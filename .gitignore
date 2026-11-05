@@ -1,0 +1,23 @@
+# Dependencies and generated output.
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local runtime, credentials and machine-specific configuration.
+.env
+.env.*
+*.log
+*.sqlite
+*.sqlite-*
+*.sock
+*.pem
+*.key
+
+# Local plans, development notes and acceptance evidence stay untracked in internal/.
+/internal/
+
+# Editor / operating system files.
+.DS_Store
+*~
+*.swp
