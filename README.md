@@ -73,7 +73,7 @@ Home Assistant 控制器管不到的板子（例如接在米家插座上、靠�
 
 ## 内存启动
 
-`boards boot <板子>[.<die>] <文件>...` 通过这颗芯片的下载口按顺序加载启动文件，通常是 FSBL、U-Boot/OpenSBI、内核 FIT：每个文件 `stage` 后 `continue`，再等下载口重新出现才加载下一个（第一个之后先等 8 秒，之后 3 秒，最多再等 20 秒；没回来就停下并报出是第几个文件）。每个参数是绝对路径，或 boardd 自带固件的名字（见下一节）；boardd 加载前算 sha256，每一步连同文件路径记进操作记录。只改内核时：`boards boot <板子> fsbl u-boot-opensbi /path/Image.itb`。要持锁，先用 `boards fastboot` 让板子进下载模式。只写内存，不烧录、不改板上配置。
+`boards boot <板子>[.<die>] <文件>...` 通过这颗芯片的下载口按顺序加载启动文件，通常是 FSBL、U-Boot/OpenSBI、内核 FIT：每个文件 `stage` 后 `continue`，再等下载口重新出现才加载下一个（第一个之后先等 8 秒，之后 3 秒，最多再等 20 秒；没回来就停下并报出是第几个文件）。每个参数是绝对路径，或 boardd 自带固件的名字（见下一节）；boardd 加载前算 sha256，每一步连同文件路径记进操作记录。只改内核时：`boards boot <板子> fsbl u-boot-opensbi /path/Image.itb`。要持锁，先用 `boards fastboot` 让板子进下载模式：Home Assistant 的 fastboot 按钮在按键序列开始时就应答，板子约 2 秒后才复位，所以 `boards fastboot` 按完再等 6 秒才返回，返回时板子已经在下载模式。只写内存，不烧录、不改板上配置。
 
 文件从哪来、只改内核和改了固件时分别用哪套、TFTP 怎么做，写在给 Claude 的 [`skills/boards/boot.md`](skills/boards/boot.md) 里。
 

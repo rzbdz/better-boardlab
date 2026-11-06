@@ -66,11 +66,13 @@ interface DownloadPort {
 /**
  * A RAM boot hands the port from the boot ROM to FSBL, then to U-Boot: each
  * stage needs time to come up and re-enumerate before the next file goes in.
+ * Before that, a Home Assistant fastboot button answers once its key sequence
+ * starts, and the board resets about 2 s later; `fastbootSettleMs` waits that out.
  */
-export interface BootTiming { firstMs: number, laterMs: number, waitMs: number, pollMs: number }
+export interface BootTiming { firstMs: number, laterMs: number, waitMs: number, pollMs: number, fastbootSettleMs: number }
 /** What `boards boot` and `boards stage` take as one of boardd's own firmware files rather than a path. */
 const FIRMWARE_NAME = /^[a-z0-9][a-z0-9-]*$/
-const BOOT_TIMING: BootTiming = { firstMs: 8_000, laterMs: 3_000, waitMs: 20_000, pollMs: 500 }
+const BOOT_TIMING: BootTiming = { firstMs: 8_000, laterMs: 3_000, waitMs: 20_000, pollMs: 500, fastbootSettleMs: 6_000 }
 /** A kernel FIT is tens of MB. */
 const BOOT_STAGE_TIMEOUT_MS = 120_000
 
@@ -393,7 +395,8 @@ export class BoardService {
     return found
   }
 
-  private async control(target: string, caller: { holder: string, token?: string | null }, kind: 'reset' | 'fastboot') {
+  /** `settle: false` returns as soon as Home Assistant answers, for a caller that waits and listens on its own. */
+  private async control(target: string, caller: { holder: string, token?: string | null }, kind: 'reset' | 'fastboot', settle = true) {
     const lease = this.authorize(target, caller)
     const board = target.startsWith('slot:') ? null : target
     const lab = board ? this.labOf(board) : null
@@ -416,7 +419,11 @@ export class BoardService {
       if (kind === 'reset' && !slot.canReset) throw new BoardError('invalid', `槽位 ${slot.slot} 没有复位实体`)
       const entity = (kind === 'reset' ? slot.resetEntity : slot.fastbootEntity)!
       detail = slot.kind === 'script' ? `槽位 ${slot.slot} 的${kind === 'reset' ? '复位' : ' fastboot '}脚本` : entity
-      act = slot.kind === 'script' ? () => this.runSlotScript(slot, kind, board) : () => this.options.ha.call(this.haConfig(), entity)
+      act = slot.kind === 'script' ? () => this.runSlotScript(slot, kind, board) : async () => {
+        await this.options.ha.call(this.haConfig(), entity)
+        // Otherwise a board already waiting in the boot ROM takes the next file at once and the late reset cuts it off.
+        if (kind === 'fastboot' && settle) await this.sleep((this.options.bootTiming ?? BOOT_TIMING).fastbootSettleMs)
+      }
     }
     let message: string | null = null
     try {
@@ -1043,7 +1050,8 @@ export class BoardService {
           session.onOutput(data => onData(data.toString('utf8')))
           return () => session.close()
         },
-        fastboot: slot => this.control(targetOf(slot), caller(targetOf(slot)), 'fastboot'),
+        // The scan listens for windowMs after every press, longer than the late reset.
+        fastboot: slot => this.control(targetOf(slot), caller(targetOf(slot)), 'fastboot', false),
         reset: slot => this.control(targetOf(slot), caller(targetOf(slot)), 'reset'),
         usb: () => hw.usb(),
         stage: usbPath => stageAndContinue(hw.fastboot, usbPath, minorPath!),

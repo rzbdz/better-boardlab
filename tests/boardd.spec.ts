@@ -156,9 +156,9 @@ function shipFirmware(purpose: string, content: string, soc = 'k3') {
 }
 
 /** HA access is entered on the web page and slots come from discovery; tests seed both directly. */
-function service(bench = new Bench([]), now?: () => number) {
+function service(bench = new Bench([]), now?: () => number, sleep?: (ms: number) => Promise<void>) {
   const db = openDatabase(join(dir, 'boards.sqlite'))
-  const svc = new BoardService({ ...bench.options(db), now })
+  const svc = new BoardService({ ...bench.options(db), now, sleep })
   db.prepare(`INSERT INTO settings(key, value) VALUES('ha.url', 'http://ha.test:8123'), ('ha.token', 'secret-token-value')`).run()
   svc.confirmSlots('user:troy', [0, 1].map(slot => ({ slot, resetEntity: `switch.ctrl_001_board_${slot}_reset`, fastbootEntity: `button.ctrl_001_board_${slot}_fastboot_mode` })))
   svc.addBoard('user:troy', { name: 'com260', slot: 1, product: 'k3_com260', chips: [{ serialPath: '/dev/ttyUSB1', alias: 'com260', downloadUsbPath: '3-2.3' }] })
@@ -273,6 +273,30 @@ describe('leases', () => {
     expect(svc.board('com260').lease!.holder).toBe('user:troy')
     expect(events).toContainEqual({ type: 'lease-stolen', board: 'com260', from: 'claude:s1', by: 'user:troy', reason: '板子卡死，需要手动处理' })
     expect(() => svc.authorize('com260', { holder: 'claude:s1', token: agent.token })).toThrow(/正被 user:troy/)
+  })
+})
+
+describe('Home Assistant buttons', () => {
+  it('returns from fastboot only after the reset that comes late', async () => {
+    const bench = new Bench([])
+    const sleeps: Array<{ ms: number, calls: number, done: () => void }> = []
+    const svc = service(bench, undefined, ms => new Promise(resolve => { sleeps.push({ ms, calls: bench.calls.length, done: resolve }) }))
+    const lease = await svc.lock('com260', 'claude:s1', '内存启动')
+    let returned = false
+    const pressed = svc.fastboot('com260', { holder: 'claude:s1', token: lease.token }).then(() => { returned = true })
+    while (!sleeps.length) await new Promise(resolve => setTimeout(resolve, 1))
+    // The wait comes after the button press, and the board is not in fastboot until it ends.
+    expect(sleeps.map(({ ms, calls }) => ({ ms, calls }))).toEqual([{ ms: 6_000, calls: 1 }])
+    expect(bench.calls).toEqual(['button.ctrl_001_board_1_fastboot_mode'])
+    await new Promise(resolve => setTimeout(resolve, 5))
+    expect(returned).toBe(false)
+    expect(svc.board('com260').mode).not.toBe('fastboot')
+    sleeps[0]!.done()
+    await pressed
+    expect(svc.board('com260').mode).toBe('fastboot')
+
+    await svc.reset('com260', { holder: 'claude:s1', token: lease.token })
+    expect(sleeps).toHaveLength(1)
   })
 })
 
@@ -525,7 +549,7 @@ describe('console and firmware', () => {
     bench.usbPresent.push({ path: '3-2.3', usbId: '361c:1001', serial: '????????????', product: null })
     const order: string[] = []
     const run = bench.options().hardware.fastboot.run
-    const svc = new BoardService({ ...bench.options(openDatabase(join(dir, 'boot.sqlite'))), sleep: async () => {}, bootTiming: { firstMs: 0, laterMs: 0, waitMs: 2, pollMs: 1 },
+    const svc = new BoardService({ ...bench.options(openDatabase(join(dir, 'boot.sqlite'))), sleep: async () => {}, bootTiming: { firstMs: 0, laterMs: 0, waitMs: 2, pollMs: 1, fastbootSettleMs: 0 },
       hardware: { ...bench.options().hardware, fastboot: { run: async args => { if (args[2] === 'stage') order.push(args[3]!); return run(args) } } } })
     svc.addBoard('user:troy', { name: 'com260', slot: 1, chips: [{ serialPath: '/dev/ttyUSB1', alias: 'com260', downloadUsbPath: '3-2.3' }] })
     const files = ['FSBL.bin', 'u-boot-opensbi.itb', 'Image.itb'].map(name => { const file = join(dir, name); writeFileSync(file, name); return file })
@@ -592,7 +616,7 @@ class FakeLab implements LabDriver {
 
 function labService(lab = new FakeLab()) {
   const bench = new Bench([])
-  const svc = new BoardService({ ...bench.options(openDatabase(join(dir, 'lab.sqlite'))), labs: { lab1: lab }, sleep: async () => {}, bootTiming: { firstMs: 0, laterMs: 0, waitMs: 2, pollMs: 1 } })
+  const svc = new BoardService({ ...bench.options(openDatabase(join(dir, 'lab.sqlite'))), labs: { lab1: lab }, sleep: async () => {}, bootTiming: { firstMs: 0, laterMs: 0, waitMs: 2, pollMs: 1, fastbootSettleMs: 0 } })
   svc.addBoard('user:troy', { name: 'com260', slot: 1, chips: [{ serialPath: '/dev/ttyUSB1', alias: 'com260', downloadUsbPath: '3-2.3' }] })
   return { svc, lab, bench }
 }
