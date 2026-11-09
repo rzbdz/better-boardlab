@@ -1,75 +1,90 @@
-# boardlab
+# better-boardlab
 
-开发板实验室：人和 AI agent 通过同一个服务、同一个命令行和同一个网页，对开发板拿锁、复位、看串口、从内存启动。
+A shared lab for development boards. People and AI agents lock a board, reset it, open its serial console and boot it from RAM, through one service, one command line and one web page.
 
-boardlab 是 [boardlab-core](https://github.com/rzbdz/boardlab-core) 加上一组常用模块的发行版：
+better-boardlab is a distribution of [boardlab-core](https://github.com/rzbdz/boardlab-core) that bundles a set of useful modules:
 
-- **本机的板子**：用 Home Assistant 开关或自己的脚本复位的槽位、serial-mux 串口、fastboot，以及一键扫描（发现并识别板子）。
-- **远程板卡主机**：经 [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow) 使用别处实验室的板子，并在构建服务器上编译、启动 SDK。
-- **Claude skill**（`skills/boardlab`）：教 agent 使用命令行。
+- **Boards on this machine**:
+  - slots reset by Home Assistant switches or by your own scripts
+  - serial consoles through serial-mux, and fastboot
+  - a one-click scan that finds and identifies boards
+- **Remote board hosts** through [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow): boards in other labs, plus building and booting SDKs on build servers.
+- **A Claude skill** (`skills/boardlab`) that teaches agents the CLI.
 
-## 功能
+## Features
 
-- 开发板锁和先来先得的排队，人和 agent 共用。
-- 每块板子都能 `reset`、`fastboot`、`console`、`send`、`log`、`boot`（把 FSBL、U-Boot、内核加载到内存启动），不管它在哪。
-- 槽位：按位置称呼板子（`host1/s3`），换板子不用重新登记。
-- 网页：板子、串口、历史和设置；HTTP API 给别的程序用。
-- 在任何机器上通过 ssh 或反向代理使用中心的 boardd。
+- Board locks with a first-come queue, shared by people and agents.
+- The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
+- Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs.
+- A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 
-## 快速开始
+## Quick start
 
-需要 Node.js ≥ 24 和 pnpm。
+Requires Node.js 24 or newer and pnpm.
 
 ```sh
-git clone --recurse-submodules https://github.com/rzbdz/better-boardlab.git boardlab
-cd boardlab
+git clone --recurse-submodules https://github.com/rzbdz/better-boardlab.git
+cd better-boardlab
 pnpm install
 pnpm run build
 node dist/cli.js serve             # http://127.0.0.1:38127/
 ```
 
-打开网页，在「设置」里配置槽位，然后扫描。命令行：
+Open the page, configure slots under **Settings**, then run a scan. From the command line:
 
 ```sh
 boardlab list
-boardlab lock board1 --for "调试 U-Boot"
+boardlab lock board1 --for "debug U-Boot"
 boardlab reset board1
 boardlab console board1
 boardlab unlock board1
 ```
 
-给 agent 装 skill：在它的工作目录运行 `boardlab install`，或 `boardlab install -g`。
+To install the skill for an agent, run `boardlab install` in the agent's working directory, or `boardlab install -g` for every agent on the machine.
 
-## 配置
+## Configuration
 
-boardd 默认加载全部模块。只要其中一些时，在状态目录（`~/.local/state/boardlab`）写 `boardd.json`：
+boardd loads every module by default. To load only some of them, write `boardd.json` in its state directory (`~/.local/state/boardlab`):
 
 ```json
 { "modules": { "bsp": { "instances": ["bsp"] } } }
 ```
 
-远程 bsp 实验室需要 bsp 命令行（`externals/bsp`）和写着你的主机的 bsp site，见 bsp 的文档。
+Remote bsp labs need the bsp CLI (`externals/bsp`) and a bsp site that lists your hosts; see the bsp documentation.
 
-## 文档
+## Documentation
 
-- [使用指南](docs/guide.md)：槽位、实验室、锁、内存启动、扫描、模块、远程使用
-- [安全边界](docs/security.md)
-- `boardlab help` 列出全部命令
+- [Guide](docs/guide.md) (in Chinese): slots, labs, locks, RAM boot, scans, modules, remote use
+- [Security](docs/security.md) (in Chinese)
+- `boardlab help` lists every command
 
-## 开发
+## Development
 
 ```sh
 pnpm run typecheck
-pnpm check     # 分层和模块登记表检查
+pnpm check     # layering and module registries
 pnpm test
 ```
 
-模块在 `src/modules/<id>/`：`index.ts` 把它装到核心上，`catalog.ts` 交给 boardd，`cli.ts` 加命令，`ui.tsx` 加网页上的部分。增删模块后运行 `pnpm modules`。核心的改动在 boardlab-core 里做。
+A module lives in `src/modules/<id>/`:
 
-## 致谢
+- `index.ts` sets it up on the core;
+- `catalog.ts` offers it to boardd;
+- `cli.ts` adds commands;
+- `ui.tsx` adds a page section.
 
-boardlab 最初由 [Troy Mitchell](https://github.com/TroyMitchell911) 创建，本项目在他的工作基础上重构而来。
+After adding or removing a module, run `pnpm modules`. Changes to the core go into boardlab-core.
 
-## 许可证
+## Origin and changes
 
-MIT，见 [LICENSE](LICENSE)。
+boardlab began as a project by [Troy Mitchell](https://github.com/TroyMitchell911), released under the MIT license; his copyright notice is kept in [LICENSE](LICENSE). better-boardlab is a substantial rework of that project. The major changes from the original:
+
+- **A core with no products in it.** [boardlab-core](https://github.com/rzbdz/boardlab-core) knows backends only through one contract and names no product. Backends, slot drivers, commands and page sections are modules, and an architecture check keeps those boundaries.
+- **Distributions.** A boardlab distribution is boardlab-core plus a chosen set of modules. Different labs ship different module sets without forking the core.
+- **Remote labs and slots.** Boards on remote board hosts, named by slot. A board can be swapped without registering it again, and it can boot from its own media.
+- **bsp integration.** Remote board hosts, SDK builds and boots run on [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
