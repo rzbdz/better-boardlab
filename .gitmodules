@@ -1,0 +1,6 @@
+[submodule "externals/bsp"]
+	path = externals/bsp
+	url = https://github.com/rzbdz/bsp-remote-dev-workflow.git
+[submodule "core"]
+	path = core
+	url = https://github.com/rzbdz/boardlab-core.git

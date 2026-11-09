@@ -1,3 +1,5 @@
+packages:
+  - core
 autoInstallPeers: false
 strictPeerDependencies: false
 allowBuilds:

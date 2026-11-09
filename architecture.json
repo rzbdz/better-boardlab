@@ -1,0 +1,137 @@
+{
+  "$comment": "This distribution's layering, enforced by core/scripts/check-architecture.mjs at build and test time. The core's own layers are checked in boardlab-core; here its files are mapped in (aliases) so modules use only what they may. Modules import only core, shared and the modules they declare.",
+  "roots": [
+    "src"
+  ],
+  "aliases": {
+    "boardlab-core/": "core/src/"
+  },
+  "layers": {
+    "shared": {
+      "path": "core/src/shared",
+      "may": []
+    },
+    "core": {
+      "path": "core/src/core",
+      "may": [
+        "shared"
+      ],
+      "typeOnly": [
+        "shared"
+      ]
+    },
+    "server": {
+      "path": "core/src/server",
+      "may": [
+        "core",
+        "shared"
+      ]
+    },
+    "cli": {
+      "path": "core/src/cli",
+      "may": [
+        "shared"
+      ]
+    },
+    "ui": {
+      "path": "core/src/ui",
+      "may": [
+        "shared"
+      ],
+      "node": false
+    },
+    "modules": {
+      "path": "src/modules",
+      "may": [
+        "core",
+        "shared"
+      ]
+    },
+    "module-catalog": {
+      "paths": [
+        "src/modules/*/catalog.ts"
+      ],
+      "may": [
+        "modules",
+        "core",
+        "shared",
+        "server"
+      ],
+      "$comment": "a module's catalog entry: how boardd makes it from its settings"
+    },
+    "module-ui": {
+      "paths": [
+        "src/modules/*/ui.tsx"
+      ],
+      "may": [
+        "shared",
+        "ui"
+      ],
+      "typeOnly": [
+        "shared"
+      ],
+      "node": false,
+      "packages": [
+        "react"
+      ],
+      "$comment": "a module's part of the default page: browser code, beside the module but never using its server side"
+    },
+    "module-cli": {
+      "paths": [
+        "src/modules/*/cli.ts"
+      ],
+      "may": [
+        "shared",
+        "cli"
+      ],
+      "$comment": "a module's commands for the boardlab CLI: client code, beside the module but never using its server side"
+    },
+    "entry": {
+      "paths": [
+        "src/boardlab.ts",
+        "src/catalog.ts",
+        "src/commands.ts"
+      ],
+      "may": [
+        "cli",
+        "module-cli",
+        "module-catalog",
+        "server"
+      ],
+      "$comment": "the CLI entry and the registries scripts/modules.mjs writes"
+    },
+    "page": {
+      "paths": [
+        "src/page.tsx",
+        "src/uis.ts"
+      ],
+      "may": [
+        "ui",
+        "module-ui"
+      ],
+      "node": false,
+      "$comment": "the page entry and its registry"
+    }
+  },
+  "modules": {
+    "libraries": {
+      "serial-mux": "the serial-mux protocol and daemons"
+    },
+    "dependencies": {
+      "local": [
+        "serial-mux"
+      ],
+      "home-assistant": [
+        "local"
+      ],
+      "script-slots": [
+        "local"
+      ],
+      "bsp": [
+        "serial-mux"
+      ],
+      "serial-mux": []
+    }
+  },
+  "maxLines": 800
+}

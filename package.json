@@ -5,14 +5,25 @@
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.28.5",
-  "engines": { "node": ">=24" },
-  "bin": { "boards": "dist/cli.js" },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "boards": "dist/cli.js"
+  },
   "exports": {
-    "./client": { "types": "./src/shared/client.ts", "default": "./dist/client.js" },
-    "./types": { "types": "./src/shared/types.ts" }
+    "./client": {
+      "types": "./core/src/shared/client.ts",
+      "default": "./dist/client.js"
+    },
+    "./types": {
+      "types": "./core/src/shared/types.ts"
+    }
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "modules": "node scripts/modules.mjs",
+    "build": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs && node core/scripts/build.mjs --cli src/boardlab.ts --page src/page.tsx",
+    "check": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -20,10 +31,15 @@
     "@types/node": "22.20.5",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "esbuild": "0.27.7",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "6.0.3",
     "vitest": "4.1.12"
+  },
+  "dependencies": {
+    "boardlab-core": "workspace:*"
   }
 }
