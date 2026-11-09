@@ -6,7 +6,7 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
-import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type Backend, type LabHolder, type LabNews } from 'boardlab-core/core/backend.ts'
+import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews } from 'boardlab-core/core/backend.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
 
@@ -47,7 +47,7 @@ interface BspPin { target: string, label?: string, aliases?: string[], state?: s
 /** A bsp DUT as `bsp --json dut list` reports it (the fields boardd uses). */
 interface BspDut {
   id: string, host: string, slot?: string | null, board?: string | null, soc?: string | null, usb?: string | null, console?: string | null,
-  stage?: string, console_up?: boolean, sdks?: string[], lease?: { holder: string, purpose?: string, expires_in_s?: number } | null,
+  stage?: string, console_up?: boolean, slot_online?: boolean | null, sdks?: string[], lease?: { holder: string, purpose?: string, expires_in_s?: number } | null,
   needs_human?: { action: string, message: string, waiting_s: number } | null,
   media_boot?: { method: string | null, available: boolean, why?: string } | null,
 }
@@ -94,6 +94,34 @@ export function bspLab(options: BspOptions = {}): Backend {
     if (error) throw new Error(`bsp ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`)
     const text = `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-4).join('\n')
     throw new Error(`bsp ${args.slice(0, 2).join(' ')} 失败${result.code === null ? '（超时或没能运行）' : `（退出码 ${result.code}）`}${text ? `：${text}` : ''}`)
+  }
+
+  /** A `bsp probe` run (a discovery or a rebuild): boards bsp registered as it went, and the rest as findings. */
+  const probed = async (config: LabConfig, args: string[], progress: (line: string) => void,
+    registered: ((device: string) => void) | undefined, host?: string): Promise<{ found: LabFinding[], message: string }> => {
+    const onLine = (line: string) => {
+      progress(line)
+      const done = line.match(/\bregistered (\S+)(?: in slot \S+)?$/)
+      if (done) registered?.(done[1]!)
+    }
+    type Result = { proposals?: Array<{ spec: BspSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
+    const out = await bsp<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host)
+    const results = Object.entries(out.results ?? {})
+    // What bsp could not register (a name taken, say) is left for a person to apply as a proposal.
+    const found = results.flatMap(([at, result]) => (result.proposals ?? []).filter(item => !item.registered).map(({ spec, warnings }) => ({
+      host: at, name: spec.id, warnings: warnings ?? [], detail: spec,
+      summary: `${at} 上的新板子：${spec.board || '型号未知'}${spec.soc ? `（${spec.soc}）` : ''}，串口 ${spec.console?.alias ?? spec.console?.device ?? '?'}，下载口 ${spec.fastboot?.usb ?? '?'}，${spec.control?.backend === 'human' ? '由人复位' : `复位线 ${spec.control?.reset?.pin ?? '?'}`}`,
+    })))
+    const added = results.flatMap(([at, result]) => (result.registered ?? []).map(item => `${at}/${item.dut}`))
+    const reasons = results.flatMap(([at, result]) => (result.reasons ?? []).map(reason => `${at}：${reason}`))
+    const where = results.map(([at]) => at).join('、') || '（没有主机完成）'
+    const message = [
+      ...(added.length ? [`登记了 ${added.length} 块：${added.join('、')}`] : []),
+      ...(found.length ? [`${where} 上发现 ${found.length} 块${added.length ? '没能自动登记的' : '新'}板子，到「扫描」确认后登记`] : []),
+      ...(!added.length && !found.length ? [`bsp probe 在 ${where} 上没有发现新板子`] : []),
+      ...reasons,
+    ].join('；')
+    return { found, message }
   }
   const lease = (token: string | null | undefined) => token && token !== SLOT_LEASE ? ['--lease', token] : []
   /** Progress lines of a reset: what a person is asked to do, and when it is done. */
@@ -148,6 +176,8 @@ export function bspLab(options: BspOptions = {}): Backend {
           online: false, serialPort: dut.console ? `${dut.host}:${dut.console}` : null,
           // Hosts without console_up predate `bsp dut pipe`; opening the console tells.
           serialConnected: dut.console_up ?? true,
+          // Its slot's adapter is unplugged or moved: after re-cabling the host wants a rebuild.
+          slotGone: dut.slot_online === false,
           // A board found without a download cable has `usb:UNKNOWN` until its port is known.
           downloadUsbPath: dut.usb && !/UNKNOWN/.test(dut.usb) ? dut.usb.replace(/^usb:/, '') : null, ip: null,
           heldBy: dut.lease && !dut.lease.holder.startsWith(HOLDER_PREFIX) ? dut.lease.holder : null,
@@ -248,29 +278,12 @@ export function bspLab(options: BspOptions = {}): Backend {
         if (hosts.length > 1) throw new Error(`一次只能发现一台主机上的槽位（这里有 ${hosts.join('、')}）`)
         const host = hosts[0] ?? (discovery.human ? discovery.host ?? undefined : undefined)
         const args = ['probe', '--register', ...(discovery.human ? ['--human'] : []), ...(slots.length ? ['--slots', slots.map(slot => slot.split('/')[1]).join(',')] : [])]
-        const onLine = (line: string) => {
-          progress(line)
-          const done = line.match(/\bregistered (\S+)(?: in slot \S+)?$/)
-          if (done) registered?.(done[1]!)
-        }
-        type Result = { proposals?: Array<{ spec: BspSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
-        const out = await bsp<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host)
-        const results = Object.entries(out.results ?? {})
-        // What bsp could not register (a name taken, say) is left for a person to apply as a proposal.
-        const found = results.flatMap(([at, result]) => (result.proposals ?? []).filter(item => !item.registered).map(({ spec, warnings }) => ({
-          host: at, name: spec.id, warnings: warnings ?? [], detail: spec,
-          summary: `${at} 上的新板子：${spec.board || '型号未知'}${spec.soc ? `（${spec.soc}）` : ''}，串口 ${spec.console?.alias ?? spec.console?.device ?? '?'}，下载口 ${spec.fastboot?.usb ?? '?'}，${spec.control?.backend === 'human' ? '由人复位' : `复位线 ${spec.control?.reset?.pin ?? '?'}`}`,
-        })))
-        const added = results.flatMap(([at, result]) => (result.registered ?? []).map(item => `${at}/${item.dut}`))
-        const reasons = results.flatMap(([at, result]) => (result.reasons ?? []).map(reason => `${at}：${reason}`))
-        const where = results.map(([at]) => at).join('、') || '（没有主机完成）'
-        const message = [
-          ...(added.length ? [`登记了 ${added.length} 块：${added.join('、')}`] : []),
-          ...(found.length ? [`${where} 上发现 ${found.length} 块${added.length ? '没能自动登记的' : '新'}板子，到「扫描」确认后登记`] : []),
-          ...(!added.length && !found.length ? [`bsp probe 在 ${where} 上没有发现新板子`] : []),
-          ...reasons,
-        ].join('；')
-        return { found, message }
+        return probed(config, args, progress, registered, host)
+      },
+      // bsp starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
+      // console plugged in now, and probes them all, registering each board as found.
+      async rebuild(config, host, progress, registered) {
+        return probed(config, ['probe', '--rebuild', '--yes'], progress, registered, host)
       },
       async register(config, finding, name) {
         const spec = { ...(finding.detail as BspSpec), id: name }

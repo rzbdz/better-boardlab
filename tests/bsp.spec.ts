@@ -131,6 +131,16 @@ describe('bsp lab driver', () => {
     expect(seen).toEqual(['k3-s4'])
     expect(found).toEqual({ found: [], message: '登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak' })
     await expect(bspLab({ run }).discovery!.discover(config, { slots: ['h1/s4', 'h2/s1'] }, () => {})).rejects.toThrow(/一次只能发现一台主机/)
+    // A rebuild starts one host over: bsp forgets its boards and slots and registers each board it finds again.
+    const rebuilt = await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, device => seen.push(device))
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--yes'])
+    expect(rebuilt.message).toBe('登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak')
+  })
+
+  it('greys a board whose slot lost its adapter', async () => {
+    const bsp = fakeBsp(args => args.includes('slot') ? ok([]) : ok([{ ...DUTS[0], slot: 's3', slot_online: false }]))
+    const [device] = await bspLab({ run: bsp.run }).inventory!.devices(config)
+    expect(device).toMatchObject({ slot: 'h1/s3', slotGone: true })
   })
 
   it('lists empty slots by their console, and reads a swapped board again under its lease', async () => {
