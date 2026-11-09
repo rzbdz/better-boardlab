@@ -66,6 +66,10 @@ pnpm test
 
 模块在 `src/modules/<id>/`：`index.ts` 把它装到核心上，`catalog.ts` 交给 boardd，`cli.ts` 加命令，`ui.tsx` 加网页上的部分。增删模块后运行 `pnpm modules`。核心的改动在 boardlab-core 里做。
 
+## 致谢
+
+boardlab 最初由 [Troy Mitchell](https://github.com/TroyMitchell911) 创建，本项目在他的工作基础上重构而来。
+
 ## 许可证
 
 MIT，见 [LICENSE](LICENSE)。
