@@ -288,10 +288,12 @@ export function bspLab(options: BspOptions = {}): Backend {
         return probed(config, args, progress, registered, host)
       },
       // bsp starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
-      // console plugged in now, and probes them all, registering each board as found.
-      async rebuild(config, host, progress, registered) {
-        return probed(config, ['probe', '--rebuild', '--yes'], progress, registered, host)
+      // console plugged in now, and probes them all, registering each board as found. With --keep-used it keeps the
+      // boards that are leased or busy and redoes only what moved.
+      async rebuild(config, host, progress, registered, options) {
+        return probed(config, ['probe', '--rebuild', ...(options?.keepInUse ? ['--keep-used'] : []), '--yes'], progress, registered, host)
       },
+      keepsInUse: true,
       async register(config, finding, name) {
         const spec = { ...(finding.detail as BspSpec), id: name }
         if (!finding.host) throw new Error('不知道这块板子在哪台 bsp 主机上')

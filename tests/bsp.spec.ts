@@ -135,6 +135,10 @@ describe('bsp lab driver', () => {
     const rebuilt = await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, device => seen.push(device))
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--yes'])
     expect(rebuilt.message).toBe('登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak')
+    // Rediscovering keeps the boards in use: bsp redoes only what moved.
+    expect(bspLab({ run }).discovery!.keepsInUse).toBe(true)
+    await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, undefined, { keepInUse: true })
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--keep-used', '--yes'])
   })
 
   it('reads a board\'s log over a time range on its host, searched', async () => {

@@ -37,7 +37,7 @@ export function mockState(you = 'user:alice'): State {
     ],
     labs: [{
       id: 'bsp', kind: 'bsp 板卡主机', about: 'boardd 用 bsp 命令行操作 bsp 管理的板子。', fields: { url: { label: 'bsp 主机 registry', placeholder: 'http://registry:8765', required: false } },
-      canDiscover: true, canRebuild: true, canRemove: true, canBind: true, canRelay: true, hosts: ['host-a', 'host-b'],
+      canDiscover: true, canRebuild: true, canRediscover: true, canRemove: true, canBind: true, canRelay: true, hosts: ['host-a', 'host-b'],
       discovery: { running: false, line: '登记了 1 块：host-a/k1-musecard', at: now }, enabled: true, url: 'http://registry.example:8765', username: null,
       hasPassword: false, jump: null, defaultJump: null, devices: null, verifiedAt: now, verifyOk: true, verifyMessage: '2 台 bsp 主机（host-a、host-b），5 块板子',
     }],
