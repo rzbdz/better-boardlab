@@ -9,9 +9,10 @@ import { PURPOSES } from '../../src/ui/format.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
 import { Confirm, Icon, holder, slotOf, upper, useUI, Who } from './kit.tsx'
 
-let current: { boards: Board[], you: string } = { boards: [], you: '' }
-/** The page tells the actions the latest state (who you are, every board), for confirmations that list boards. */
-export function setActionState(boards: Board[], you: string) { current = { boards, you } }
+let current: { boards: Board[], you: string, rediscover: Set<string> } = { boards: [], you: '', rediscover: new Set() }
+/** The page tells the actions the latest state (who you are, every board, which labs can rediscover). */
+export function setActionState(boards: Board[], you: string, rediscover: string[] = []) { current = { boards, you, rediscover: new Set(rediscover) } }
+export const canRediscover = (board: Board) => !!board.lab && current.rediscover.has(board.lab.id)
 
 function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: boolean, close: () => void, onDone: (purpose: string) => Promise<void> }) {
   const [purpose, setPurpose] = useState('')
@@ -63,6 +64,8 @@ export function useBoardActions(board: Board) {
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),
     discoverSlot: () => ask(`发现 ${host} / ${slotOf(board).slot}`, '复位这个槽位的复位线，看串口认出插上的板子。只动这一个槽位。', '开始',
       () => void run('discover', '发现', () => api.discoverLab(labId, { slots: [`${host}/${slotOf(board).slot}`] }))),
+    rediscover: () => ask(`重新发现 ${host}`, <>保留在用的板子，忘掉串口不见的（比如 <b>{name}</b>），给新接上的串口建槽位并在空闲串口上找板子。只会复位没人用的复位线。</>,
+      '重新发现', () => void run('rebuild', '重新发现', () => api.rebuildLab(labId, host, true), `${host} 重新发现好了`)),
     rebuild: () => {
       const on = current.boards.filter(b => b.lab?.id === labId && slotOf(b).host === host), held = on.filter(b => b.lease || b.lab?.heldBy)
       if (held.length) return ui.fail(`现在不能重建 ${host}`, `${held.map(b => upper(b.name)).join('、')} 有锁，要等释放`)

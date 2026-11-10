@@ -9,7 +9,7 @@ import { SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
-import { useBoardActions } from '../actions.tsx'
+import { canRediscover, useBoardActions } from '../actions.tsx'
 import { age, clock, copyText, hhmm, holder, Icon, model, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import { LogPanel } from './logs.tsx'
@@ -136,7 +136,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
   return <>
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={!!act.busy} onClick={act.confirm}><Icon name="check" />我操作好了</button>}</div>}
-    {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重建这台主机。</span></div><button className="pill sm" onClick={act.rebuild}><Icon name="rebuild" />重建</button></div>}
+    {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div></div>}
     {m.flags.offline && <div className="flag"><Icon name="plug" /><div><b>串口不在线</b><span>板子可能没上电，或者串口线松了。</span></div></div>}
     {m.flags.error && <div className="flag bad"><Icon name="warn" /><div><b>锁和实验室对不上</b><span>{m.flags.error}</span></div></div>}

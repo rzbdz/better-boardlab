@@ -61,7 +61,7 @@ function Shell() {
   const refresh = useCallback(async () => {
     try {
       const next = await api.state()
-      setBoards(next.boards); setActionState(next.boards, next.you)
+      setBoards(next.boards); setActionState(next.boards, next.you, next.labs.filter(l => l.canRediscover).map(l => l.id))
       if (last.current) {
         const told = changes(last.current.boards, next.boards, next.you, prefs.get().watched)
         if (told.length) setNotes(list => [...told.map(n => ({ ...n, at: new Date().toISOString(), read: false })), ...list].slice(0, 100))

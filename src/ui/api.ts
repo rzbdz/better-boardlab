@@ -67,7 +67,7 @@ export const api = {
   configureLab: (input: { id: string, enabled: boolean, url: string, username: string, password?: string, jump: string, devices: string }) => call<LabSettings>('POST', 'api/labs', { ...input, password: input.password || undefined }),
   testLab: (id: string) => call<LabSettings>('POST', 'api/labs/test', { id }),
   refresh: (board: string, options: { name?: string, rename?: boolean }) => call<{ board: string, message: string }>('POST', 'api/boards/refresh', { board, ...options }),
-  rebuildLab: (id: string, host: string) => call<{ message: string }>('POST', 'api/labs/rebuild', { id, host, confirmed: true }),
+  rebuildLab: (id: string, host: string, keepInUse = false) => call<{ message: string }>('POST', 'api/labs/rebuild', { id, host, confirmed: true, keepInUse }),
   discoverLab: (id: string, options: { human?: boolean, host?: string, slots?: string[] } = {}) => call<{ message: string }>('POST', 'api/labs/discover', { id, confirmed: true, ...options }),
   labPorts: (id: string, fresh = false) => call<LabPorts>('GET', `api/labs/slots?id=${encodeURIComponent(id)}${fresh ? '&fresh=1' : ''}`),
   bindLab: (id: string, input: { host: string, console: string, usb: string, name?: string }) => call<{ board: string }>('POST', 'api/labs/bind', { id, ...input }),

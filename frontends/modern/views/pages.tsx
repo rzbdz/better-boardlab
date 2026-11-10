@@ -57,6 +57,7 @@ function HostPanel({ lab, host, state, boards, running, open }: { lab: LabSettin
   const slots = [...boards.map(b => ({ slot: slotOf(b).slot, b, p: null as Proposal | null })), ...props.map(p => ({ slot: String(p.change.slot ?? p.slot ?? '?'), b: null as Board | null, p }))]
     .sort((a, b) => a.slot.localeCompare(b.slot, 'en', { numeric: true }))
   const rebuild = () => ui.layer(close => <RebuildDialog host={host} boards={boards} close={close} onGo={() => fire(`重建 ${host}`, api.rebuildLab(lab.id, host))} />)
+  const rediscover = () => ui.layer(close => <RediscoverDialog host={host} boards={boards} close={close} onGo={() => fire(`重新发现 ${host}`, api.rebuildLab(lab.id, host, true))} />)
   const human = () => ui.layer(close => <Confirm title={`人工配对 · ${host}`} ok="开始" close={close} onOk={() => fire('人工配对', api.discoverLab(lab.id, { human: true, host }))}>
     没有复位线的板子用这个：开始后按页面上的提示，<b>一次只让一块还没登记的板子进下载模式</b>，实验室把串口和下载口配成一对。不会复位别的板子，有人在用板子时也能用。</Confirm>)
   return (
@@ -64,9 +65,10 @@ function HostPanel({ lab, host, state, boards, running, open }: { lab: LabSettin
       <h2><Icon name="server" />{host}<span className="sub small">{boards.filter(b => !b.lab?.empty).length} 块板子{lockedHere.length ? ` · ${lockedHere.length} 块有锁` : ''}</span>
         <span className="acts">
           <button className="pill sm" disabled={running} onClick={human}><Icon name="hand" />人工配对</button>
-          {lab.canRebuild && <button className="pill sm danger-o" disabled={running || lockedHere.length > 0} title={lockedHere.length ? `${lockedHere.map(b => upper(b.name)).join('、')} 有锁` : undefined} onClick={rebuild}><Icon name="rebuild" />重建</button>}
+          {lab.canRediscover && <button className="pill sm" disabled={running} title="保留在用的板子，只重做变动的" onClick={rediscover}><Icon name="radar" />重新发现</button>}
+          {lab.canRebuild && <button className="pill sm danger-o" disabled={running || lockedHere.length > 0} title={lockedHere.length ? `${lockedHere.map(b => upper(b.name)).join('、')} 有锁` : '整台主机从头来过'} onClick={rebuild}><Icon name="rebuild" />重建</button>}
         </span></h2>
-      <p className="lead">{lockedHere.length ? <><Icon name="lock" /> {lockedHere.map(b => upper(b.name)).join('、')} 有锁，重建要等它们释放。</> : '重新布线后重建，按现在的接线重新对出串口、复位线和下载口。'}</p>
+      <p className="lead">{lab.canRediscover ? '重新布线后：「重新发现」保留在用的板子，只去掉串口不见的、找空闲串口上的板子；「重建」整台主机从头来过。' : '重新布线后重建，按现在的接线重新对出串口、复位线和下载口。'}{lockedHere.length ? <> <Icon name="lock" /> {lockedHere.map(b => upper(b.name)).join('、')} 有锁{lab.canRebuild ? '，重建要等它们释放' : ''}。</> : null}</p>
       <div className="slots">{slots.map(({ slot, b, p }) => {
         if (p) return <div key={p.id} className="slot prop"><b>{slot}</b><span className="n">新板子 · 待确认</span><span className="sub">{String(p.change.product ?? '')}</span></div>
         const m = model(b!, state.you)
@@ -75,6 +77,20 @@ function HostPanel({ lab, host, state, boards, running, open }: { lab: LabSettin
       })}{!slots.length && <span className="sub small">这台主机上还没有槽位。</span>}</div>
     </section>
   )
+}
+
+function RediscoverDialog({ host, boards, close, onGo }: { host: string, boards: Board[], close: () => void, onGo: () => void }) {
+  const inUse = boards.filter(held), gone = boards.filter(b => b.lab?.slotGone && !held(b))
+  return <>
+    <h2>重新发现 {host}</h2>
+    <div className="lead">只重做变动的，别人在用的板子不受影响：
+      <ul className="blist">
+        <li>保留在用的板子：{inUse.length ? inUse.map(b => upper(b.name)).join('、') : '（没有）'}</li>
+        <li>忘掉串口不见的板子：{gone.length ? gone.map(b => upper(b.name)).join('、') : '（没有）'}</li>
+        <li>给新接上的串口建槽位，在空闲串口上找板子（会复位没人用的复位线）</li>
+      </ul></div>
+    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" onClick={() => { close(); onGo() }}>重新发现</button></div>
+  </>
 }
 
 function RebuildDialog({ host, boards, close, onGo }: { host: string, boards: Board[], close: () => void, onGo: () => void }) {

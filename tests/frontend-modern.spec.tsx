@@ -88,6 +88,20 @@ describe('Modern frontend', () => {
     expect((await button('人工配对', hostB)).disabled).toBe(false)
   })
 
+  it('rediscovers a host while its boards are held, keeping them', async () => {
+    go('#/discover')
+    await waitFor(() => expect(document.querySelectorAll('.panel').length).toBeGreaterThan(1), wait)
+    const hostB = [...document.querySelectorAll('.panel')].find(p => p.querySelector('h2')?.textContent?.startsWith('host-b')) as HTMLElement
+    const rediscover = await button('重新发现', hostB)
+    expect(rediscover.disabled).toBe(false)
+    fireEvent.click(rediscover)
+    const dialog = await screen.findByRole('dialog', {}, wait)
+    expect(dialog.textContent).toContain('保留在用的板子：BSP-K3-DEB1、BSP-K3-CM1')
+    expect(dialog.textContent).toContain('忘掉串口不见的板子：BSP-K3-GONE')
+    fireEvent.click(await button('重新发现', dialog))
+    await waitFor(() => expect(calls.find(c => c.path === 'api/labs/rebuild')?.body).toEqual({ id: 'bsp', host: 'host-b', confirmed: true, keepInUse: true }), wait)
+  })
+
   it('switches the frontend boardd serves from settings', async () => {
     go('#/settings')
     fireEvent.click(await screen.findByText('TroyMitchellDefault', {}, wait))

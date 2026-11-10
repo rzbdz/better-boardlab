@@ -4,7 +4,7 @@ import { api, type PageState } from '../../../src/ui/api.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
 import { age, clock, Icon, middle, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
-import { useBoardActions } from '../actions.tsx'
+import { canRediscover, useBoardActions } from '../actions.tsx'
 
 type Filter = 'all' | 'free' | 'mine' | 'need'
 type Layout = 'cards' | 'hosts' | 'list'
@@ -62,7 +62,7 @@ function Actions({ board, m, watched, open }: { board: Board, m: Model, watched:
   if (m.lock === 'empty') return <button className="pill" onClick={act.discoverSlot}><Icon name="radar" />发现这块板</button>
   if (m.lock === 'mine') return <>{confirm ?? <button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' && <span className="spin" />}释放</button>}<span className="sp" />
     {!m.flags.gone && <button className="pill icon" title="复位" aria-label="复位" disabled={!!act.busy} onClick={act.reset}>{act.busy === 'reset' ? <span className="spin" /> : <Icon name="power" />}</button>}{look('term', '串口')}</>
-  if (m.flags.gone) return <><button className="pill" onClick={act.rebuild}><Icon name="rebuild" />重建 {slotOf(board).host}</button><span className="sp" />{look()}</>
+  if (m.flags.gone) return <><button className="pill" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'} {slotOf(board).host}</button><span className="sp" />{look()}</>
   if (m.lock === 'free') return <>{confirm ?? <button className="pill dark" onClick={act.lock}><Icon name="lock" />拿锁</button>}<span className="sp" />{watch}{look()}</>
   const queue = m.queued
     ? <span className="queued">排队第 {m.queued} 位<button title="不排了" aria-label="不排了" onClick={act.unqueue}><Icon name="x" /></button></span>
