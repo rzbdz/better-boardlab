@@ -52,6 +52,7 @@ globalThis.EventSource = FakeEventSource as unknown as typeof EventSource
 window.matchMedia = window.matchMedia ?? ((query: string) => ({
   matches: false, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,
 }) as MediaQueryList)
+window.scrollTo = (() => {}) as typeof window.scrollTo
 globalThis.ResizeObserver = globalThis.ResizeObserver ?? class { observe() {} unobserve() {} disconnect() {} }
 // Switching frontends reloads the page; in tests there is nothing to reload.
 Object.defineProperty(window, 'location', { value: { ...window.location, reload: () => {}, href: 'http://localhost/', hash: '' }, writable: true })
