@@ -24,8 +24,9 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   const key = `${board}\0${die ?? ''}`
   const known = lives.get(key)
   if (known) return known
+  // The terminal fills its box absolutely, so its own size never feeds back into the box it is measured from.
   const el = document.createElement('div')
-  el.style.height = '100%'
+  el.style.cssText = 'position:absolute;inset:0;overflow:hidden'
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, lineHeight: 1.25, scrollback: 50_000, allowProposedApi: true,
     fontFamily: '"SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
@@ -34,10 +35,20 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   void dark
   const fit = new FitAddon()
   term.loadAddon(fit)
-  let opened = false
+  let opened = false, frame = 0
   const live: Live = {
     el, status: 'connecting', onStatus: () => {},
-    fit() { if (!opened) { term.open(el); opened = true } try { fit.fit() } catch {} },
+    // At most once a frame, and only when the cell grid changes: resizing to the same rows and columns is what made
+    // a maximised window shake (fit → reflow → resize event → fit …).
+    fit() {
+      if (!opened) { term.open(el); opened = true }
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (!el.isConnected || !el.clientWidth || !el.clientHeight) return
+        const next = fit.proposeDimensions()
+        if (next && Number.isFinite(next.cols) && Number.isFinite(next.rows) && (next.cols !== term.cols || next.rows !== term.rows)) term.resize(Math.max(next.cols, 2), Math.max(next.rows, 1))
+      })
+    },
     focus() { term.focus() },
     dispose() { source.close(); term.dispose(); el.remove(); lives.delete(key) },
   }
@@ -71,14 +82,17 @@ export function SerialConsole({ board, die, dark, onStatus, className = 'bl-term
   useEffect(() => {
     const live = open(board, die, dark)
     live.onStatus = status => { setStatus(status); onStatus?.(status) }
+    // Inside the box's padding, so a frontend still pads its console.
+    const pad = getComputedStyle(host.current!)
+    live.el.style.inset = `${pad.paddingTop} ${pad.paddingRight} ${pad.paddingBottom} ${pad.paddingLeft}`
     host.current!.appendChild(live.el)
     const observer = new ResizeObserver(() => live.fit())
     observer.observe(host.current!)
-    requestAnimationFrame(() => { live.fit(); live.focus() })
+    live.fit(); requestAnimationFrame(() => live.focus())
     onStatus?.(live.status)
     return () => { observer.disconnect(); live.el.remove(); live.onStatus = () => {} }
   }, [board, die])
-  return <div ref={host} className={className} />
+  return <div ref={host} className={className} style={{ position: 'relative', overflow: 'hidden' }} />
 }
 
 export const STATUS_TEXT: Record<ConsoleStatus, string> = { connecting: '连接中', live: '实时', closed: '已关闭', retry: '重连中' }
