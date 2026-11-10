@@ -41,15 +41,20 @@ let prefix = ''
 /** Boards display in upper case; a backend prefix every board shares (`bsp-`) is dropped. */
 export function setBoards(boards: Board[]) { const ps = new Set(boards.map(b => /^([a-z]+)-/.exec(b.name)?.[1])); prefix = ps.size === 1 && [...ps][0] ? `${[...ps][0]}-` : '' }
 export const upper = (name: string) => (prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name).toUpperCase()
-export function holder(id: string) { const at = id.indexOf(':'); const kind = at >= 0 ? id.slice(0, at) : 'user', name = at >= 0 ? id.slice(at + 1) : id; return { kind, name, agent: kind === 'claude' } }
+/** Agents name themselves `<kind>:<task>` (claude, codex, opencode, dsh, …); people are `user:<name>`. */
+const AGENT_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', dsh: 'dsh', gemini: 'Gemini', cursor: 'Cursor', boardlab: 'boardlab' }
+export function holder(id: string) {
+  const at = id.indexOf(':'); const kind = at >= 0 ? id.slice(0, at) : 'user', name = at >= 0 ? id.slice(at + 1) : id
+  return { kind, name, agent: kind !== 'user', label: AGENT_NAMES[kind] ?? kind }
+}
 function hue(s: string) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 35% 45%)` }
 export function Who({ id, you, full = false, max = 18, tag = true }: { id: string, you: string, full?: boolean, max?: number, tag?: boolean }) {
   const h = holder(id)
   return (
     <span className="who" title={id}>
-      {h.agent ? <span className="av agent"><Icon name="spark" /></span> : <span className="av" style={{ background: hue(h.name) }}>{h.name[0]}</span>}
+      {h.agent ? <span className={`av agent k-${h.kind}`}><Icon name="spark" /></span> : <span className="av" style={{ background: hue(h.name) }}>{h.name[0]}</span>}
       <span className="nm2">{id === you ? '你' : full ? h.name : middle(h.name, max)}</span>
-      {h.agent && tag && <span className="kind">Claude</span>}
+      {h.agent && tag && <span className={`kind k-${h.kind}`}>{h.label}</span>}
     </span>
   )
 }
