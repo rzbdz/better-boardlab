@@ -120,7 +120,8 @@
         "@xterm/xterm",
         "@xterm/addon-fit",
         "antd",
-        "@ant-design/icons"
+        "@ant-design/icons",
+        "dayjs"
       ],
       "$comment": "each frontend is a whole page of its own; it renders the modules' views and knows no module's internals"
     },

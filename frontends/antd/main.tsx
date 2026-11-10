@@ -14,7 +14,6 @@ import { changes, prefs, show as notifySystem } from '../../src/ui/notify.ts'
 import { who } from './format.ts'
 import { JobDrawer, registerModuleUis, useJobs } from './render.tsx'
 import { themeFor, useMode } from './theme.ts'
-import { BoardDrawer } from './views/board.tsx'
 import { BoardsPage } from './views/boards.tsx'
 import { canDiscover, DiscoverPage } from './views/discover.tsx'
 import { HistoryPage } from './views/history.tsx'
@@ -44,8 +43,8 @@ function Shell() {
       const next = await api.state(); you.current = next.you
       // Tell the person what changed for them: the system's notification centre when allowed, else here.
       if (last.current) for (const note of changes(last.current.boards, next.boards, next.you, prefs.get().watched)) {
-        if (!notifySystem(note, () => setBoard(note.board)) && prefs.get().enabled[note.topic]) {
-          const open = { message: note.title, description: note.body, placement: 'bottomRight' as const, onClick: () => setBoard(note.board) }
+        if (!notifySystem(note, () => { setPage('boards'); setBoard(note.board) }) && prefs.get().enabled[note.topic]) {
+          const open = { message: note.title, description: note.body, placement: 'bottomRight' as const, onClick: () => { setPage('boards'); setBoard(note.board) } }
           if (note.topic === 'attention') notification.warning({ ...open, key: `attention-${note.board}`, duration: 0 })
           else if (note.topic === 'stolen') notification.warning(open)
           else notification.success(open)
@@ -94,37 +93,33 @@ function Shell() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Sider width={232} breakpoint="lg" collapsedWidth={64} theme={dark ? 'dark' : 'light'} style={{ borderRight: '1px solid var(--bl-line)', position: 'sticky', top: 0, height: '100vh' }}>
-        <Flex align="center" gap={10} style={{ height: 60, padding: '0 22px' }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg, #0a66ff, #6e8bff)', boxShadow: '0 4px 12px rgba(10,102,255,.35)', flex: 'none' }} />
-          <Typography.Text strong style={{ fontSize: 16, letterSpacing: -0.2, whiteSpace: 'nowrap' }}>boardlab</Typography.Text>
-        </Flex>
-        <Menu mode="inline" selectedKeys={[page]} onClick={event => setPage(event.key as Page)} items={items} style={{ border: 'none', padding: '8px 10px' }} />
+      <Layout.Sider width={208} breakpoint="lg" collapsedWidth={56} theme={dark ? 'dark' : 'light'} style={{ borderRight: '1px solid var(--bl-line)', position: 'sticky', top: 0, height: '100vh' }}>
+        <div className="bl-brand"><i />boardlab</div>
+        <Menu mode="inline" selectedKeys={[page]} onClick={event => setPage(event.key as Page)} items={items} style={{ border: 'none', paddingTop: 8 }} />
       </Layout.Sider>
       <Layout>
-        <Layout.Header style={{ position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backdropFilter: 'saturate(180%) blur(16px)', WebkitBackdropFilter: 'saturate(180%) blur(16px)', borderBottom: '1px solid var(--bl-line)' }}>
-          <Typography.Title level={4} style={{ margin: 0, fontWeight: 600, letterSpacing: -0.3 }}>{PAGES[page]}</Typography.Title>
-          <Space size={16}>
-            {!connected && <Typography.Text type="warning">与 boardd 的连接中断，重试中…</Typography.Text>}
-            {waiting > 0 && <Tooltip title="有板子在等人操作"><Badge count={waiting}><BellOutlined style={{ fontSize: 18 }} /></Badge></Tooltip>}
-            <Tooltip title="任务"><Badge count={running} size="small"><Button type="text" icon={<UnorderedListOutlined />} onClick={() => setJobsOpen(true)} /></Badge></Tooltip>
+        <header className="bl-page-head">
+          <h1>{PAGES[page]}</h1>
+          <Space size={14}>
+            {!connected && <Typography.Text type="warning" style={{ fontSize: 12 }}>与 boardd 的连接中断，重试中…</Typography.Text>}
+            {waiting > 0 && <Tooltip title="有板子在等人操作"><Badge count={waiting} size="small"><BellOutlined style={{ fontSize: 16 }} /></Badge></Tooltip>}
+            <Tooltip title="任务"><Badge count={running} size="small"><Button size="small" type="text" icon={<UnorderedListOutlined />} onClick={() => setJobsOpen(true)} /></Badge></Tooltip>
             <Tooltip title="我是谁（锁和排队按名字区分）">
-              <Space style={{ cursor: 'pointer' }} onClick={() => setNaming(true)} data-testid="identity">
-                <Avatar size={30} style={{ background: '#0a66ff', fontWeight: 600 }}>{(state ? who(state.you) : '?').slice(0, 1).toUpperCase()}</Avatar>
-                <Typography.Text>{state ? who(state.you) : ''}</Typography.Text>
+              <Space size={8} style={{ cursor: 'pointer' }} onClick={() => setNaming(true)} data-testid="identity">
+                <Avatar size={24} style={{ background: 'var(--bl-accent)', fontSize: 12, fontWeight: 600 }}>{(state ? who(state.you) : '?').slice(0, 1).toUpperCase()}</Avatar>
+                <Typography.Text style={{ fontSize: 13 }}>{state ? who(state.you) : ''}</Typography.Text>
               </Space>
             </Tooltip>
           </Space>
-        </Layout.Header>
-        <Layout.Content style={{ padding: 28, maxWidth: 1480, width: '100%', margin: '0 auto' }}>
-          {!state ? (error ? <Result status="warning" title="连不上 boardd" subTitle={error} extra={<Button onClick={() => void refresh()}>重试</Button>} /> : <Flex justify="center" style={{ padding: 120 }}><Spin size="large" /></Flex>)
-            : page === 'boards' ? <BoardsPage state={state} onOpen={setBoard} />
+        </header>
+        <Layout.Content className={page === 'boards' ? 'bl-content bl-wide' : 'bl-content bl-narrow'}>
+          {!state ? (error ? <Result status="warning" title="连不上 boardd" subTitle={error} extra={<Button onClick={() => void refresh()}>重试</Button>} /> : <Flex justify="center" style={{ padding: 120 }}><Spin /></Flex>)
+            : page === 'boards' ? <BoardsPage state={state} dark={dark} selected={board} onSelect={setBoard} />
             : page === 'discover' ? <DiscoverPage state={state} onJobStarted={onJobStarted} />
             : page === 'history' ? <HistoryPage state={state} refreshKey={refreshKey} onJobStarted={onJobStarted} />
             : <SettingsPage state={state} mode={mode} onMode={setMode} onJobStarted={onJobStarted} />}
         </Layout.Content>
       </Layout>
-      {state && <BoardDrawer state={state} name={board} dark={dark} onClose={() => setBoard(null)} />}
       <JobDrawer open={jobsOpen} onClose={() => setJobsOpen(false)} />
       <Modal open={naming} title="我是谁" okText="保存" cancelText="取消" onCancel={() => setNaming(false)}
         onOk={() => { if (name && !/^[A-Za-z0-9_.@-]{1,40}$/.test(name)) return message.error('名字只能用字母、数字和 . _ - @'); identity.set(name.trim()); setNaming(false); void refresh() }}>
@@ -140,7 +135,6 @@ function Root() {
   return (
     <ConfigProvider theme={themeFor(dark)} locale={zhCN}>
       <AntApp>
-        <style>{`:root{--bl-line:${dark ? '#23272f' : '#eceef2'};--bl-card-shadow:${dark ? '0 0 0 1px #23272f' : '0 1px 2px rgba(16,24,40,.04), 0 0 0 1px #eceef2'}}`}</style>
         <Shell />
       </AntApp>
     </ConfigProvider>

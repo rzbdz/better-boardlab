@@ -11,8 +11,15 @@ import { calls } from './frontend-setup.ts'
 vi.mock('../frontends/antd/console.tsx', () => ({ SerialConsole: () => null, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已关闭', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
+/** A board's row in the list (its name also heads the workspace beside it). */
+const row = async (name: string) => (await screen.findAllByText(name, {}, wait)).map(el => el.closest('tr')).find(Boolean)!
 /** antd spaces out two-character Chinese button labels (`重 建`): match buttons ignoring spaces. */
-const button = (label: string) => screen.findByRole('button', { name: (name: string) => name.replace(/\s/g, '') === label }, wait)
+const button = async (label: string) => {
+  // A button's accessible name includes its icon's label (`lock 拿锁`): match the text a person sees.
+  const visible = (el: Element) => (el.textContent ?? '').replace(/\s/g, '') === label
+  await waitFor(() => expect(screen.getAllByRole('button').some(visible)).toBe(true), wait)
+  return screen.getAllByRole('button').find(visible)!
+}
 /** Text anywhere in an element, whichever pieces it is split into. */
 const text = (value: string | RegExp) => screen.findAllByText((_, el) => !!el && el.children.length === 0 ? false : !!el?.textContent && (typeof value === 'string' ? el.textContent.includes(value) : value.test(el.textContent)), {}, wait)
 
@@ -26,21 +33,35 @@ beforeAll(async () => {
 const goTo = async (page: string) => { location.hash = page; fireEvent.click(await screen.findByRole('menuitem', { name: new RegExp(page === 'boards' ? '板子' : page === 'discover' ? '发现' : page === 'history' ? '历史' : '设置') }, wait)) }
 
 describe('Ant Design frontend', () => {
-  it('lists every board with who has it, and the boards needing attention', async () => {
-    expect(await screen.findByText('bsp-k1-musecard', {}, wait)).toBeTruthy()
+  it('lists every board with who has it, beside the chosen board\'s workspace', async () => {
+    expect(await row('bsp-k1-musecard')).toBeTruthy()
     expect(screen.getAllByText('你在使用').length).toBeGreaterThan(0)
     expect(screen.getByText('bob 在用')).toBeTruthy()
-    expect(screen.getByText('槽位串口不见了')).toBeTruthy()
+    expect(screen.getByText('串口不见了')).toBeTruthy()
+    expect(screen.getByText('等人操作')).toBeTruthy()
     expect(screen.getByText('空槽位 host-b/s6')).toBeTruthy()
+    // The workspace shows the first board, with its console, log and history tabs.
+    expect(await screen.findByRole('tab', { name: /串口/ }, wait)).toBeTruthy()
+    expect(screen.getByRole('tab', { name: /日志/ })).toBeTruthy()
   })
 
-  it('takes a lock with a one-click purpose', async () => {
-    const row = (await screen.findByText('bsp-k1-musecard', {}, wait)).closest('tr')!
-    fireEvent.click(row.querySelector('button')!)
+  it('takes a lock with a one-click purpose, from the workspace', async () => {
+    fireEvent.click(await row('bsp-k1-musecard'))
+    fireEvent.click(await button('拿锁'))
     fireEvent.click(await screen.findByText('boardlab 调试', {}, wait))
     const dialog = await screen.findByRole('dialog', {}, wait)
-    fireEvent.click(within(dialog).getByRole('button', { name: (name: string) => name.replace(/\s/g, '') === '拿锁' }))
+    fireEvent.click(within(dialog).getAllByRole('button').find(el => (el.textContent ?? '').replace(/\s/g, '') === '拿锁')!)
     await waitFor(() => expect(calls.find(call => call.path === 'api/lock')?.body).toEqual({ board: 'bsp-k1-musecard', purpose: 'boardlab 调试' }), wait)
+  })
+
+  it('searches a board\'s log over a range, and offers download and wget', async () => {
+    fireEvent.click(await row('bsp-k3-cm1'))
+    fireEvent.click(await screen.findByRole('tab', { name: /日志/ }, wait))
+    expect(await screen.findByText(/mmc0 timeout/, {}, wait)).toBeTruthy()
+    const search = calls.filter(call => call.path.startsWith('api/logs?')).at(-1)!
+    expect(search.path).toMatch(/board=bsp-k3-cm1&die=die0&since=\d{4}-\d\d-\d\d\+\d\d%3A\d\d%3A\d\d&until=/)
+    expect(await button('下载')).toBeTruthy()
+    expect(await button('wget')).toBeTruthy()
   })
 
   it('shows each module\'s settings as cards, and switching the frontend', async () => {
@@ -48,6 +69,9 @@ describe('Ant Design frontend', () => {
     expect(await screen.findByText('Home Assistant', {}, wait)).toBeTruthy()
     expect(await screen.findByText('米家插座 · 工位 3', {}, wait)).toBeTruthy()
     expect(await screen.findByText('TroyMitchellDefault', {}, wait)).toBeTruthy()
+    // Switching asks boardd to serve the other frontend.
+    fireEvent.click(await screen.findByText('TroyMitchellDefault', {}, wait))
+    await waitFor(() => expect(calls.some(call => call.method === 'POST' && call.path === 'api/frontends?name=troy-mitchell-default')).toBe(true), wait)
     // jsdom has no Notification: the card says why it cannot turn them on.
     expect(await screen.findByText('这个页面不能发系统通知', {}, wait)).toBeTruthy()
   })

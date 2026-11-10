@@ -28,6 +28,7 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
   if (path === '/api/frontends') return reply({ default: 'antd', current: 'antd', frontends: [{ name: 'antd', title: 'Ant Design' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
+  if (path === '/api/logs') return reply({ lines: ['[2026-11-10 08:59:58] U-Boot SPL 2022.10', '[2026-11-10 09:00:00] ERROR: mmc0 timeout'], matched: 2, truncated: false, source: 'backend' })
   if (path === '/api/lock' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
     board.lease = { id: 'new', board: board.name, holder: state.you, purpose: body.purpose, startedAt: state.now, status: 'held', endedAt: null, endReason: null }
@@ -52,4 +53,6 @@ window.matchMedia = window.matchMedia ?? ((query: string) => ({
   matches: false, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,
 }) as MediaQueryList)
 globalThis.ResizeObserver = globalThis.ResizeObserver ?? class { observe() {} unobserve() {} disconnect() {} }
+// Switching frontends reloads the page; in tests there is nothing to reload.
+Object.defineProperty(window, 'location', { value: { ...window.location, reload: () => {}, href: 'http://localhost/', hash: '' }, writable: true })
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false

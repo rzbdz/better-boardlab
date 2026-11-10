@@ -137,6 +137,13 @@ describe('bsp lab driver', () => {
     expect(rebuilt.message).toBe('登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak')
   })
 
+  it('reads a board\'s log over a time range on its host, searched', async () => {
+    const bsp = fakeBsp(() => ok({ lines: ['[2026-11-10 09:00:00] ERROR mmc0'], matched: 1, truncated: false }))
+    const range = await bspLab({ run: bsp.run }).serial.logs!(config, on('k3-a'), { since: '2026-11-10 08:00:00', grep: 'error', limit: 500 })
+    expect(range).toEqual({ lines: ['[2026-11-10 09:00:00] ERROR mmc0'], matched: 1, truncated: false })
+    expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--since', '2026-11-10 08:00:00', '--grep', 'error', '--limit', '500'])
+  })
+
   it('greys a board whose slot lost its adapter', async () => {
     const bsp = fakeBsp(args => args.includes('slot') ? ok([]) : ok([{ ...DUTS[0], slot: 's3', slot_online: false }]))
     const [device] = await bspLab({ run: bsp.run }).inventory!.devices(config)

@@ -1,17 +1,21 @@
-/** The boards page: a summary, filters, and a table of every board, with a drawer for one board's details. */
-import { ApiOutlined, LockOutlined, PoweroffOutlined, SearchOutlined, ThunderboltOutlined, UnlockOutlined } from '@ant-design/icons'
-import { App, Badge as DotBadge, Button, Card, Col, Dropdown, Flex, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd'
-import { useMemo, useState } from 'react'
-import { api, type PageState } from '../../../src/ui/api.ts'
+/**
+ * The boards page: the list and the chosen board's workspace side by side. The list is a compact table with a
+ * status strip, filters and search; ↑/↓ (or j/k) move through it, and the workspace follows.
+ */
+import { SearchOutlined } from '@ant-design/icons'
+import { Badge as DotBadge, Input, Segmented, Table, Tooltip, Typography } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import type { PageState } from '../../../src/ui/api.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { ago, MODE, who } from '../format.ts'
-import { LockDialog, useBoardActions } from './dialogs.tsx'
+import { ago, who } from '../format.ts'
+import { BoardWorkspace } from './board.tsx'
 
 type Filter = 'all' | 'free' | 'mine' | 'busy'
 
 export function boardState(board: Board, you: string): { tone: 'success' | 'processing' | 'warning' | 'error' | 'default', text: string } {
   if (board.lab?.empty) return { tone: 'default', text: '空槽位' }
-  if (board.lab?.slotGone) return { tone: 'error', text: '槽位串口不见了' }
+  if (board.lab?.slotGone) return { tone: 'error', text: '串口不见了' }
+  if (board.lab?.attention) return { tone: 'warning', text: '等人操作' }
   if (board.lease?.holder === you) return { tone: 'processing', text: '你在使用' }
   if (board.lease) return { tone: 'warning', text: `${who(board.lease.holder)} 在用` }
   if (board.lab?.heldBy) return { tone: 'warning', text: '实验室占用' }
@@ -20,115 +24,92 @@ export function boardState(board: Board, you: string): { tone: 'success' | 'proc
 
 const where = (board: Board) => board.lab ? (board.slotRef?.split('/').slice(1).join('/') ?? board.lab.device) : board.slot !== null ? `槽位 ${board.slot}` : '—'
 
-export function BoardsPage({ state, onOpen }: { state: PageState, onOpen: (board: string) => void }) {
+export function BoardsPage({ state, dark, selected, onSelect }: { state: PageState, dark: boolean, selected: string | null, onSelect: (board: string) => void }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
-  const [lockFor, setLockFor] = useState<{ board: Board, queue: boolean } | null>(null)
-  const actions = useBoardActions()
-  const { message } = App.useApp()
   const you = state.you
-  const boards = state.boards
+  const real = state.boards.filter(board => !board.lab?.empty)
   const counts = {
-    all: boards.filter(board => !board.lab?.empty).length,
-    free: boards.filter(board => !board.lab?.empty && !board.lease && !board.lab?.heldBy).length,
-    mine: boards.filter(board => board.lease?.holder === you).length,
-    busy: boards.filter(board => board.lease && board.lease.holder !== you).length,
-    queued: boards.filter(board => board.waiters.some(waiter => waiter.holder === you)).length,
+    all: real.length,
+    free: real.filter(board => !board.lease && !board.lab?.heldBy).length,
+    mine: real.filter(board => board.lease?.holder === you).length,
+    busy: real.filter(board => board.lease && board.lease.holder !== you).length,
   }
-  const shown = useMemo(() => boards.filter(board => {
+  const shown = useMemo(() => state.boards.filter(board => {
     if (filter === 'free' && (board.lease || board.lab?.heldBy || board.lab?.empty)) return false
     if (filter === 'mine' && board.lease?.holder !== you) return false
     if (filter === 'busy' && !(board.lease && board.lease.holder !== you)) return false
     const q = query.trim().toLowerCase()
     return !q || [board.name, board.product, board.soc, board.slotRef, board.lease?.holder, board.lab?.id].some(value => value?.toLowerCase().includes(q))
-  }).sort((a, b) => Number(!!a.lab?.empty) - Number(!!b.lab?.empty) || a.name.localeCompare(b.name)), [boards, filter, query, you])
+  }).sort((a, b) => Number(!!a.lab?.empty) - Number(!!b.lab?.empty) || a.name.localeCompare(b.name)), [state.boards, filter, query, you])
+  const current = state.boards.find(board => board.name === selected) ?? shown[0] ?? null
+
+  useEffect(() => { if (!selected && shown[0]) onSelect(shown[0].name) }, [selected, shown[0]?.name])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (target.closest('input, textarea, .xterm, [contenteditable]')) return
+      const at = shown.findIndex(board => board.name === current?.name)
+      if ((event.key === 'ArrowDown' || event.key === 'j') && at < shown.length - 1) { onSelect(shown[at + 1]!.name); event.preventDefault() }
+      if ((event.key === 'ArrowUp' || event.key === 'k') && at > 0) { onSelect(shown[at - 1]!.name); event.preventDefault() }
+      if (event.key === '/') { document.getElementById('bl-board-search')?.focus(); event.preventDefault() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [shown, current?.name])
 
   return (
-    <Flex vertical gap={20}>
-      <Row gutter={[16, 16]}>
-        {[
-          { label: '板子', value: counts.all, icon: <ApiOutlined /> },
-          { label: '空闲', value: counts.free, icon: <UnlockOutlined />, color: '#16a34a' },
-          { label: '你在使用', value: counts.mine, icon: <LockOutlined />, color: '#0a66ff' },
-          { label: '别人在用', value: counts.busy, icon: <ThunderboltOutlined />, color: '#d97706', extra: counts.queued ? `你在排 ${counts.queued} 块` : undefined },
-        ].map(item => (
-          <Col key={item.label} xs={12} md={6}>
-            <Card variant="borderless" style={{ boxShadow: 'var(--bl-card-shadow)' }}>
-              <Statistic title={<Space size={6}>{item.icon}{item.label}</Space>} value={item.value} valueStyle={{ fontWeight: 600, color: item.color }} />
-              {item.extra && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.extra}</Typography.Text>}
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      <Card variant="borderless" style={{ boxShadow: 'var(--bl-card-shadow)' }} styles={{ body: { padding: 0 } }}>
-        <Flex justify="space-between" align="center" wrap gap={12} style={{ padding: '16px 20px' }}>
-          <Segmented<Filter> value={filter} onChange={setFilter} options={[
-            { label: `全部 ${counts.all}`, value: 'all' }, { label: `空闲 ${counts.free}`, value: 'free' },
-            { label: `我的 ${counts.mine}`, value: 'mine' }, { label: `在用 ${counts.busy}`, value: 'busy' },
-          ]} />
-          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索板名、型号、槽位、持有人" value={query} onChange={event => setQuery(event.target.value)} style={{ width: 280 }} />
-        </Flex>
-        <Table<Board> rowKey="name" dataSource={shown} pagination={false} size="middle" scroll={{ x: 900 }}
-          onRow={board => ({ onClick: event => { if (!(event.target as HTMLElement).closest('button, .ant-dropdown-trigger')) onOpen(board.name) }, style: { cursor: 'pointer', opacity: board.lab?.slotGone ? 0.55 : 1 } })}
-          columns={[
-            {
-              title: '板子', key: 'name', render: (_, board) => (
-                <Flex vertical gap={2}>
-                  <Typography.Text strong>{board.lab?.empty ? `空槽位 ${where(board)}` : board.name}</Typography.Text>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>{board.lab?.empty ? '只有串口，还没有登记板子' : [board.product ?? '型号未知', board.soc?.toUpperCase()].filter(Boolean).join(' · ')}</Typography.Text>
-                </Flex>
-              ),
-            },
-            {
-              title: '位置', key: 'where', render: (_, board) => (
-                <Flex vertical gap={2}>
-                  <span>{where(board)}</span>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>{board.lab ? `实验室 ${board.lab.id}` : '本机'}</Typography.Text>
-                </Flex>
-              ),
-            },
-            {
-              title: '状态', key: 'state', render: (_, board) => {
-                const s = boardState(board, you)
-                return <Flex vertical gap={2}><DotBadge status={s.tone} text={s.text} />{board.lease && <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: board.lease.purpose }}>{board.lease.purpose} · {ago(board.lease.startedAt)}</Typography.Text>}</Flex>
-              },
-            },
-            {
-              title: '串口', key: 'serial', render: (_, board) => {
-                const online = board.chips.some(chip => chip.online)
-                return <DotBadge status={online ? 'success' : 'default'} text={online ? '在线' : '离线'} />
-              },
-            },
-            { title: '模式', key: 'mode', render: (_, board) => board.lab?.progress ? <Tag color="processing" bordered={false}>{board.lab.progress}</Tag> : <Typography.Text type="secondary">{MODE[board.mode]}</Typography.Text> },
-            { title: '排队', key: 'queue', align: 'center', render: (_, board) => board.waiters.length ? <Tooltip title={board.waiters.map(waiter => who(waiter.holder)).join('、')}><Tag bordered={false}>{board.waiters.length}</Tag></Tooltip> : <Typography.Text type="secondary">—</Typography.Text> },
-            {
-              title: '', key: 'act', align: 'right', render: (_, board) => {
-                const mine = board.lease?.holder === you
-                if (board.lab?.empty) return <Button size="small" onClick={() => onOpen(board.name)}>串口</Button>
-                if (mine) return (
-                  <Space size={6}>
-                    <Button size="small" icon={<PoweroffOutlined />} loading={actions.busy === `${board.name}:reset`} onClick={() => actions.reset(board)}>复位</Button>
-                    <Dropdown trigger={['click']} menu={{ items: [
-                      { key: 'fastboot', label: '进入 fastboot', onClick: () => actions.fastboot(board) },
-                      { key: 'console', label: '打开串口', onClick: () => onOpen(board.name) },
-                      { type: 'divider' },
-                      { key: 'unlock', label: board.waiters[0] ? `放锁并交给 ${who(board.waiters[0].holder)}` : '放锁', onClick: () => actions.unlock(board) },
-                    ] }}><Button size="small">更多</Button></Dropdown>
-                  </Space>
-                )
-                if (board.lease || board.lab?.heldBy) {
-                  const place = board.waiters.findIndex(waiter => waiter.holder === you)
-                  return place >= 0
-                    ? <Button size="small" onClick={() => void api.unqueue(board.name).then(() => message.success('已退出排队'))}>排第 {place + 1} 位 · 退出</Button>
-                    : <Button size="small" onClick={() => setLockFor({ board, queue: true })}>排队</Button>
-                }
-                return <Button size="small" type="primary" icon={<LockOutlined />} onClick={() => setLockFor({ board, queue: false })}>拿锁</Button>
-              },
-            },
-          ]} />
-      </Card>
-      {lockFor && <LockDialog board={lockFor.board} queue={lockFor.queue} onClose={() => setLockFor(null)} />}
-    </Flex>
+    <div className="bl-split">
+      <div style={{ gap: 12 }}>
+        <div className="bl-stats">
+          <div><span>板子</span><b>{counts.all}</b></div>
+          <div><span>空闲</span><b style={{ color: '#12b76a' }}>{counts.free}</b></div>
+          <div><span>我的</span><b style={{ color: 'var(--bl-accent)' }}>{counts.mine}</b></div>
+          <div><span>别人在用</span><b style={{ color: '#f79009' }}>{counts.busy}</b></div>
+        </div>
+        <div className="bl-panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="bl-toolbar" style={{ padding: '8px 10px', borderBottom: '1px solid var(--bl-line)' }}>
+            <Segmented<Filter> size="small" value={filter} onChange={setFilter} options={[
+              { label: '全部', value: 'all' }, { label: '空闲', value: 'free' }, { label: '我的', value: 'mine' }, { label: '在用', value: 'busy' },
+            ]} />
+            <span className="bl-grow" />
+            <Tooltip title="按 / 搜索，↑↓ 或 j/k 切换板子">
+              <Input id="bl-board-search" size="small" allowClear prefix={<SearchOutlined />} placeholder="搜索" value={query} onChange={event => setQuery(event.target.value)} style={{ width: 200 }} />
+            </Tooltip>
+          </div>
+          <div className="bl-scroll">
+            <Table<Board> rowKey="name" dataSource={shown} pagination={false} size="small" sticky showHeader
+              rowClassName={board => [board.name === current?.name ? 'bl-current' : '', board.lab?.slotGone ? 'bl-dim' : ''].join(' ')}
+              onRow={board => ({ onClick: () => onSelect(board.name) })}
+              columns={[
+                {
+                  title: '板子', key: 'name', ellipsis: true, render: (_, board) => (
+                    <div style={{ minWidth: 0 }}>
+                      <Typography.Text strong style={{ fontSize: 13 }} ellipsis>{board.lab?.empty ? `空槽位 ${where(board)}` : board.name}</Typography.Text>
+                      <div style={{ fontSize: 12, color: 'var(--bl-text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {board.lab?.empty ? '只有串口' : [board.product ?? '型号未知', board.soc?.toUpperCase()].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                  ),
+                },
+                { title: '位置', key: 'where', width: 132, ellipsis: true, render: (_, board) => <span className="bl-mono" style={{ fontSize: 12 }}>{where(board)}</span> },
+                {
+                  title: '状态', key: 'state', width: 150, render: (_, board) => {
+                    const s = boardState(board, you)
+                    return (
+                      <div>
+                        <DotBadge status={s.tone} text={<span style={{ fontSize: 12 }}>{s.text}</span>} />
+                        {board.lease && <div style={{ fontSize: 11, color: 'var(--bl-text3)' }} className="bl-num">{ago(board.lease.startedAt)}{board.waiters.length ? ` · 排队 ${board.waiters.length}` : ''}</div>}
+                      </div>
+                    )
+                  },
+                },
+                { title: '串口', key: 'serial', width: 56, align: 'center', render: (_, board) => <DotBadge status={board.chips.some(chip => chip.online) ? 'success' : 'default'} /> },
+              ]} />
+          </div>
+        </div>
+      </div>
+      <div><BoardWorkspace state={state} board={current} dark={dark} /></div>
+    </div>
   )
 }

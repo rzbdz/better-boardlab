@@ -1,14 +1,72 @@
-/* The Ant Design frontend's few global rules; everything else is antd's theme tokens (theme.ts). */
+/* The Ant Design frontend's global rules. Values follow theme.ts; components get theirs from antd's tokens. */
+:root { --bl-bg: #f6f7f9; --bl-panel: #fff; --bl-line: #e4e7ec; --bl-text2: #475467; --bl-text3: #98a2b3; --bl-hover: #f4f6f8; --bl-select: rgba(11,107,255,.07); --bl-accent: #0b6bff; }
+:root[data-theme="dark"] { --bl-bg: #0b0c0f; --bl-panel: #111317; --bl-line: #24282f; --bl-text2: #9aa1ad; --bl-text3: #6b7280; --bl-hover: #181b21; --bl-select: rgba(11,107,255,.16); }
 html, body, #root { height: 100%; margin: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Zen Hei", sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-.bl-mono, code, pre { font-family: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
-.bl-terminal { height: 100%; min-height: 320px; background: #0b0d12; border-radius: 10px; padding: 10px 6px 6px 12px; box-sizing: border-box; }
+body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Zen Hei", sans-serif; -webkit-font-smoothing: antialiased; font-feature-settings: "tnum" 1, "cv11" 1; }
+.bl-mono, code, pre, kbd { font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+.bl-num { font-variant-numeric: tabular-nums; }
+
+/* Panels: flat surfaces divided by hairlines. */
+.bl-panel { background: var(--bl-panel); border: 1px solid var(--bl-line); border-radius: 6px; }
+.bl-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--bl-line); min-height: 44px; box-sizing: border-box; }
+.bl-panel-head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+.bl-panel-body { padding: 14px; }
+.bl-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--bl-text3); }
+
+/* The boards page: list and console side by side, each scrolling on its own. */
+.bl-split { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(460px, 1.15fr); gap: 12px; height: calc(100vh - 48px - 24px); min-height: 520px; }
+.bl-split > * { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+@media (max-width: 1100px) { .bl-split { grid-template-columns: 1fr; height: auto; } .bl-split > :last-child { min-height: 560px; } }
+.bl-scroll { flex: 1; min-height: 0; overflow: auto; }
+.ant-table-row.bl-current > td { background: var(--bl-select) !important; }
+.ant-table-row.bl-current > td:first-child { box-shadow: inset 2px 0 0 var(--bl-accent); }
+.ant-table-row { cursor: pointer; }
+.bl-dim { opacity: .5; }
+
+/* A toolbar: a row of compact, grouped controls. */
+.bl-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bl-toolbar .bl-grow { flex: 1; }
+.bl-sep { width: 1px; align-self: stretch; background: var(--bl-line); margin: 2px 4px; }
+
+/* Facts: label over value, in a dense grid. */
+.bl-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 16px; }
+.bl-facts dt { font-size: 11px; color: var(--bl-text3); margin: 0 0 2px; }
+.bl-facts dd { margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Terminal and log views. */
+.bl-terminal { flex: 1; min-height: 280px; background: #0a0b0d; padding: 8px 4px 4px 10px; box-sizing: border-box; }
 .bl-terminal .xterm { height: 100%; }
 .bl-terminal .xterm-viewport::-webkit-scrollbar { width: 8px; }
-.bl-terminal .xterm-viewport::-webkit-scrollbar-thumb { background: #2b313d; border-radius: 4px; }
-.bl-log-hit { background: rgba(250, 173, 20, .35); border-radius: 2px; }
-pre.bl-log { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6; }
+.bl-terminal .xterm-viewport::-webkit-scrollbar-thumb { background: #2a2f37; border-radius: 4px; }
+.bl-log { margin: 0; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+.bl-logview { flex: 1; min-height: 280px; overflow: auto; background: #0a0b0d; color: #c9d1d9; padding: 8px 12px; }
+.bl-logview .bl-line { display: grid; grid-template-columns: 4.5em 1fr; gap: 10px; }
+.bl-logview .bl-ln { color: #4b5563; text-align: right; user-select: none; }
+.bl-logview mark { background: rgba(247,144,9,.38); color: inherit; border-radius: 2px; }
+.bl-logview .bl-ts { color: #7d8590; }
+
+/* Stat strip. */
+.bl-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--bl-line); border-radius: 6px; background: var(--bl-panel); }
+.bl-stats > div { padding: 10px 14px; border-left: 1px solid var(--bl-line); }
+.bl-stats > div:first-child { border-left: none; }
+.bl-stats b { display: block; font-size: 20px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.bl-stats span { font-size: 11px; color: var(--bl-text3); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+@media (max-width: 700px) { .bl-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* A compact table without antd's chrome (a board's history). */
+table.bl-mini { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.bl-mini td { padding: 6px 14px 6px 0; border-bottom: 1px solid var(--bl-line); vertical-align: top; }
+table.bl-mini td:first-child { padding-left: 14px; }
+
+/* Tabs that fill the workspace: the active pane takes the rest of the height. */
+.ant-tabs-content-holder, .ant-tabs-content, .ant-tabs-tabpane-active { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.ant-tabs-tabpane-active > * { flex: 1; min-height: 0; }
+
+/* The rail: icons and labels, the brand at the top. */
+.bl-brand { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--bl-line); font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
+.bl-brand i { width: 18px; height: 18px; border-radius: 4px; background: var(--bl-accent); display: inline-block; }
+.bl-page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 20px; border-bottom: 1px solid var(--bl-line); background: var(--bl-panel); position: sticky; top: 0; z-index: 10; }
+.bl-page-head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.bl-content { padding: 12px; }
+.bl-content.bl-wide { padding: 12px; }
+.bl-content.bl-narrow { padding: 16px 20px; max-width: 1180px; }

@@ -231,6 +231,13 @@ export function bspLab(options: BspOptions = {}): Backend {
     },
 
     serial: {
+      // The board host keeps each console's log by day; bsp reads a range of it there and searches it.
+      async logs(config, { device }, query) {
+        return bsp<{ lines: string[], matched: number, truncated: boolean }>(config, ['dut', 'logs', device,
+          ...(query.since ? ['--since', query.since] : []), ...(query.until ? ['--until', query.until] : []),
+          ...(query.grep ? ['--grep', query.grep] : []), ...(query.regex ? ['--regex'] : []),
+          '--limit', String(query.limit ?? 20000), ...(query.first ? ['--first'] : [])], 120_000)
+      },
       async open(config, { device }) {
         const child = start([...global(config), 'dut', 'pipe', device], env(config))
         // A pipe that could not start prints bsp's error envelope instead of protocol frames.
