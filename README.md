@@ -48,7 +48,8 @@ flowchart LR
 - Board locks with a first-come queue, shared by people and agents.
 - The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
-- A web page with boards, consoles, history and settings, and an HTTP API for other programs.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Two frontends ship, Ant Design (the default) and TroyMitchellDefault; each browser picks one under Settings.
+- Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 
 ## Quick start
@@ -104,9 +105,11 @@ A module lives in `src/modules/<id>/`:
 - `index.ts` sets it up on the core;
 - `catalog.ts` offers it to boardd;
 - `cli.ts` adds commands;
-- `ui.tsx` adds a page section.
+- `ui.ts` describes its part of the page as views (`src/ui/contract.ts`): sections, forms, actions, long jobs with progress, live streams. Every frontend renders them its own way.
 
 After adding or removing a module, run `pnpm modules`. Changes to the core go into boardlab-core.
+
+Each frontend is a whole page of its own in `frontends/<name>/` (`page.tsx`, `index.html`, styles), listed in `frontends/frontends.json` with the default. `pnpm run build` builds them all into `dist/ui`. Frontend tests run in jsdom against a mock boardd (`tests/mock-boardd.ts`), with no hardware.
 
 ## Origin and changes
 

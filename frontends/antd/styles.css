@@ -1,0 +1,14 @@
+/* The Ant Design frontend's few global rules; everything else is antd's theme tokens (theme.ts). */
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Zen Hei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.bl-mono, code, pre { font-family: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+.bl-terminal { height: 100%; min-height: 320px; background: #0b0d12; border-radius: 10px; padding: 10px 6px 6px 12px; box-sizing: border-box; }
+.bl-terminal .xterm { height: 100%; }
+.bl-terminal .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.bl-terminal .xterm-viewport::-webkit-scrollbar-thumb { background: #2b313d; border-radius: 4px; }
+.bl-log-hit { background: rgba(250, 173, 20, .35); border-radius: 2px; }
+pre.bl-log { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6; }

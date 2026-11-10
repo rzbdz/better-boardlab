@@ -1,7 +1,8 @@
 {
   "$comment": "This distribution's layering, enforced by core/scripts/check-architecture.mjs at build and test time. The core's own layers are checked in boardlab-core; here its files are mapped in (aliases) so modules use only what they may. Modules import only core, shared and the modules they declare.",
   "roots": [
-    "src"
+    "src",
+    "frontends"
   ],
   "aliases": {
     "boardlab-core/": "core/src/"
@@ -33,13 +34,6 @@
         "shared"
       ]
     },
-    "ui": {
-      "path": "core/src/ui",
-      "may": [
-        "shared"
-      ],
-      "node": false
-    },
     "modules": {
       "path": "src/modules",
       "may": [
@@ -61,20 +55,18 @@
     },
     "module-ui": {
       "paths": [
-        "src/modules/*/ui.tsx"
+        "src/modules/*/ui.ts"
       ],
       "may": [
         "shared",
-        "ui"
+        "ui-contract"
       ],
       "typeOnly": [
         "shared"
       ],
       "node": false,
-      "packages": [
-        "react"
-      ],
-      "$comment": "a module's part of the default page: browser code, beside the module but never using its server side"
+      "packages": [],
+      "$comment": "a module's views (src/ui/contract.ts): data and operations, no drawing, no frontend"
     },
     "module-cli": {
       "paths": [
@@ -100,17 +92,48 @@
       ],
       "$comment": "the CLI entry and the registries scripts/modules.mjs writes"
     },
-    "page": {
+    "ui-contract": {
+      "path": "src/ui",
+      "may": [
+        "shared"
+      ],
+      "typeOnly": [
+        "shared"
+      ],
+      "node": false,
+      "$comment": "the layer between modules and frontends: the view contract and the browser API client"
+    },
+    "frontends": {
+      "path": "frontends",
+      "may": [
+        "shared",
+        "ui-contract",
+        "page-registry"
+      ],
+      "typeOnly": [
+        "shared"
+      ],
+      "node": false,
+      "packages": [
+        "react",
+        "react-dom",
+        "@xterm/xterm",
+        "@xterm/addon-fit",
+        "antd",
+        "@ant-design/icons"
+      ],
+      "$comment": "each frontend is a whole page of its own; it renders the modules' views and knows no module's internals"
+    },
+    "page-registry": {
       "paths": [
-        "src/page.tsx",
         "src/uis.ts"
       ],
       "may": [
-        "ui",
-        "module-ui"
+        "module-ui",
+        "ui-contract"
       ],
       "node": false,
-      "$comment": "the page entry and its registry"
+      "$comment": "the registry scripts/modules.mjs writes of the modules' views"
     }
   },
   "modules": {

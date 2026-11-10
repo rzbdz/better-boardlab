@@ -22,18 +22,25 @@
   },
   "scripts": {
     "modules": "node scripts/modules.mjs",
-    "build": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs && node core/scripts/build.mjs --cli src/boardlab.ts --page src/page.tsx",
+    "build": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs && node core/scripts/build.mjs --cli src/boardlab.ts && node scripts/frontends.mjs",
     "check": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "frontends": "node scripts/frontends.mjs"
   },
   "devDependencies": {
+    "@ant-design/icons": "5.6.1",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/react": "16.1.0",
+    "@types/jsdom": "21.1.7",
     "@types/node": "22.20.5",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/xterm": "5.5.0",
+    "antd": "5.29.3",
     "esbuild": "0.27.7",
+    "jsdom": "25.0.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "6.0.3",
