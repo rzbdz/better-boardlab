@@ -11,6 +11,12 @@ better-boardlab is a distribution of [boardlab-core](https://github.com/rzbdz/bo
 - **Remote board hosts** through [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow): boards in other labs, plus building and booting SDKs on build servers.
 - **A Claude skill** (`skills/boardlab`) that teaches agents the CLI.
 
+![The boards page](docs/images/boards.png)
+
+| A board: controls beside its serial console | Discovering boards, host by host |
+| --- | --- |
+| ![A board's page](docs/images/board.png) | ![The discover page](docs/images/discover.png) |
+
 ## Architecture
 
 Four separate parts: each box is one kind of machine (or a board), and they connect only through the interfaces on the arrows.
@@ -48,7 +54,7 @@ flowchart LR
 - Board locks with a first-come queue, shared by people and agents.
 - The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
-- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Ant Design (the default), shadcn/ui and TroyMitchellDefault. Settings picks the one this boardd serves.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
