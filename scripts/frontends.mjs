@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
  * Build this distribution's web frontends into dist/ui: each frontends/<name>/ (its page.tsx, index.html and any
- * *.css next to it) into dist/ui/<name>/, and dist/ui/frontends.json listing them, which boardd serves.
+ * *.css next to it; a frontend with tailwind.config.cjs gets its tailwind.css compiled into styles.css) into
+ * dist/ui/<name>/, and dist/ui/frontends.json listing them, which boardd serves.
  *
  *   node scripts/frontends.mjs [--out dist/ui] [--only <name>]
  */
 import { build } from 'esbuild'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -27,7 +30,11 @@ for (const { name } of list.frontends.filter(item => !only || item.name === only
     entryPoints: [join(src, 'page.tsx')], outfile: join(dest, 'main.js'), bundle: true, format: 'esm', platform: 'browser',
     target: 'es2022', minify: true, sourcemap: true, define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning',
   })
-  for (const file of await readdir(src)) if (file === 'index.html' || file.endsWith('.css')) await copyFile(join(src, file), join(dest, file))
+  for (const file of await readdir(src)) if (file === 'index.html' || (file.endsWith('.css') && file !== 'tailwind.css')) await copyFile(join(src, file), join(dest, file))
+  // A frontend styled with Tailwind (shadcn/ui) has its tailwind.css compiled with its own config.
+  if (existsSync(join(src, 'tailwind.config.cjs'))) {
+    execFileSync(process.execPath, [require.resolve('tailwindcss/lib/cli.js'), '-c', join(src, 'tailwind.config.cjs'), '-i', join(src, 'tailwind.css'), '-o', join(dest, 'styles.css'), '--minify'], { stdio: 'pipe', cwd: root })
+  }
   // Every frontend has the serial console, drawn with xterm.
   await copyFile(require.resolve('@xterm/xterm/css/xterm.css'), join(dest, 'xterm.css'))
 }

@@ -7,7 +7,7 @@ import { Badge as DotBadge, Input, Segmented, Table, Tooltip, Typography } from 
 import { useEffect, useMemo, useState } from 'react'
 import type { PageState } from '../../../src/ui/api.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { ago, who } from '../format.ts'
+import { ago, who } from '../../../src/ui/format.ts'
 import { BoardWorkspace } from './board.tsx'
 
 type Filter = 'all' | 'free' | 'mine' | 'busy'

@@ -48,7 +48,8 @@ flowchart LR
 - Board locks with a first-come queue, shared by people and agents.
 - The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
-- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Two frontends ship, Ant Design (the default) and TroyMitchellDefault; each browser picks one under Settings.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Ant Design (the default), shadcn/ui and TroyMitchellDefault. Settings picks the one this boardd serves.
+- Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 

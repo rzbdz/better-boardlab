@@ -2,7 +2,17 @@
   "$comment": "This distribution's web frontends: each is a whole page of its own in frontends/<name>/ (entry page.tsx, index.html, styles.css). boardd serves the default; each browser can switch in the settings page.",
   "default": "antd",
   "frontends": [
-    { "name": "antd", "title": "Ant Design" },
-    { "name": "troy-mitchell-default", "title": "TroyMitchellDefault" }
+    {
+      "name": "antd",
+      "title": "Ant Design"
+    },
+    {
+      "name": "shadcn",
+      "title": "shadcn/ui"
+    },
+    {
+      "name": "troy-mitchell-default",
+      "title": "TroyMitchellDefault"
+    }
   ]
 }

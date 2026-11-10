@@ -7,7 +7,7 @@ import { App, Button, Card, Col, Flex, Form, Input, Radio, Row, Segmented, Space
 import { useEffect, useState } from 'react'
 import { api, frontends, type FrontendList, type PageState } from '../../../src/ui/api.ts'
 import type { LabSettings } from 'boardlab-core/shared/types.ts'
-import { ago } from '../format.ts'
+import { ago } from '../../../src/ui/format.ts'
 import { ViewCard, viewsFor } from '../render.tsx'
 import type { Mode } from '../theme.ts'
 import { NotifyCard } from './notify.tsx'

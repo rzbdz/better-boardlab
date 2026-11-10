@@ -8,7 +8,7 @@ import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-desi
 import { App, Alert, Button, Card, Checkbox, Collapse, Descriptions, Drawer, Empty, Flex, Form, Input, InputNumber, List, Modal, Progress, Select, Space, Switch, Table, Tag, Timeline, Typography } from 'antd'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { plain, type Badge, type Element, type Field, type Inline, type ModuleUi, type Operation, type PageState, type Rich, type Tone, type Values, type View, type ViewContext } from '../../src/ui/contract.ts'
-import { stamp } from './format.ts'
+import { stamp } from '../../src/ui/format.ts'
 
 let registered: ModuleUi[] = []
 export function registerModuleUis(uis: ModuleUi[]) { registered = uis }
@@ -181,7 +181,7 @@ function Live({ element }: { element: Extract<Element, { kind: 'live' }> }) {
   const [lines, setLines] = useState<string[]>([])
   const box = useRef<HTMLPreElement>(null)
   useEffect(() => element.stream.open({ line: text => setLines(list => [...list.slice(-800), text]) }), [element.stream.id])
-  useEffect(() => { box.current?.scrollTo({ top: box.current.scrollHeight }) }, [lines])
+  useEffect(() => { box.current?.scrollTo?.({ top: box.current.scrollHeight }) }, [lines])
   return <pre ref={box} className="bl-log bl-terminal" style={{ minHeight: 0, maxHeight: element.height === 'large' ? 480 : 220, overflow: 'auto', color: '#d7dde8' }}>{lines.join('\n')}</pre>
 }
 

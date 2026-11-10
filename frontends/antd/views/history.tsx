@@ -3,7 +3,7 @@ import { Card, Flex, Select, Table, Tabs, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { api, type History, type PageState } from '../../../src/ui/api.ts'
 import type { Action, Lease } from 'boardlab-core/shared/types.ts'
-import { ACTIONS, stamp, who } from '../format.ts'
+import { ACTIONS, stamp, who } from '../../../src/ui/format.ts'
 import { ViewCard, viewsFor } from '../render.tsx'
 
 const LEASE: Record<Lease['status'], { text: string, color: string }> = { held: { text: '使用中', color: 'processing' }, released: { text: '已释放', color: 'default' }, stolen: { text: '被抢', color: 'warning' } }

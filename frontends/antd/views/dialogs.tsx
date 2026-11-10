@@ -3,7 +3,7 @@ import { App, Flex, Form, Input, Modal, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import { api } from '../../../src/ui/api.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { PURPOSES, who } from '../format.ts'
+import { PURPOSES, who } from '../../../src/ui/format.ts'
 
 /**
  * Board actions that need no form. A reset of a lab board can take tens of seconds; the button spins while this board

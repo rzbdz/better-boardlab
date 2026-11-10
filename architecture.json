@@ -101,7 +101,12 @@
         "shared"
       ],
       "node": false,
-      "$comment": "the layer between modules and frontends: the view contract and the browser API client"
+      "$comment": "the layer between modules and frontends: the view contract, the browser API client, and what every frontend shares (logs, notifications, the serial console, formatting)",
+      "packages": [
+        "react",
+        "@xterm/xterm",
+        "@xterm/addon-fit"
+      ]
     },
     "frontends": {
       "path": "frontends",
@@ -121,7 +126,18 @@
         "@xterm/addon-fit",
         "antd",
         "@ant-design/icons",
-        "dayjs"
+        "dayjs",
+        "@radix-ui/react-checkbox",
+        "@radix-ui/react-dialog",
+        "@radix-ui/react-dropdown-menu",
+        "@radix-ui/react-switch",
+        "@radix-ui/react-tabs",
+        "@radix-ui/react-tooltip",
+        "class-variance-authority",
+        "clsx",
+        "lucide-react",
+        "tailwind-merge",
+        "sonner"
       ],
       "$comment": "each frontend is a whole page of its own; it renders the modules' views and knows no module's internals"
     },

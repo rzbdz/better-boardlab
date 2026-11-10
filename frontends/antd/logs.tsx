@@ -39,7 +39,7 @@ export function LogPanel({ board, die }: { board: string, die?: string }) {
   }, [board, die, range, custom, grep, regex])
   const run = async () => {
     setLoading(true)
-    try { setResult(await logs.search(search)); requestAnimationFrame(() => box.current?.scrollTo({ top: box.current.scrollHeight })) }
+    try { setResult(await logs.search(search)); requestAnimationFrame(() => box.current?.scrollTo?.({ top: box.current.scrollHeight })) }
     catch (error) { message.error((error as Error).message) }
     finally { setLoading(false) }
   }

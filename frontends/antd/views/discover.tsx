@@ -7,7 +7,7 @@ import { Alert, App, Button, Card, Col, Empty, Flex, Input, List, Row, Select, S
 import { useState } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import type { LabSettings, Proposal } from 'boardlab-core/shared/types.ts'
-import { ago } from '../format.ts'
+import { ago } from '../../../src/ui/format.ts'
 import { ViewCard, viewsFor } from '../render.tsx'
 
 const KIND: Record<Proposal['kind'], string> = { 'new-board': '新板', 'replace-board': '换板', 'serial-moved': '串口', 'download-moved': '下载口', 'product-changed': '型号', 'slot-empty': '空槽位' }

@@ -1,11 +1,11 @@
 /**
- * The serial console: a live xterm on a chip's port, streamed from boardd. Kept per board while the page is open, so
- * switching boards and back shows it as it was.
+ * The serial console for every frontend: a live xterm on a chip's port, streamed from boardd. Kept per board while the
+ * page is open, so switching boards and back shows it as it was. `className` styles its box in the frontend's look.
  */
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../../src/ui/api.ts'
+import { api } from './api.ts'
 
 export type ConsoleStatus = 'connecting' | 'live' | 'closed' | 'retry'
 
@@ -65,7 +65,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
 
 window.addEventListener('pagehide', () => { for (const live of [...lives.values()]) live.dispose() })
 
-export function SerialConsole({ board, die, dark, onStatus }: { board: string, die?: string, dark: boolean, onStatus?: (status: ConsoleStatus) => void }) {
+export function SerialConsole({ board, die, dark, onStatus, className = 'bl-terminal' }: { board: string, die?: string, dark: boolean, onStatus?: (status: ConsoleStatus) => void, className?: string }) {
   const host = useRef<HTMLDivElement>(null)
   const [, setStatus] = useState<ConsoleStatus>('connecting')
   useEffect(() => {
@@ -78,7 +78,7 @@ export function SerialConsole({ board, die, dark, onStatus }: { board: string, d
     onStatus?.(live.status)
     return () => { observer.disconnect(); live.el.remove(); live.onStatus = () => {} }
   }, [board, die])
-  return <div ref={host} className="bl-terminal" />
+  return <div ref={host} className={className} />
 }
 
 export const STATUS_TEXT: Record<ConsoleStatus, string> = { connecting: '连接中', live: '实时', closed: '已关闭', retry: '重连中' }
