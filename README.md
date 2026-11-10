@@ -11,6 +11,38 @@ better-boardlab is a distribution of [boardlab-core](https://github.com/rzbdz/bo
 - **Remote board hosts** through [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow): boards in other labs, plus building and booting SDKs on build servers.
 - **A Claude skill** (`skills/boardlab`) that teaches agents the CLI.
 
+## Architecture
+
+Four separate parts: each box is one kind of machine (or a board), and they connect only through the interfaces on the arrows.
+
+```mermaid
+flowchart LR
+  dev["Dev & Compile Machine<br/>boardlab CLI · agent"]
+  subgraph registry["Boardlab Registry"]
+    direction TB
+    ui["Frontend<br/>web page, replaceable"]
+    api["API server<br/>boardd: locks · queue · inventory · /api"]
+    ui --> api
+  end
+  subgraph ctrld["CtrlD backends"]
+    direction TB
+    local["Local Backend<br/>slots · serial-mux · fastboot"]
+    bsp["BSP Remote Backend<br/>bsp board hosts"]
+    other["… Backend<br/>other labs"]
+  end
+  dut["DUT<br/>development boards"]
+  dev -- "ssh tunnel / HTTP" --> api
+  api --> ctrld
+  ctrld -- "reset · download port · serial" --> dut
+```
+
+| Part | What it is |
+| --- | --- |
+| Dev & Compile Machine | Only the `boardlab` CLI and the skill, pointed at the registry. It needs no knowledge of the hosts. |
+| Boardlab Registry | boardd: every request from people and agents arrives here (locks, queue, inventory, API). The web page is one frontend on the API. |
+| CtrlD backends | The machines wired to the boards: this machine's own boards (Local), remote bsp board hosts, and others. Each is a boardd module. |
+| DUT | The development boards, each with a reset line, a download port and a serial console, sitting in a slot. |
+
 ## Features
 
 - Board locks with a first-come queue, shared by people and agents.
