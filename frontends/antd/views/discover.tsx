@@ -52,10 +52,10 @@ function LabCard({ lab, state }: { lab: LabSettings, state: PageState }) {
           )}
           <Col xs={24} lg={8}>
             <Card size="small" type="inner" title={<Space><UserOutlined />人工复位的板子</Space>} style={{ height: '100%' }}>
-              <Typography.Paragraph type="secondary" style={{ minHeight: 66 }}>没接复位线的板子：开始后按提示一次让一块进下载模式，实验室把串口和下载口配成一对。</Typography.Paragraph>
+              <Typography.Paragraph type="secondary" style={{ minHeight: 66 }}>没接复位线的板子：开始后按提示一次让一块进下载模式，实验室把串口和下载口配成一对。不会复位别的板子，有人在用板子时也能用。</Typography.Paragraph>
               <Space.Compact block>
                 <Select value={host} onChange={setHost} options={lab.hosts.map(item => ({ value: item, label: item }))} style={{ flex: 1 }} placeholder="主机" />
-                <Button disabled={running || !host || held.length > 0}
+                <Button disabled={running || !host}
                   onClick={() => modal.confirm({ title: `在 ${host} 上人工发现板子`, content: '按页面上的提示，一次只让一块还没登记的板子进下载模式（按 RESET，需要时同时按住 BOOT）。', okText: '开始', onOk: () => fire(api.discoverLab(lab.id, { human: true, host })) })}>开始</Button>
               </Space.Compact>
             </Card>

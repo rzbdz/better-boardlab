@@ -31,7 +31,7 @@ function LabCard({ lab, state }: { lab: LabSettings, state: PageState }) {
   const modes = [
     { key: 'discover' as const, icon: <Search />, title: '发现新板子', body: '逐个拉还没用过的复位线，看哪个串口有反应、哪个下载口出现。会复位接在这些线上的板子。', host: false, blocked: held.length > 0 },
     ...(lab.canRebuild ? [{ key: 'rebuild' as const, icon: <RotateCw />, title: '重新布线以后：重建主机', body: '忘掉这台主机发现过的板子和槽位，按现在的接线重新发现。以前用过的复位线先试，找到的板子沿用原名。', host: true, blocked: heldOnHost.length > 0 }] : []),
-    { key: 'human' as const, icon: <UserRound />, title: '人工复位的板子', body: '没接复位线的板子：开始后按提示一次让一块进下载模式，实验室把串口和下载口配成一对。', host: true, blocked: held.length > 0 },
+    { key: 'human' as const, icon: <UserRound />, title: '人工复位的板子', body: '没接复位线的板子：开始后按提示一次让一块进下载模式，实验室把串口和下载口配成一对。不会复位别的板子，有人在用板子时也能用。', host: true, blocked: false },
   ]
   return (
     <Card>

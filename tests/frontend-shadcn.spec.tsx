@@ -73,5 +73,12 @@ describe('shadcn frontend', () => {
     expect(await button('重建')).toBeTruthy()
     expect(screen.getByText(/槽位 2 上的新板子/)).toBeTruthy()
     expect(await screen.findByText('扫描本机槽位', {}, wait)).toBeTruthy()
+    // Boards are locked in this lab, which holds back discovering by reset lines; a person pairing a board by hand
+    // resets nothing, so that stays open.
+    const card = screen.getByText('人工复位的板子').closest('div.rounded-md') as HTMLElement
+    expect((await button('开始', card) as HTMLButtonElement).disabled).toBe(false)
+    // Discovering by reset lines stays held back while boards are locked.
+    const pulse = screen.getByText('发现新板子').closest('div.rounded-md') as HTMLElement
+    expect((await button('开始', pulse) as HTMLButtonElement).disabled).toBe(true)
   })
 })

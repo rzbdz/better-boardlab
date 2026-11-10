@@ -82,5 +82,9 @@ describe('Ant Design frontend', () => {
     expect(await button('重建')).toBeTruthy()
     expect(screen.getByText(/槽位 2 上的新板子/)).toBeTruthy()
     expect(await screen.findByText('扫描本机槽位', {}, wait)).toBeTruthy()
+    // Boards are locked in this lab, which holds back discovering by reset lines; a person pairing a board by hand
+    // resets nothing, so that stays open.
+    const start = await button('开始')
+    expect((start as HTMLButtonElement).disabled).toBe(false)
   })
 })
