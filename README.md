@@ -52,12 +52,23 @@ flowchart LR
 ## Features
 
 - Board locks with a first-come queue, shared by people and agents.
+- Resets, download mode and power through relays, wired once per slot (see [Reset and power control](#reset-and-power-control)).
 - The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
 - A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
+
+## Reset and power control
+
+Every slot names how its board is reset and put into download mode, and boardlab drives it with no one at the bench:
+
+- **GPIO relay boards** on bsp board hosts, switching each board's reset and boot buttons. bsp's control backends are pluggable, so other controllers can be added.
+- **Home Assistant** switches and smart plugs.
+- **Your own scripts**, for any relay, PDU or USB-controlled hub you can drive from a command.
+
+A board on a bench with no reset line wired yet, for a quick debugging session, still works: boardlab asks a person to press RESET, shows where the board is, and carries on once they confirm.
 
 ## Quick start
 
