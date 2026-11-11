@@ -4,8 +4,9 @@
  * every few hours (or when asked to), and an update runs the installer, which swaps the program in once no board is
  * locked and restarts boardd. The page reloads itself when it sees a new version.
  */
-import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
@@ -20,6 +21,16 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
   // releases/<v>/ in an installed boardlab: its prefix holds release-source and install.sh.
   const prefix = root && existsSync(join(dirname(dirname(root)), 'release-source')) ? dirname(dirname(root)) : null
   const get = options.fetch ?? (async (url: string) => {
+    // A git source (`git@host:group/repo.git#release`): its release branch, fetched shallow.
+    const git = /^(git\+)?(git@|ssh:\/\/|.*\.git(#|\/release\.json$))/.test(url)
+    if (git) {
+      const repo = url.replace(/\/release\.json$/, '').replace(/^git\+/, '').split('#')[0]!, branch = url.replace(/\/release\.json$/, '').split('#')[1] ?? 'release'
+      const dir = mkdtempSync(join(tmpdir(), 'boardlab-release-'))
+      try {
+        await new Promise<void>((resolve, reject) => execFile('git', ['clone', '-q', '--depth', '1', '-b', branch, '--filter=blob:none', '--no-checkout', repo, dir], { timeout: 60_000 }, error => error ? reject(new Error(`${repo}：${error.message}`)) : resolve()))
+        return await new Promise<string>((resolve, reject) => execFile('git', ['-C', dir, 'show', `HEAD:release.json`], { timeout: 30_000 }, (error, stdout) => error ? reject(error) : resolve(stdout)))
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    }
     const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
     if (!response.ok) throw new Error(`${url}：${response.status}`)
     return response.text()
@@ -37,7 +48,7 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
         if (!source) return state()
         if (!force && checkedAt && lab.kernel.now() - Date.parse(checkedAt) < ttl) return state()
         try {
-          const release = JSON.parse(await get(`${source.replace(/\/$/, '')}/release.json`)) as { version: string, revision: string }
+          const release = JSON.parse(await get(/^(git\+)?(git@|ssh:\/\/)|\.git(#|$)/.test(source) ? source : `${source.replace(/\/$/, '')}/release.json`)) as { version: string, revision: string }
           latest = { version: release.version, revision: release.revision }; error = null
         } catch (failure) { error = (failure as Error).message }
         checkedAt = lab.kernel.iso()

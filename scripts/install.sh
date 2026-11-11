@@ -2,15 +2,19 @@
 # Install or update boardlab on this machine, in one step:
 #
 #   curl -fsSL <release>/install.sh | sh                       # the release this script came with
-#   curl -fsSL <release>/install.sh | sh -s -- --from <url|file>  # a given release tarball (or its directory)
+#   curl -fsSL <release>/install.sh | sh -s -- --from <source>   # another release
 #   sh install.sh --uninstall [--purge]
+#
+# A source is a release directory (URL or path, holding release.json and the tarball), a tarball, or a git repository
+# with the release on a branch (`git@host:group/repo.git#release`, for a server only reachable over ssh).
 #
 # As root it sets boardlab up as a service: the program in /opt/boardlab (releases/<version>, `current` links the one in
 # use), state in /var/lib/boardlab, the `boardd` systemd unit, and `boardlab` on PATH. As another user it installs only
 # the CLI under ~/.local. Updating swaps `current` and restarts boardd once no board is locked; the state, boardd.json
 # and the page's settings are kept. Node >= 24 comes from PATH, /opt/node, or is fetched.
 set -eu
-BASE=${BOARDLAB_RELEASE:-}
+BASE=${BOARDLAB_RELEASE:-@RELEASE_SOURCE@}
+case $BASE in @*) BASE="" ;; esac
 FROM="" UNINSTALL="" PURGE="" PORT=38127 HOSTS="" ORIGIN="" FORCE=""
 while [ $# -gt 0 ]; do
   case $1 in
@@ -53,6 +57,13 @@ fetch() { case $1 in http://*|https://*) curl -fsSL "$1" -o "$2" ;; *) cp "$1" "
 SRC=${FROM:-$BASE}
 [ -n "$SRC" ] || die "say where the release is: --from <url|file>, or BOARDLAB_RELEASE=<url>"
 case $SRC in
+  *.git|*.git\#*|git@*|ssh://*|git+*)
+     REPO=${SRC%%#*}; REPO=${REPO#git+}; BRANCH=release; case $SRC in *\#*) BRANCH=${SRC#*#} ;; esac
+     command -v git >/dev/null || die "git is needed to fetch $REPO"
+     git clone -q --depth 1 -b "$BRANCH" "$REPO" "$TMP/git" || die "could not fetch branch $BRANCH of $REPO"
+     FILE=$(sed -n 's/.*"file": *"\([^"]*\)".*/\1/p' "$TMP/git/release.json"); SUM=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$TMP/git/release.json")
+     cp "$TMP/git/$FILE" "$TMP/boardlab.tar.gz"
+     [ "$(sha256sum "$TMP/boardlab.tar.gz" | cut -d' ' -f1)" = "$SUM" ] || die "the tarball's sha256 does not match release.json" ;;
   *.tar.gz) fetch "$SRC" "$TMP/boardlab.tar.gz" ;;
   *) SRC=${SRC%/}; fetch "$SRC/release.json" "$TMP/release.json"
      FILE=$(sed -n 's/.*"file": *"\([^"]*\)".*/\1/p' "$TMP/release.json"); SUM=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$TMP/release.json")
@@ -68,7 +79,7 @@ mkdir -p "$PREFIX/releases" "$STATE" "$BIN"
 rm -rf "$PREFIX/releases/$VERSION-$REV"; mv "$DIR" "$PREFIX/releases/$VERSION-$REV"
 # Where updates come from: the release this came from (boardd checks it, `boardlab update` installs from it).
 case $SRC in *.tar.gz) ;; *) printf '%s\n' "$SRC" > "$PREFIX/release-source" ;; esac
-cp "$0" "$PREFIX/install.sh" 2>/dev/null || curl -fsSL "${SRC%/}/install.sh" -o "$PREFIX/install.sh" 2>/dev/null || true
+cp "$DIR/install.sh" "$PREFIX/install.sh" 2>/dev/null || cp "$PREFIX/releases/$VERSION-$REV/install.sh" "$PREFIX/install.sh" 2>/dev/null || true
 # On a service install, `boardlab` on this machine talks to the service's boardd (its state directory's socket).
 printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOARDS_STATE_DIR"} "exec $NODE $FLAGS \"$PREFIX/current/dist/cli.js\" \"\$@\"" > "$BIN/boardlab"; chmod 755 "$BIN/boardlab"; ln -sf boardlab "$BIN/boards"
 

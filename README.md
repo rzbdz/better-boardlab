@@ -70,19 +70,31 @@ Every slot names how its board is reset and put into download mode, and boardlab
 
 A board on a bench with no reset line wired yet, for a quick debugging session, still works: boardlab asks a person to press RESET, shows where the board is, and carries on once they confirm.
 
-## Quick start
+## Install
 
-Requires Node.js 24 or newer and pnpm.
+On the machine that will run boardlab (as root, to set it up as a service):
 
 ```sh
-git clone --recurse-submodules https://github.com/rzbdz/better-boardlab.git
-cd better-boardlab
-pnpm install
-pnpm run build
-node dist/cli.js serve             # http://127.0.0.1:38127/
+curl -fsSL https://github.com/rzbdz/better-boardlab/releases/latest/download/install.sh | sh
 ```
 
-Open the page, configure slots under **Settings**, then run a scan. From the command line:
+It installs boardlab in `/opt/boardlab` (Node 24 is fetched if the machine has none), keeps its state in
+`/var/lib/boardlab`, starts the `boardd` service, and prints its address. Add `-s -- --host <address>` to open the page on
+the network, or put it behind your reverse proxy (`--origin https://proxy/`). Run as another user, it installs only the
+CLI under `~/.local`.
+
+Everything else is done on the page:
+
+- **Board hosts.** Settings → bsp 板卡主机 → 添加板卡主机: give the machine's address (an IP, a DNS name, or a name from
+  this machine's ssh config) and a password, or nothing when this machine's ssh keys already get in. boardlab logs in,
+  puts its own key there, installs bspd (it works out the machine's GPIO header itself), and adds the host as a lab.
+  Then 发现 finds the boards on it.
+- **Updates.** Settings → 版本 → 检查更新 / 升级, or `boardlab update`. boardd checks for a newer release every few hours,
+  installs it once no board is locked, and restarts; locks, queues and settings are kept, and the page reloads itself.
+- **Terminals.** Turn on `{ "terminal": { "enabled": true } }` in `/var/lib/boardlab/boardd.json` for a 终端 tab: shells on
+  the boardlab machine in tmux sessions that outlive the page.
+
+From the command line:
 
 ```sh
 boardlab list
@@ -92,7 +104,22 @@ boardlab console board1
 boardlab unlock board1
 ```
 
-To install the skill for an agent, run `boardlab install` in the agent's working directory, or `boardlab install -g` for every agent on the machine.
+On other machines (build servers, laptops), install the CLI the same way as a normal user and point it at boardlab:
+`boardlab remote set ssh://<user>@<boardlab host>`. To install the skill for an agent, run `boardlab install` in the
+agent's working directory, or `boardlab install -g` for every agent on the machine.
+
+### From source
+
+Requires Node.js 24 or newer and pnpm.
+
+```sh
+git clone --recurse-submodules https://github.com/rzbdz/better-boardlab.git
+cd better-boardlab
+pnpm install
+pnpm run build
+node dist/cli.js serve             # http://127.0.0.1:38127/
+node scripts/release.mjs           # or make a release: release/install.sh, the tarball and release.json
+```
 
 ## Configuration
 
