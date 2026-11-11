@@ -164,7 +164,8 @@
       "serial-mux": [],
       "boardlab": [],
       "terminal": [],
-      "hosts": []
+      "hosts": [],
+      "system": []
     }
   },
   "maxLines": 800

@@ -58,9 +58,16 @@ function Shell() {
   const seen = useRef(new Set<string>())
   useEffect(() => onPrefs(p => setWatched(p.watched)), [])
 
+  const version = useRef<string | null>(null)
   const refresh = useCallback(async () => {
     try {
       const next = await api.state()
+      // boardd came back on another version (an update): load the page that goes with it.
+      void fetch('api/system/version').then(r => r.ok ? r.json() : null).then((v: { revision?: string } | null) => {
+        if (!v?.revision) return
+        if (version.current && version.current !== v.revision) location.reload()
+        version.current = v.revision
+      }).catch(() => {})
       setBoards(next.boards); setActionState(next.boards, next.you, next.labs.filter(l => l.canRediscover).map(l => l.id))
       if (last.current) {
         const told = changes(last.current.boards, next.boards, next.you, prefs.get().watched)

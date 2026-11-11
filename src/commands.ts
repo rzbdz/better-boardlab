@@ -4,5 +4,6 @@ import { commands as local } from './modules/local/cli.ts'
 import { commands as homeAssistant } from './modules/home-assistant/cli.ts'
 import { commands as scriptSlots } from './modules/script-slots/cli.ts'
 import { commands as bsp } from './modules/bsp/cli.ts'
+import { commands as system } from './modules/system/cli.ts'
 
-export const COMMAND_GROUPS: CommandGroup[] = [local, homeAssistant, scriptSlots, bsp]
+export const COMMAND_GROUPS: CommandGroup[] = [local, homeAssistant, scriptSlots, bsp, system]
