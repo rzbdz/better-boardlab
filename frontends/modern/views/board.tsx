@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
-import { SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
+import { reconnectConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
@@ -36,7 +36,8 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
           <button className={`tab${tab === 'log' ? ' on' : ''}`} onClick={() => setTab('log')}>日志</button>
           {full && <span className="cname">{upper(board.name)}</span>}
           <span className="gap" />
-          <span className="st"><span className={`dot ${m.flags.gone || m.flags.offline ? 'bad' : status === 'live' ? 'live' : status === 'retry' ? 'warn' : ''}`} />{m.flags.gone ? '串口离线' : STATUS_TEXT[status]}</span>
+          <span className="st"><span className={`dot ${m.flags.gone || m.flags.offline ? 'bad' : status === 'live' ? 'live' : status === 'retry' || status === 'closed' ? 'warn' : ''}`} />{m.flags.gone ? '串口离线' : STATUS_TEXT[status]}</span>
+          {tab === 'tty' && status !== 'live' && <button className="ib" title="现在重连串口" aria-label="重连" onClick={() => reconnectConsole(board.name, chosen)}>重连</button>}
           {dies.length > 1 && <span className="seg2">{dies.map(d => <button key={d} className={d === chosen ? 'on' : ''} onClick={() => setDie(d)}>{d}</button>)}</span>}
           <button className="ib" title={full ? '还原' : '占满'} aria-label={full ? '还原' : '占满'} onClick={() => setFull(!full)}><Icon name={full ? 'shrink' : 'expand'} /></button>
         </div>

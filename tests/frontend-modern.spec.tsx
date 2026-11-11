@@ -8,7 +8,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { calls } from './frontend-setup.ts'
 
-vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已关闭', retry: '重连中' } }))
+vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
 const card = async (board: string) => { await waitFor(() => expect(document.querySelector(`[data-board="${board}"]`)).toBeTruthy(), wait); return document.querySelector(`[data-board="${board}"]`) as HTMLElement }

@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { calls } from './frontend-setup.ts'
 
 // The serial console needs a canvas; its own behaviour is the console's to test, not the page's.
-vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已关闭', retry: '重连中' } }))
+vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
 /** A board's row in the list (its name also heads the workspace beside it). */
