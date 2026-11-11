@@ -144,7 +144,8 @@
   },
   "modules": {
     "libraries": {
-      "serial-mux": "the serial-mux protocol and daemons"
+      "serial-mux": "the serial-mux protocol and daemons",
+      "hosts": "reaching other machines over ssh from boardd, for modules that set them up"
     },
     "dependencies": {
       "local": [
@@ -157,11 +158,13 @@
         "local"
       ],
       "bsp": [
+        "hosts",
         "serial-mux"
       ],
       "serial-mux": [],
       "boardlab": [],
-      "terminal": []
+      "terminal": [],
+      "hosts": []
     }
   },
   "maxLines": 800
