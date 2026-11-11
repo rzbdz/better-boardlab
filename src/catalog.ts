@@ -4,5 +4,6 @@ import { entry as local } from './modules/local/catalog.ts'
 import { entry as homeAssistant } from './modules/home-assistant/catalog.ts'
 import { entry as scriptSlots } from './modules/script-slots/catalog.ts'
 import { entry as bsp } from './modules/bsp/catalog.ts'
+import { entry as boardlab } from './modules/boardlab/catalog.ts'
 
-export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, bsp]
+export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, bsp, boardlab]
