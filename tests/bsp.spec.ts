@@ -42,6 +42,11 @@ describe('bsp lab driver', () => {
     await bspLab({ run: only.run }).inventory!.devices({ ...config, username: 'h1,h2', url: '', password: '' })
     expect(only.calls[0]!.args).toEqual(['--json', '--stateless', '-r', 'h1,h2', 'dut', 'list'])
     expect(only.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
+    // On a board host: this machine's bspd, directly, with no registry.
+    const local = fakeBsp(() => ok([]))
+    await bspLab({ run: local.run }).inventory!.devices({ ...config, url: 'bspd+http://127.0.0.1:8765' })
+    expect(local.calls[0]!.args).toEqual(['--json', '--stateless', '--url', 'http://127.0.0.1:8765', 'dut', 'list'])
+    expect(local.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
     const none = fakeBsp(() => ok([{ host: 'h3', error: 'no route' }]))
     await expect(bspLab({ run: none.run }).inventory!.verify(config)).rejects.toThrow('没有连上任何 bsp 主机：h3（no route）')
   })

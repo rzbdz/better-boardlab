@@ -81,9 +81,15 @@ export function bspLab(options: BspOptions = {}): Backend {
    * `url` names a bsp host registry, `username` the hosts to use (`-r`), `password` the hosts' API token. Commands on a
    * host's own hardware (its relay controller) go to that host alone.
    */
-  const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
+  // `url` is either one bspd reached directly (`bspd+http://127.0.0.1:8765`, this machine's on a board host), or a bsp
+  // registry that lists several hosts (a plain URL, or empty for bsp's own site).
+  const direct = (config: LabConfig) => config.url.startsWith('bspd+')
+  const bspdUrl = (config: LabConfig) => config.url.slice('bspd+'.length)
+  const registryUrl = (config: LabConfig) => config.url
+  const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', bspdUrl(config)]
+    : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
   const env = (config: LabConfig): NodeJS.ProcessEnv => ({
-    ...process.env, ...(config.url ? { BSP_REGISTRY: config.url } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
+    ...process.env, ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
   })
   const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string): Promise<T> => {
     const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr })
@@ -142,11 +148,11 @@ export function bspLab(options: BspOptions = {}): Backend {
 
   return {
     kind: 'bsp 板卡主机',
-    about: 'boardd 用 bsp 命令行（--json）操作 bsp 管理的板子：列表、租约、复位、下载模式、往内存加载文件都是 bsp dut 命令，串口走 bsp dut pipe。有哪些主机由 bsp 自己的配置（site 和主机 registry）决定。拿锁时 boardd 同时持有 bsp 的租约（持有人 boardlab:<你>），每分钟续一次。',
+    about: 'boardd 经 bsp 操作这台主机上的板子：复位线、下载口、串口、刷机和启动都由主机上的 bspd 做，锁和排队以这台 boardd 为准（拿锁时它同时持有 bspd 的租约）。',
     fields: {
-      url: { label: 'bsp 主机 registry', placeholder: '例如 http://registry:8765；留空用 bsp site 的配置', required: false },
-      username: { label: '只用这些 bsp 主机', placeholder: '逗号分隔的主机名；留空用全部', required: false },
-      password: { label: 'bsp API token', placeholder: '主机要求 token 时填', required: false },
+      url: { label: 'bspd 地址', placeholder: '本机的 bspd：bspd+http://127.0.0.1:8765（或 bsp registry 的地址）', required: false },
+      username: { label: '只用这些 bsp 主机', placeholder: '经 registry 时：逗号分隔的主机名；留空用全部', required: false },
+      password: { label: 'bspd token', placeholder: 'bspd 要求 token 时填', required: false },
     },
     defaultJump: () => '',
 
@@ -331,8 +337,8 @@ export function bspLab(options: BspOptions = {}): Backend {
 
     news: {
       watch(config, onNews, ended) {
-        // Hosts tell the registry when their cables change; one stream from it covers every host.
-        const child = start([...global(config), 'watch', '--registry'], env(config))
+        // One bspd: its own events. Several hosts: they tell the registry when their cables change, one stream for all.
+        const child = start([...global(config), 'watch', ...(direct(config) ? [] : ['--registry'])], env(config))
         let buffer = '', stopped = false
         child.stream.setEncoding('utf8')
         child.stream.on('data', (chunk: string) => {
@@ -344,10 +350,13 @@ export function bspLab(options: BspOptions = {}): Backend {
             try { event = JSON.parse(line) } catch { continue }
             const data = event.data ?? {}
             const host = String(data.host ?? '')
-            if (event.topic === 'registry.ports' && host) {
-              const flat = (side: Record<string, string[]> | undefined) => [...(side?.tty ?? []), ...(side?.usb ?? []).map(item => item.split(' ')[0]!)]
-              onNews({ kind: 'ports', host, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews)
-            } else if (event.topic === 'registry.announced' && host) onNews({ kind: 'hosts', host })
+            const flat = (side: Record<string, string[]> | undefined) => [...(side?.tty ?? []), ...(side?.usb ?? []).map(item => item.split(' ')[0]!)]
+            const at = host || String(event.host ?? '')
+            if (event.topic === 'registry.ports' && host) onNews({ kind: 'ports', host, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews)
+            else if (event.topic === 'registry.announced' && host) onNews({ kind: 'hosts', host })
+            else if (event.topic === 'dut.ports' && at) onNews({ kind: 'ports', host: at, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews)
+            // A board registered, removed, renamed, leased elsewhere, or a slot came and went: list the boards again.
+            else if (at && /^dut\.(added|removed|renamed|slots|leased|released|attention|rebuilt)/.test(event.topic ?? '')) onNews({ kind: 'hosts', host: at })
           }
         })
         // The stream is half bsp's stdin, which never ends: its output ending (or the stream failing) is the end.
