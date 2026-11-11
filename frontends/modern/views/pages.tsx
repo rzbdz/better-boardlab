@@ -244,17 +244,42 @@ function LabSettingsPanel({ lab }: { lab: LabSettings }) {
 }
 
 export function SettingsPage({ state, theme, onTheme, onIdentity }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void }) {
+  // One column of sections, and a list of them on the left that follows the scroll.
+  const views = viewsFor(state, 'settings')
+  const sections: Array<{ id: string, title: string, group: string, body: JSX.Element }> = [
+    { id: 'me', title: '我是谁', group: '你', body: <Identity you={state.you} onSaved={onIdentity} /> },
+    { id: 'look', title: '外观', group: '你', body: <Appearance theme={theme} onTheme={onTheme} /> },
+    { id: 'notify', title: '通知', group: '你', body: <section className="panel"><h2><Icon name="bell" />通知</h2><p className="lead">锁拿到了、轮到你了、板子等人操作、锁被抢、关注的板子空了。</p><NotifyPrefs /></section> },
+    ...views.map(view => ({ id: `m-${view.id}`, title: view.title ?? view.id, group: view.id === 'version' ? '系统' : '实验室和模块', body: <ViewPanel view={view} /> })),
+    ...state.labs.filter(lab => !lab.addedAs).map(lab => ({ id: `lab-${lab.id}`, title: `实验室 ${lab.id}`, group: '实验室和模块', body: <LabSettingsPanel lab={lab} /> })),
+    { id: 'firmware', title: '自带固件', group: '系统', body: <section className="panel"><h2><Icon name="dl" />自带固件</h2><p className="lead">boardd 自带的固件，用的时候核对 sha256。</p>
+      {state.firmware.length ? state.firmware.map(f => <div key={`${f.soc}/${f.purpose}`} className="fw"><b>{f.soc.toUpperCase()} · {f.purpose}</b><span className="sub">{f.note ?? '—'}</span><code title={f.sha256}>{f.sha256.slice(0, 12)}…</code></div>) : <p className="sub small">这个 boardlab 没有自带固件。</p>}</section> },
+  ]
+  const order = ['实验室和模块', '你', '系统']
+  const groups = order.map(group => ({ group, items: sections.filter(item => item.group === group) })).filter(item => item.items.length)
+  const [current, setCurrent] = useState(groups[0]?.items[0]?.id ?? 'me')
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return
+    const seen = new IntersectionObserver(entries => {
+      const top = entries.filter(entry => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+      if (top) setCurrent(top.target.id.replace(/^s-/, ''))
+    }, { rootMargin: '-60px 0px -60% 0px' })
+    for (const item of sections) { const el = document.getElementById(`s-${item.id}`); if (el) seen.observe(el) }
+    return () => seen.disconnect()
+  }, [sections.map(item => item.id).join()])
+  const go = (id: string) => { document.getElementById(`s-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setCurrent(id) }
   return (
-    <div className="page">
-      <section className="hero"><h1>设置</h1><p>你是谁、外观、通知，以及这台 boardd 接的实验室和模块。</p></section>
-      <div className="panels">
-        <Identity you={state.you} onSaved={onIdentity} />
-        <Appearance theme={theme} onTheme={onTheme} />
-        <section className="panel"><h2><Icon name="bell" />通知</h2><p className="lead">锁拿到了、轮到你了、板子等人操作、锁被抢、关注的板子空了。</p><NotifyPrefs /></section>
-        {viewsFor(state, 'settings').map(view => <ViewPanel key={view.id} view={view} />)}
-        {state.labs.map(lab => <LabSettingsPanel key={lab.id} lab={lab} />)}
-        <section className="panel"><h2><Icon name="dl" />自带固件</h2><p className="lead">boardd 自带的固件，用的时候核对 sha256。</p>
-          {state.firmware.length ? state.firmware.map(f => <div key={`${f.soc}/${f.purpose}`} className="fw"><b>{f.soc.toUpperCase()} · {f.purpose}</b><span className="sub">{f.note ?? '—'}</span><code title={f.sha256}>{f.sha256.slice(0, 12)}…</code></div>) : <p className="sub small">这个 boardlab 没有自带固件。</p>}</section>
+    <div className="page settings">
+      <section className="hero"><h1>设置</h1><p>实验室和模块、你自己、这台 boardlab。</p></section>
+      <div className="settings-grid">
+        <nav className="settings-nav">{groups.map(({ group, items }) => (
+          <div key={group}><div className="settings-group">{group}</div>
+            {items.map(item => <button key={item.id} className={current === item.id ? 'on' : ''} onClick={() => go(item.id)}>{item.title}</button>)}</div>
+        ))}</nav>
+        <div className="settings-flow">{groups.map(({ group, items }) => (
+          <div key={group} className="settings-section"><h3 className="settings-heading">{group}</h3>
+            {items.map(item => <div key={item.id} id={`s-${item.id}`} className="settings-anchor">{item.body}</div>)}</div>
+        ))}</div>
       </div>
     </div>
   )

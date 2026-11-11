@@ -425,3 +425,17 @@ body.console-full .detail{height:100vh}
 .term-screen .xterm{height:100%}
 .term-screen .xterm-viewport{background:transparent!important}
 @media (max-width:720px){.term-page{grid-template-columns:1fr;grid-template-rows:auto 1fr}.term-list{max-height:30vh;border-right:0;border-bottom:1px solid var(--line)}}
+
+/* settings: the sections on the left, following the scroll; one column on the right */
+.settings-grid{display:grid;grid-template-columns:200px minmax(0,1fr);gap:28px;align-items:start}
+.settings-nav{position:sticky;top:64px;display:grid;gap:14px}
+.settings-group{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--faint);padding:0 10px 4px}
+.settings-nav button{display:block;width:100%;text-align:left;height:30px;padding:0 10px;border-radius:8px;color:var(--sub);font-size:13px}
+.settings-nav button:hover{background:var(--tile)}
+.settings-nav button.on{background:var(--tile);color:var(--fg);font-weight:600}
+.settings-flow{display:grid;gap:26px;max-width:860px}
+.settings-section{display:grid;gap:12px}
+.settings-heading{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--faint)}
+.settings-anchor{scroll-margin-top:64px}
+.settings-anchor .panel{margin:0}
+@media (max-width:900px){.settings-grid{grid-template-columns:1fr}.settings-nav{position:static;display:flex;flex-wrap:wrap;gap:6px}.settings-group{display:none}.settings-nav>div{display:contents}.settings-nav button{width:auto;height:28px}}
