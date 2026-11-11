@@ -32,4 +32,4 @@ const scan: Command = {
   },
 }
 
-export const commands: CommandGroup = { title: '本机', commands: [scan] }
+export const commands: CommandGroup = { id: 'local', summary: '扫描本机的槽位', title: '本机', commands: [scan] }

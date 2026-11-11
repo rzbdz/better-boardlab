@@ -21,4 +21,4 @@ const slot: Command = {
   },
 }
 
-export const commands: CommandGroup = { title: '脚本槽位', commands: [slot] }
+export const commands: CommandGroup = { id: 'slots', summary: '用脚本复位的本机槽位', title: '脚本槽位', commands: [slot] }

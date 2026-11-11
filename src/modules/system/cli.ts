@@ -14,4 +14,4 @@ const update: Command[] = [{
   },
 }]
 
-export const commands: CommandGroup = { title: '系统', commands: update }
+export const commands: CommandGroup = { id: 'system', summary: '检查和安装新版', title: '系统', commands: update }

@@ -97,4 +97,4 @@ const bsp: Command = {
   },
 }
 
-export const commands: CommandGroup = { title: 'bsp：SDK 和构建', commands: [sdk, registry, bsp] }
+export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [sdk, registry, bsp] }

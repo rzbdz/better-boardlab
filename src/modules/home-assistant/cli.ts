@@ -18,4 +18,4 @@ const ha: Command = {
   },
 }
 
-export const commands: CommandGroup = { title: 'Home Assistant', commands: [ha] }
+export const commands: CommandGroup = { id: 'ha', summary: '本机的 Home Assistant 控制器', title: 'Home Assistant', commands: [ha] }
