@@ -94,7 +94,9 @@ if [ -n "$SERVICE" ]; then
     done
   fi
   ln -sfn "releases/$VERSION-$REV" "$PREFIX/current.new" && mv -Tf "$PREFIX/current.new" "$PREFIX/current"
-  [ -f "$STATE/boardd.json" ] || printf '%s\n' '{ "modules": { "bsp": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
+  [ -f "$STATE/boardd.json" ] || printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
+  # Updating from a release that had no system module: add it, so updates show on the page.
+  grep -q '"system"' "$STATE/boardd.json" || sed -i 's/"modules": *{/"modules": { "system": {},/' "$STATE/boardd.json"
   cat > /etc/systemd/system/boardd.service <<EOF
 [Unit]
 Description=boardd: the board lab (boardlab $VERSION)
