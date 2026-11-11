@@ -3,7 +3,7 @@
  * spins its button, and shows boardd's own message when it fails. Hardware-touching actions ask first and say what
  * will happen.
  */
-import { useState, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import { api } from '../../src/ui/api.ts'
 import { PURPOSES } from '../../src/ui/format.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
@@ -29,6 +29,21 @@ function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: b
     </form>
   )
 }
+
+// A file this page is still sending for a board, before boardd starts on it: the board shows how far it got.
+export interface Sending { text: string, pct: number }
+const sending = new Map<string, Sending>(), sendWatchers = new Set<() => void>()
+function setSending(board: string, value: Sending | null) {
+  const now = sending.get(board)
+  if (value ? now?.text === value.text : !now) return
+  if (value) sending.set(board, value); else sending.delete(board)
+  sendWatchers.forEach(watch => watch())
+}
+const watchSending = (watch: () => void) => { sendWatchers.add(watch); return () => { sendWatchers.delete(watch) } }
+export const useSending = (board: string) => useSyncExternalStore(watchSending, () => sending.get(board) ?? null)
+
+/** A flash package: a link the board's backend downloads, or a file this page sends to boardd first. */
+export interface FlashPackage { url?: string, file?: File, flasher?: string }
 
 /** boardd's operations (`Board.busy.kind`) as the buttons that start them. */
 const SERVER: Record<string, string> = { reset: 'reset', fastboot: 'fastboot', boot: 'boot', stage: 'boot', refresh: 'refresh', remove: 'remove', discover: 'discover', rebuild: 'rebuild', lock: 'lock' }
@@ -71,6 +86,17 @@ export function useBoardActions(board: Board) {
     fastboot: () => ask('进下载模式', <>让 <b>{name}</b> 重启进 boot ROM，停在那里等下载文件。</>, '进下载模式', () => void run('fastboot', '进下载模式', () => api.fastboot(board.name))),
     confirm: () => void run('confirm', '确认', () => api.confirm(board.name), `${name} 继续了`),
     boot: (sdk: string, method: 'load' | 'download') => run('boot', method === 'load' ? '内存启动' : '刷机', () => api.bootSdk(board.name, sdk, method)),
+    flashPackage: (pkg: FlashPackage) => run('boot', '刷机', async () => {
+      const file = pkg.file
+      try {
+        const sha256 = file ? await api.sendFile(file, (step, done, total) => {
+          const pct = total ? Math.floor(done * 100 / total) : 100
+          setSending(board.name, { text: `${step === 'hash' ? '校验' : '上传'} ${file.name}：${pct}%`, pct })
+        }) : undefined
+        setSending(board.name, null)
+        return await api.flashPackage(board.name, { ...(file ? { sha256 } : { url: pkg.url }), flasher: pkg.flasher || undefined })
+      } finally { setSending(board.name, null) }
+    }),
     refresh: () => ask(`重新读取 ${name}`, '复位板子，从 EEPROM 读型号；换了板子时用。', '读取', () => void run('refresh', '重新读取', () => api.refresh(board.name, {}))),
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),
     discoverSlot: () => ask(`发现 ${host} / ${slotOf(board).slot}`, '复位这个槽位的复位线，看串口认出插上的板子。只动这一个槽位。', '开始',

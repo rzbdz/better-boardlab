@@ -8,7 +8,7 @@ const waiter = (holder: string): Waiter => ({ id: holder, board: 'b', holder, pu
 function board(name: string, change: Partial<Board> = {}): Board {
   return { name, slot: null, serial: null, product: null, baseMac: null, soc: null, notes: null, source: 'manual', mode: 'normal', chips: [], lease: null, waiters: [], lastSeenAt: null, backend: 'local', slotRef: null, lab: null, ...change } as Board
 }
-const lab = (attention: string | null) => ({ id: 'bsp', device: 'd', online: false, ip: null, heldBy: null, leaseError: null, attention, canConfirm: true, empty: false, slotGone: false, canRefresh: false, mediaBoot: null, sdks: [], progress: null })
+const lab = (attention: string | null) => ({ id: 'bsp', device: 'd', online: false, ip: null, heldBy: null, leaseError: null, attention, canConfirm: true, empty: false, slotGone: false, canRefresh: false, mediaBoot: null, sdks: [], progress: null, canFlashPackage: false })
 
 describe('notifications', () => {
   const me = 'user:alice'

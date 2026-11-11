@@ -9,7 +9,7 @@ import { reconnectConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
-import { canRediscover, useBoardActions } from '../actions.tsx'
+import { canRediscover, useBoardActions, useSending, type FlashPackage } from '../actions.tsx'
 import { age, clock, copyText, hhmm, holder, Icon, model, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import { LogPanel } from './logs.tsx'
@@ -17,6 +17,10 @@ import { LogPanel } from './logs.tsx'
 const LAST_BOOT = 'boardlab.modern.lastBoot'
 const lastBoot = (board: string): { sdk: string, method: 'load' | 'download' } | null => { try { return JSON.parse(localStorage.getItem(LAST_BOOT) ?? '{}')[board] ?? null } catch { return null } }
 const saveBoot = (board: string, value: { sdk: string, method: 'load' | 'download' }) => { try { localStorage.setItem(LAST_BOOT, JSON.stringify({ ...JSON.parse(localStorage.getItem(LAST_BOOT) ?? '{}'), [board]: value })) } catch {} }
+// The flash package link (and flashing tool) last used on each board, offered again next time.
+const LAST_PACKAGE = 'boardlab.modern.lastPackage'
+const lastPackage = (board: string): { url: string, flasher: string } | null => { try { return JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}')[board] ?? null } catch { return null } }
+const savePackage = (board: string, value: { url: string, flasher: string }) => { try { localStorage.setItem(LAST_PACKAGE, JSON.stringify({ ...JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}'), [board]: value })) } catch {} }
 
 export function BoardPage({ state, name, dark, full, setFull, watched }: { state: PageState, name: string, dark: boolean, full: boolean, setFull: (full: boolean) => void, watched: string[] }) {
   const board = state.boards.find(b => b.name === name)
@@ -83,7 +87,8 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   })
   useEffect(() => { if (!menu) return; const off = () => setMenu(false); window.addEventListener('click', off); return () => window.removeEventListener('click', off) }, [menu])
   const watchedOn = watched.includes(board.name), last = lastBoot(board.name)
-  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method) }} />)
+  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method) }}
+    onPackage={pkg => { if (pkg.url) savePackage(board.name, { url: pkg.url, flasher: pkg.flasher ?? '' }); void act.flashPackage(pkg) }} />)
   const relay = () => ui.layer(close => <RelayDialog board={board} close={close} />, 'wide')
   const extra = viewsFor(state, 'board', { board: board.name })
   const lab = state.labs.find(l => l.id === board.lab?.id)
@@ -93,7 +98,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
     ...(lab?.canRelay ? [['relay', 'plug', '继电器', '', relay, true] as [string, string, string, string, () => void, boolean]] : []),
     ['logs', 'dl', '日志', '', openLogs, false],
   ]
-  const sub: Record<string, string> = { reset: '约 3 秒', fastboot: '停在 boot ROM 等文件', boot: last ? `上次：${last.sdk} · ${last.method === 'load' ? '内存' : '刷机'}` : '选 SDK，内存启动或刷机', relay: '电源、复位、BOOT 键', logs: '搜索、下载、wget' }
+  const sub: Record<string, string> = { reset: '约 3 秒', fastboot: '停在 boot ROM 等文件', boot: last ? `上次：${last.sdk} · ${last.method === 'load' ? '内存' : '刷机'}` : board.lab?.canFlashPackage ? '选 SDK 或刷机包' : '选 SDK，内存启动或刷机', relay: '电源、复位、BOOT 键', logs: '搜索、下载、wget' }
 
   return <>
     <div className="side-top"><a className="back" href="#/"><Icon name="back" />板子</a>
@@ -135,7 +140,9 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 }
 
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
+  const sending = useSending(board.name)
   return <>
+    {sending && <div className="flag run"><span className="spin" /><div><b>{sending.text}</b><div className="bar2"><i style={{ width: `${sending.pct}%` }} /></div></div></div>}
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div></div>}
@@ -182,19 +189,41 @@ function Facts({ board }: { board: Board }) {
   return <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <><dt key={`${k}t`}>{k}</dt><dd key={`${k}d`}>{v}</dd></>)}</dl>
 }
 
-function BootDialog({ board, close, onStart }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download') => void }) {
-  const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name)
+function BootDialog({ board, close, onStart, onPackage }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download') => void, onPackage: (pkg: FlashPackage) => void }) {
+  const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name), canPackage = !!board.lab?.canFlashPackage, used = lastPackage(board.name)
   const [sdk, setSdk] = useState(last?.sdk && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? '')
-  const [method, setMethod] = useState<'load' | 'download'>(last?.method ?? 'load')
+  const [method, setMethod] = useState<'load' | 'download' | 'package'>(!sdks.length && canPackage ? 'package' : last?.method ?? 'load')
+  const [from, setFrom] = useState<'url' | 'file'>('url')
+  const [url, setUrl] = useState(used?.url ?? '')
+  const [file, setFile] = useState<File | null>(null)
+  const [flasher, setFlasher] = useState(used?.flasher ?? '')
+  const pkg = method === 'package', link = url.trim()
+  const ready = pkg ? (from === 'url' ? /^https?:\/\/\S+$/i.test(link) : !!file) : !!sdk
+  const start = () => {
+    close()
+    if (!pkg) return onStart(sdk, method as 'load' | 'download')
+    onPackage({ ...(from === 'url' ? { url: link } : { file: file! }), flasher: flasher.trim() || undefined })
+  }
   return <>
-    <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · 用一个 SDK 编好的产物启动板子。开始后可以关掉这个窗口，进度在板子上显示。</p>
-    {sdks.length ? <label className="field">SDK<select className="select" value={sdk} onChange={e => setSdk(e.target.value)}>{sdks.map(s => <option key={s}>{s}</option>)}</select></label>
-      : <div className="mv-note warn">这块板子没有登记可用的 SDK。</div>}
+    <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · {pkg ? '用一个刷机包刷写板子' : '用一个 SDK 编好的产物启动板子'}。开始后可以关掉这个窗口，进度在板子上显示。</p>
+    {!pkg && (sdks.length ? <label className="field">SDK<select className="select" value={sdk} onChange={e => setSdk(e.target.value)}>{sdks.map(s => <option key={s}>{s}</option>)}</select></label>
+      : <div className="mv-note warn">这块板子没有登记可用的 SDK。</div>)}
     <div className="field">方式<div className="opts">
       <button className={`opt${method === 'load' ? ' on' : ''}`} onClick={() => setMethod('load')}><Icon name="rocket" /><div><b>内存启动</b><span>经下载口加载到内存，不动存储；复位就没了。</span></div></button>
       <button className={`opt${method === 'download' ? ' on' : ''}`} onClick={() => setMethod('download')}><Icon name="dl" /><div><b>刷机</b><span>写进 eMMC / SD，要几分钟；之后复位从存储启动。</span></div></button>
+      {canPackage && <button className={`opt${pkg ? ' on' : ''}`} onClick={() => setMethod('package')}><Icon name="link" /><div><b>刷机包</b><span>给一个刷机包的链接或者传一个文件，整个写进板子的存储。</span></div></button>}
     </div></div>
-    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!sdk} onClick={() => { close(); onStart(sdk, method) }}><Icon name="rocket" />开始</button></div>
+    {pkg && <>
+      <div className="field">刷机包<div className="chips">
+        <button className={`chip${from === 'url' ? ' on' : ''}`} onClick={() => setFrom('url')}>链接</button>
+        <button className={`chip${from === 'file' ? ' on' : ''}`} onClick={() => setFrom('file')}>上传文件</button>
+      </div></div>
+      {from === 'url'
+        ? <label className="field">链接<input className="input" type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/package.zip" /><span className="sub small">板子所在的主机自己下载。</span></label>
+        : <label className="field">文件<input className="input" type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /><span className="sub small">{file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB，先传给 boardd` : '从这台电脑选，先传给 boardd'}</span></label>}
+      <label className="field">刷机工具（可选）<input className="input" value={flasher} onChange={e => setFlasher(e.target.value)} placeholder="留空由后端按刷机包选" /></label>
+    </>}
+    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!ready} onClick={start}><Icon name={pkg ? 'dl' : 'rocket'} />开始</button></div>
   </>
 }
 

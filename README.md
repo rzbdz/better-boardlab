@@ -9,6 +9,7 @@ better-boardlab is a distribution of [boardlab-core](https://github.com/rzbdz/bo
   - serial consoles through serial-mux, and fastboot
   - a one-click scan that finds and identifies boards
 - **Remote board hosts** through [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow): boards in other labs, plus building and booting SDKs on build servers.
+- **Flashing a package** onto a board from a link or a file, on the board's page or with `boardlab flash <board> <url|file>`.
 - **A Claude skill** (`skills/boardlab`) that teaches agents the CLI.
 
 ![The boards page](docs/images/boards.png)

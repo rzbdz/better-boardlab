@@ -15,7 +15,7 @@ const lease = (board: string, holder: string, purpose: string) => ({ id: `l-${bo
 const chip = (board: string, online = true) => ({ board, die: 'die0', serialPath: null, baud: 115200, alias: board, downloadUsbPath: '2-1.4', usbId: null, lastSeenAt: now, online, gateError: null })
 const inLab = (device: string, extra: Partial<NonNullable<Board['lab']>> = {}): Board['lab'] => ({
   id: 'bsp', device, online: false, ip: null, heldBy: null, leaseError: null, attention: null, canConfirm: true, empty: false, slotGone: false,
-  canRefresh: true, mediaBoot: { method: 'reset', available: true, why: null }, sdks: ['k1x-2.0', 'upstream-k1'], progress: null, ...extra,
+  canRefresh: true, mediaBoot: { method: 'reset', available: true, why: null }, sdks: ['k1x-2.0', 'upstream-k1'], progress: null, canFlashPackage: true, ...extra,
 })
 const board = (name: string, extra: Partial<Board>): Board => ({
   name, slot: null, serial: null, product: null, baseMac: null, soc: null, notes: null, source: 'lab', mode: 'normal', chips: [chip(name)],
@@ -32,8 +32,8 @@ export function mockState(you = 'user:alice'): State {
       board('bsp-k3-cm1', { product: 'k3_com260', soc: 'k3', slotRef: 'bsp/host-b/s4', lease: lease('bsp-k3-cm1', 'user:bob', '跑启动回归'), waiters: [{ id: 'w1', board: 'bsp-k3-cm1', holder: 'user:carol', purpose: '临时开发任务', queuedAt: now }], lab: inLab('k3-cm1') }),
       board('bsp-k1-pico', { product: 'k1-x_pico', soc: 'k1', slotRef: 'bsp/host-a/s2', lab: inLab('k1-pico', { attention: '请按一下 k1-pico 的 RESET 键，然后点「我已完成」' }) }),
       board('bsp-k3-gone', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s1', chips: [chip('bsp-k3-gone', false)], lab: inLab('k3-gone', { slotGone: true }) }),
-      board('bsp-host-b-s6', { slotRef: 'bsp/host-b/s6', lab: inLab('host-b-s6', { empty: true, canRefresh: false, mediaBoot: null, sdks: [] }) }),
-      board('bsp-host-a-s7', { slotRef: 'bsp/host-a/s7', busy: { kind: 'discover', label: '发现中', by: 'user:bob', since: now, line: 'P13：没有串口反应' }, lab: inLab('host-a-s7', { empty: true, canRefresh: false, mediaBoot: null, sdks: [] }) }),
+      board('bsp-host-b-s6', { slotRef: 'bsp/host-b/s6', lab: inLab('host-b-s6', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
+      board('bsp-host-a-s7', { slotRef: 'bsp/host-a/s7', busy: { kind: 'discover', label: '发现中', by: 'user:bob', since: now, line: 'P13：没有串口反应' }, lab: inLab('host-a-s7', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
       board('bsp-k1-flash', { product: 'k1-x_deb1', soc: 'k1', slotRef: 'bsp/host-a/s3', lease: lease('bsp-k1-flash', you, '刷机'), busy: { kind: 'boot', label: '刷机中', by: you, since: now, line: 'flash rootfs' }, lab: inLab('k1-flash') }),
       board('desk-k1', { product: 'k1-x_deb1', soc: 'k1', slot: 1, backend: 'local', source: 'scan', lab: null }),
     ],
@@ -94,8 +94,13 @@ export async function startMock(uiDir: string, port = 0): Promise<{ url: string,
       res.write(`event: history\ndata: ${JSON.stringify(['U-Boot SPL 2022.10 (Nov 10 2026)', 'DDR: 8 GiB', 'Hit any key to stop autoboot:  0', 'root@k1:~# '])}\n\n`)
       return
     }
+    if (path.startsWith('/api/files/')) {
+      if (req.method === 'PUT') { let size = 0; for await (const chunk of req) size += chunk.length; return json(res, { sha256: path.slice('/api/files/'.length), size, stored: true }) }
+      return json(res, { sha256: path.slice('/api/files/'.length), present: false })
+    }
     if (req.method === 'POST') {
       const input = await body(req)
+      if (path === '/api/flash/package') return json(res, { output: `[   0.0s] ${input.url ? `download ${input.url}` : 'upload package'}\n[  41.0s] flash done` })
       if (path === '/api/lock') { const b = state.boards.find(item => item.name === input.board)!; b.lease = lease(b.name, state.you, input.purpose) as Board['lease']; return json(res, { lease: b.lease, token: 't', gateToken: null, queued: null }) }
       if (path === '/api/unlock') { const b = state.boards.find(item => item.name === input.board)!; b.lease = null; return json(res, { ok: true }) }
       return json(res, { ok: true, message: 'ok' })

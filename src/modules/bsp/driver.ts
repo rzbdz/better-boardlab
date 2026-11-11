@@ -351,6 +351,14 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           ...(sdk.variant ? ['--variant', sdk.variant] : []), ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress)
         return (job.lines ?? []).join('\n')
       },
+      async flash(config, { device, lease: token }, pkg, progress, signal) {
+        // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.
+        const job = await bsp<{ job?: string, lines?: string[], flasher?: string, elapsed_s?: number }>(config, ['dut', 'flash', device,
+          '--package', pkg.url ?? pkg.path!, ...(pkg.sha256 ? ['--sha256', pkg.sha256] : []), ...(pkg.flasher ? ['--flasher', pkg.flasher] : []),
+          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress, undefined, signal)
+        const lines = job.lines ?? []
+        return [...lines, ...(job.flasher ? [`刷机工具：${job.flasher}${job.elapsed_s ? `，用时 ${Math.round(job.elapsed_s)} 秒` : ''}`] : [])].join('\n')
+      },
     },
 
     news: {

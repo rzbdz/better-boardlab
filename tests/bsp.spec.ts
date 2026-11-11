@@ -127,6 +127,24 @@ describe('bsp lab driver', () => {
     expect(probe.calls[2]!.args.slice(2)).toEqual(['dut', 'add', 'h1', '--spec', JSON.stringify({ ...spec, id: 'slot-3' })])
   })
 
+  it('flashes a package from a link or an uploaded file as a bsp job, passing on its progress', async () => {
+    const bsp = fakeBsp(() => ok({ job: 'flash-7', lines: ['[   0.0s] download package', '[  41.0s] flash rootfs 100%'], elapsed_s: 41.4, flasher: 'tool-b', flashed: true }))
+    const progress: string[] = []
+    const signals: Array<AbortSignal | undefined> = []
+    const run: BspRunner = async (args, options) => { signals.push(options.signal); options.onStderr?.('[  12.0s] flash rootfs 40%'); return bsp.run(args, options) }
+    const lab = bspLab({ run })
+    const abort = new AbortController()
+    expect(await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/k3/pkg.zip?sig=1', flasher: null }, line => progress.push(line), abort.signal))
+      .toBe('[   0.0s] download package\n[  41.0s] flash rootfs 100%\n刷机工具：tool-b，用时 41 秒')
+    await lab.builds!.flash!(config, on('k3-a', 'T1'), { path: '/files/abc/pkg.zip', sha256: 'abc', flasher: 'tool-b' }, () => {})
+    expect(bsp.calls.map(call => call.args.slice(2).join(' '))).toEqual([
+      'dut flash k3-a --package https://images.test/k3/pkg.zip?sig=1 --lease T1 --timeout 3600',
+      'dut flash k3-a --package /files/abc/pkg.zip --sha256 abc --flasher tool-b --lease T1 --timeout 3600',
+    ])
+    expect(progress).toEqual(['[  12.0s] flash rootfs 40%'])
+    expect(signals[0]).toBe(abort.signal)
+  })
+
   it('registers boards as bsp finds them, on the slots asked for, and says why a slot found nothing', async () => {
     const seen: string[] = []
     const bsp = fakeBsp(() => ok({ results: { h1: { proposals: [{ spec: { id: 'k3-s4' }, warnings: [], registered: { dut: 'k3-s4' } }], registered: [{ dut: 'k3-s4', slot: 's4' }], reasons: ['no reset line made console(s) s5 speak'] } } }))

@@ -1,6 +1,6 @@
 ---
 name: boardlab
-description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，再复位、fastboot、看串口、发命令；在构建服务器上租 SDK 源码树、编译、改代码（boardlab sdk）；用 SDK 的产物或本机文件内存启动、刷机；用完放锁。要操作开发板、编译并在板子上验证内核或固件、看板子串口输出、找新接上的板子时使用。
+description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，再复位、fastboot、看串口、发命令；在构建服务器上租 SDK 源码树、编译、改代码（boardlab sdk）；用 SDK 的产物或本机文件内存启动、刷机，或用刷机包（链接或文件）刷机；用完放锁。要操作开发板、编译并在板子上验证内核或固件、看板子串口输出、找新接上的板子时使用。
 ---
 
 # 开发板（boardlab）
@@ -70,6 +70,7 @@ boardlab unlock bsp-board-1
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
 - 本机文件（例如自己打的 FIT）照样 `boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`，文件会自动传过去。
+- 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先传给 boardd。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
 
 ## 给 SDK 加启动或刷机方法
 

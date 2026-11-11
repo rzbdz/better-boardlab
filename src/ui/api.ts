@@ -3,6 +3,7 @@
  * never handles lease tokens. Paths are relative, so a page also works behind a reverse proxy under `/boardlab/`.
  */
 import type { Action, BoardChannels, BoardDetail, HaSettings, LabPorts, LabSettings, Lease, LockResult, Scan, SendResult, Slot, State } from 'boardlab-core/shared/types.ts'
+import { sha256File } from './sha256.ts'
 
 /** The state as the page uses it: the parts modules keep are filled in when their module is not loaded. */
 /** Actions and locks, and whatever modules add (`scans`). */
@@ -72,6 +73,38 @@ export async function stream(path: string, body: unknown, sink: { line(text: str
   return result
 }
 
+/** How far sending a file has got: hashing it here, then uploading it (`total` bytes either way). */
+export type SendProgress = (step: 'hash' | 'upload', done: number, total: number) => void
+
+/**
+ * Send a file to boardd under its sha256, unless boardd has it already, for `flashPackage`: returns `sha256:<hex>`. The
+ * upload goes by XMLHttpRequest, the one way a page hears how much of a request body has been sent.
+ */
+export async function sendFile(file: File, onProgress?: SendProgress): Promise<string> {
+  const sha256 = await sha256File(file, done => onProgress?.('hash', done, file.size))
+  const have = await call<{ present: boolean }>('GET', `api/files/${sha256}`)
+  if (!have.present) {
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', `api/files/${sha256}?name=${encodeURIComponent(file.name)}`)
+      const user = identity.get()
+      if (user) xhr.setRequestHeader('X-Boards-User', user)
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+      if (xhr.upload) xhr.upload.onprogress = event => onProgress?.('upload', event.loaded, file.size)
+      xhr.onload = () => {
+        if (xhr.status < 400) return resolve()
+        let message = xhr.responseText
+        try { message = JSON.parse(message).error ?? message } catch {}
+        reject(new ApiError(xhr.status, `传 ${file.name} 失败：${message}`))
+      }
+      xhr.onerror = () => reject(new Error(`传 ${file.name} 时连接断了`))
+      xhr.send(file)
+    })
+  }
+  onProgress?.('upload', file.size, file.size)
+  return `sha256:${sha256}`
+}
+
 export const api = {
   state: () => call<State>('GET', 'api/state').then(page),
   board: (name: string) => call<BoardDetail>('GET', `api/board?name=${encodeURIComponent(name)}`),
@@ -86,6 +119,9 @@ export const api = {
   setChannel: (board: string, channel: string, action: string, ms: number | null) => call<{ message: string }>('POST', 'api/relay', { board, channel, action, ms: ms ?? undefined }),
   confirm: (board: string) => call<{ message: string }>('POST', 'api/confirm', { board }),
   bootSdk: (board: string, sdk: string, method: 'load' | 'download') => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method }),
+  sendFile,
+  /** Flash a package: a `url` the board's backend downloads itself, or a file sent first (`sendFile`'s `sha256`). */
+  flashPackage: (board: string, input: { url?: string, sha256?: string, flasher?: string }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
   fastboot: (board: string) => call('POST', 'api/fastboot', { board }),
   /** Keystrokes for the online console, sent as they are. */
   // People on the page type without the lock (agents use the CLI and need it).

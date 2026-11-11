@@ -2,11 +2,12 @@
 /**
  * The Modern frontend against the mock boardd: the board cards and their states, the board page with the lock and its
  * purpose, log search with download and wget, discovery with rebuild held back by locks, settings with the frontend
- * switch, and the pinned banner for a board waiting for a person.
+ * switch, the pinned banner for a board waiting for a person, and flashing a package from a link or an uploaded file.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { calls } from './frontend-setup.ts'
+import { createHash } from 'node:crypto'
+import { calls, state } from './frontend-setup.ts'
 
 vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
@@ -118,6 +119,41 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(document.querySelectorAll('.ll.hit').length).toBe(1), wait)
     expect(await button('复制wget')).toBeTruthy()
     expect(await button('下载.log')).toBeTruthy()
+  })
+
+  it('flashes a package from a link or an uploaded file, and offers the last link again', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    const open = async () => { fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    await open()
+    fireEvent.click(await button(/^刷机包/, dialog()))
+    expect((await button('开始', dialog())).disabled).toBe(true)
+    fireEvent.change(dialog().querySelector('input[type=url]')!, { target: { value: 'https://images.test/k3/pkg.zip' } })
+    fireEvent.change(screen.getByPlaceholderText('留空由后端按刷机包选'), { target: { value: 'tool-b' } })
+    fireEvent.click(await button('开始', dialog()))
+    await waitFor(() => expect(calls.find(c => c.path === 'api/flash/package')?.body).toEqual({ board: 'bsp-k3-deb1', url: 'https://images.test/k3/pkg.zip', flasher: 'tool-b' }), wait)
+
+    // The link and the tool are offered again; a file is hashed here, sent to boardd, then flashed by its sha256.
+    const data = new TextEncoder().encode('a flash package')
+    const sha256 = createHash('sha256').update(data).digest('hex')
+    state.boards.find(b => b.name === 'bsp-k3-deb1')!.lab!.canFlashPackage = false
+    await open()
+    fireEvent.click(await button(/^刷机包/, dialog()))
+    expect((dialog().querySelector('input[type=url]') as HTMLInputElement).value).toBe('https://images.test/k3/pkg.zip')
+    fireEvent.click(await button('上传文件', dialog()))
+    fireEvent.change(dialog().querySelector('input[type=file]')!, { target: { files: [new File([data], 'pkg.zip')] } })
+    fireEvent.click(await button('开始', dialog()))
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'bsp-k3-deb1', sha256: `sha256:${sha256}`, flasher: 'tool-b' }), wait)
+    expect(calls.filter(c => c.path.startsWith('api/files/')).map(c => `${c.method} ${c.path}`)).toEqual([`GET api/files/${sha256}`, `PUT api/files/${sha256}?name=pkg.zip`])
+
+    // A board whose backend cannot flash packages offers SDKs only.
+    await waitFor(() => expect(document.querySelector('.controls')?.textContent).not.toContain('选 SDK 或刷机包'), wait)
+    await open()
+    expect(within(dialog()).queryAllByRole('button').some(el => /^刷机包/.test(el.textContent ?? ''))).toBe(false)
+    fireEvent.click(await button('取消', dialog()))
+    state.boards.find(b => b.name === 'bsp-k3-deb1')!.lab!.canFlashPackage = true
+    go('#/')
   })
 
   it('makes the console fill the screen and back', async () => {

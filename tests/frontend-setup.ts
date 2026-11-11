@@ -21,13 +21,15 @@ function reply(body: unknown) { return new Response(JSON.stringify(body), { head
 globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input), 'http://localhost/')
   const method = init?.method ?? 'GET'
-  const body = init?.body ? JSON.parse(String(init.body)) : undefined
+  const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
   calls.push({ method, path: url.pathname.replace(/^\//, '') + url.search, body })
   const path = url.pathname
   if (path === '/api/state') return reply(state)
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
   if (path === '/api/frontends') return reply({ default: 'antd', current: 'antd', frontends: [{ name: 'antd', title: 'Ant Design' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
+  if (path.startsWith('/api/files/')) return reply({ sha256: path.slice('/api/files/'.length), present: false })
+  if (path === '/api/flash/package' && method === 'POST') return reply({ output: 'job flash-1 succeeded' })
   if (path === '/api/logs') return reply({ lines: ['[2026-11-10 08:59:58] U-Boot SPL 2022.10', '[2026-11-10 09:00:00] ERROR: mmc0 timeout'], matched: 2, truncated: false, source: 'backend' })
   if (path === '/api/lock' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
@@ -36,6 +38,30 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   }
   return reply({ ok: true })
 }) as typeof fetch
+
+// Files the page sends go by XMLHttpRequest (for upload progress): recorded in `calls` with their name and size.
+class FakeXMLHttpRequest {
+  status = 0
+  responseText = ''
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  readonly upload: { onprogress: ((event: { loaded: number }) => void) | null } = { onprogress: null }
+  private method = ''
+  private url = ''
+  open(method: string, url: string) { this.method = method; this.url = url }
+  setRequestHeader() {}
+  send(body: Blob) {
+    const url = new URL(this.url, 'http://localhost/')
+    calls.push({ method: this.method, path: url.pathname.replace(/^\//, '') + url.search, body: { size: body.size } })
+    setTimeout(() => {
+      this.upload.onprogress?.({ loaded: Math.floor(body.size / 2) })
+      this.status = 200
+      this.responseText = JSON.stringify({ sha256: url.pathname.split('/').pop(), size: body.size, stored: true })
+      this.onload?.()
+    }, 0)
+  }
+}
+globalThis.XMLHttpRequest = FakeXMLHttpRequest as unknown as typeof XMLHttpRequest
 
 class FakeEventSource {
   static readonly CLOSED = 2
