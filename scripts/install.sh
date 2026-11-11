@@ -78,7 +78,8 @@ mkdir -p "$PREFIX/releases" "$STATE" "$BIN"
 rm -rf "$PREFIX/releases/$VERSION-$REV"; mv "$DIR" "$PREFIX/releases/$VERSION-$REV"
 # Where updates come from: the release this came from (boardd checks it, `boardlab update` installs from it).
 case $SRC in *.tar.gz) ;; *) printf '%s\n' "$SRC" > "$PREFIX/release-source" ;; esac
-cp "$DIR/install.sh" "$PREFIX/install.sh" 2>/dev/null || cp "$PREFIX/releases/$VERSION-$REV/install.sh" "$PREFIX/install.sh" 2>/dev/null || true
+# Replaced by a rename, never written over: this very script may be the one running (sh reads it as it goes).
+cp "$PREFIX/releases/$VERSION-$REV/install.sh" "$PREFIX/install.sh.new" 2>/dev/null && mv -f "$PREFIX/install.sh.new" "$PREFIX/install.sh" || true
 # On a service install, `boardlab` on this machine talks to the service's boardd (its state directory's socket).
 printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOARDS_STATE_DIR"} "exec $NODE $FLAGS \"$PREFIX/current/dist/cli.js\" \"\$@\"" > "$BIN/boardlab"; chmod 755 "$BIN/boardlab"; ln -sf boardlab "$BIN/boards"
 
@@ -86,7 +87,7 @@ if [ -n "$SERVICE" ]; then
   # Swap in the new version once no board is locked (a running boardd answers; a stopped one has nothing to wait for).
   if systemctl is-active -q boardd.service 2>/dev/null; then
     for i in $(seq 1 60); do
-      held=$(curl -fsS -m 5 -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null | "$NODE" -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>{try{console.log(JSON.parse(t).boards.filter(x=>x.lease).length)}catch{console.log(0)}})' 2>/dev/null || echo 0)
+      held=$(curl -fsS -m 5 -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null | "$NODE" $FLAGS -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>{try{console.log(JSON.parse(t).boards.filter(x=>x.lease).length)}catch{console.log(0)}})' 2>/dev/null || echo 0)
       [ "$held" = 0 ] && break
       [ "$i" = 1 ] && say "$held board(s) locked: waiting for them to be released (up to 10 minutes; --force to not wait)"
       [ -n "$FORCE" ] && break

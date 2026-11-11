@@ -24,7 +24,10 @@ const version = option('version') ?? JSON.parse(readFileSync(join(root, 'package
 const source = option('source') ?? ''
 const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim()
 const revision = git('rev-parse', '--short', 'HEAD')
-if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/frontends.json'))) throw new Error('build first: pnpm run build')
+// Always from a fresh build of this very tree: a release must never carry an older dist/.
+if (!args.includes('--no-build')) { rmSync(join(root, 'dist'), { recursive: true, force: true }); execFileSync('pnpm', ['run', 'build'], { cwd: root, stdio: 'inherit' }) }
+if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/frontends.json'))) throw new Error('the build made no dist/')
+if (git('status', '--porcelain', '--untracked-files=no', '--', 'src', 'core', 'frontends', 'scripts', 'externals')) throw new Error('uncommitted changes: a release is made from a commit')
 
 const stage = join(out, `boardlab-${version}`)
 rmSync(stage, { recursive: true, force: true })

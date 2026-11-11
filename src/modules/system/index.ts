@@ -5,7 +5,7 @@
  * locked and restarts boardd. The page reloads itself when it sees a new version.
  */
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { BoardError } from 'boardlab-core/core/errors.ts'
@@ -69,7 +69,9 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
             updating = true
             lab.kernel.record(caller.holder, null, 'update', `${version} → ${now.latest?.version ?? '?'}`, true, null)
             // Run apart from boardd (it restarts boardd): a transient unit when systemd is there, else detached.
-            const script = join(prefix, 'install.sh')
+            // A copy of the installer runs, so the update can replace the installed one under it.
+            const script = join(tmpdir(), `boardlab-install-${Date.now()}.sh`)
+            copyFileSync(join(prefix, 'install.sh'), script)
             const args = ['sh', script, '--from', source, ...(body.force === true ? ['--force'] : [])]
             const child = existsSync('/run/systemd/system')
               ? spawn('systemd-run', ['--unit', `boardlab-update-${Date.now()}`, '--collect', ...args], { stdio: 'ignore', detached: true })
