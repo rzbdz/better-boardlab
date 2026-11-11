@@ -35,21 +35,20 @@ if [ -n "$UNINSTALL" ]; then
   say "boardlab removed${PURGE:+ with its state}"; exit 0
 fi
 
-# Node >= 24.
+# Node >= 24. On RISC-V, Node's Sparkplug compiler crashes some cores: off there, from the first run on.
+FLAGS=""; [ "$(uname -m)" = riscv64 ] && FLAGS="--no-sparkplug"
 NODE=""
 for n in "$(command -v node 2>/dev/null || true)" /opt/node/bin/node "$PREFIX/node/bin/node"; do
-  [ -n "$n" ] && [ -x "$n" ] && [ "$("$n" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 24 ] && { NODE=$n; break; }
+  [ -n "$n" ] && [ -x "$n" ] && [ "$("$n" $FLAGS -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 24 ] && { NODE=$n; break; }
 done
 if [ -z "$NODE" ]; then
   case $(uname -m) in x86_64) NA=x64; NB=https://nodejs.org/dist ;; aarch64) NA=arm64; NB=https://nodejs.org/dist ;; riscv64) NA=riscv64; NB=https://unofficial-builds.nodejs.org/download/release ;; *) die "no Node >= 24 here and none to fetch for $(uname -m): install it" ;; esac
-  V=${BOARDLAB_NODE:-v24.13.0}
+  V=${BOARDLAB_NODE:-v24.13.0}; [ "$NA" = riscv64 ] && V=${BOARDLAB_NODE:-v24.11.1}
   say "fetching Node $V for $(uname -m)"
   mkdir -p "$PREFIX/node"
   curl -fsSL "$NB/$V/node-$V-linux-$NA.tar.xz" | tar -xJ -C "$PREFIX/node" --strip-components=1 || die "could not fetch Node $V"
   NODE=$PREFIX/node/bin/node
 fi
-# On RISC-V, Node's Sparkplug compiler crashes some cores: off there.
-FLAGS=""; [ "$(uname -m)" = riscv64 ] && FLAGS="--no-sparkplug"
 
 # The release: a tarball by URL or path, a directory holding release.json, or the release this script came from.
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
