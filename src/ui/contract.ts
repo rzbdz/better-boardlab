@@ -26,6 +26,7 @@ export type Slot =
   | 'scan-result'   // what the latest finding run found, beside the ways to scan
   | 'history'       // a section of the history page
   | 'board'         // extra lines on every board's card, given the board (`views(state, { board })`)
+  | 'page'          // a page of its own, beside boards, discover, history and settings (its `title` names the tab)
 
 /** What the page knows when it asks: the state, and for `board` views the board in question. */
 export interface ViewContext { board?: string }

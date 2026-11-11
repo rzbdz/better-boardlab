@@ -10,7 +10,7 @@ import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, onPrefs, prefs, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
 import { hhmm, holder, Icon, model, setBoards, UIProvider, upper, useUI, where } from './kit.tsx'
-import { registerModuleUis } from './render.tsx'
+import { registerModuleUis, ViewPage, viewsFor } from './render.tsx'
 import { BoardPage } from './views/board.tsx'
 import { HomePage } from './views/home.tsx'
 import { canDiscover, DiscoverPage, HistoryPage, NotifyPrefs, SettingsPage, type Theme } from './views/pages.tsx'
@@ -118,12 +118,15 @@ function Shell() {
   const unread = notes.filter(n => !n.read).length
   const attn = state?.boards.filter(b => b.lab?.attention) ?? []
   for (const b of attn) if (!seen.current.has(b.name)) setTimeout(() => seen.current.add(b.name), 400)
-  const nav: Array<[string, string, number?]> = [['boards', '板子'], ...(state && !canDiscover(state) ? [] : [['discover', '发现', state?.proposals.filter(p => p.status === 'pending').length] as [string, string, number]]), ['history', '历史'], ['settings', '设置']]
+  // Modules' own pages (the terminal, say) get a tab each, before settings.
+  const pages = state ? viewsFor(state, 'page') : []
+  const nav: Array<[string, string, number?]> = [['boards', '板子'], ...(state && !canDiscover(state) ? [] : [['discover', '发现', state?.proposals.filter(p => p.status === 'pending').length] as [string, string, number]]), ['history', '历史'],
+    ...pages.map(view => [`p/${view.id}`, view.title ?? view.id] as [string, string]), ['settings', '设置']]
   const me = state ? holder(state.you) : null
   return <>
-    <header className={`top${page === 'board' ? ' wide' : ''}`}><div className="in">
+    <header className={`top${page === 'board' || page === 'p' ? ' wide' : ''}`}><div className="in">
       <a className="brand" href="#/">Boardlab</a>
-      <nav className="nav">{nav.map(([k, l, c]) => <a key={k} href={`#/${k}`} className={page === k || (k === 'boards' && page === 'board') ? 'on' : ''}>{l}{c ? <span className="cnt">{c}</span> : null}</a>)}</nav>
+      <nav className="nav">{nav.map(([k, l, c]) => <a key={k} href={`#/${k}`} className={page === k || `${page}/${where_.arg}` === k || (k === 'boards' && page === 'board') ? 'on' : ''}>{l}{c ? <span className="cnt">{c}</span> : null}</a>)}</nav>
       <div className="right">
         {!connected && <span className="conn"><Icon name="warn" />与 boardd 断开，重试中…</span>}
         <button className="bell" aria-label="通知" onClick={openNotes}><Icon name="bell" />{unread ? <b>{unread}</b> : null}</button>
@@ -136,6 +139,7 @@ function Shell() {
         : page === 'board' ? <BoardPage state={state} name={where_.arg} dark={dark} full={full} setFull={setFull} watched={watched} />
         : page === 'discover' ? <DiscoverPage state={state} open={name => go(`#/board/${encodeURIComponent(name)}`)} />
         : page === 'history' ? <HistoryPage state={state} refreshKey={refreshKey} initialBoard={where_.query.get('board') ?? ''} />
+        : page === 'p' && pages.some(view => view.id === where_.arg) ? <ViewPage view={pages.find(view => view.id === where_.arg)!} />
         : page === 'settings' ? <SettingsPage state={state} theme={theme} onTheme={setTheme} onIdentity={() => void refresh()} />
         : <HomePage state={state} watched={watched} open={name => go(`#/board/${encodeURIComponent(name)}`)} />}
     </main>

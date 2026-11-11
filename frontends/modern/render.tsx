@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { plain, type Badge, type Element, type Field, type Inline, type ModuleUi, type Operation, type PageState, type Rich, type Values, type View, type ViewContext } from '../../src/ui/contract.ts'
 import { stamp } from '../../src/ui/format.ts'
+import { TerminalPage } from '../../src/ui/terminal.tsx'
 import { Confirm, Icon, useUI } from './kit.tsx'
 
 let registered: ModuleUi[] = []
@@ -163,12 +164,24 @@ function One({ element, ctx, onDone }: { element: Element, ctx: Ctx, onDone?: ()
     case 'group': return element.layout === 'columns'
       ? <div className="mv-cols"><Elements body={element.body} ctx={ctx} onDone={onDone} /></div>
       : <div className="mv-group">{element.title && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>{element.title}{badge(element.status)}</div>}<Elements body={element.body} ctx={ctx} onDone={onDone} /></div>
-    case 'custom': return <Elements body={element.fallback} ctx={ctx} onDone={onDone} />
+    case 'custom': return element.type === 'terminal.page' ? <TerminalWithToasts api={String((element.data as { api?: string }).api ?? 'api/terminals')} /> : <Elements body={element.fallback} ctx={ctx} onDone={onDone} />
   }
 }
 
 export function Elements({ body, ctx, onDone }: { body: Element[], ctx: Ctx, onDone?: () => void }) {
   return <>{body.map((element, index) => <One key={index} element={element} ctx={ctx} onDone={onDone} />)}</>
+}
+
+function TerminalWithToasts({ api }: { api: string }) {
+  const ui = useUI()
+  return <TerminalPage base={api} onError={(title, error) => ui.fail(title, error)} />
+}
+
+/** A module's page (a `page` view): its body, filling the page. */
+export function ViewPage({ view }: { view: View }) {
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }
+  return <div className="module-page"><Elements body={view.body} ctx={ctx} /></div>
 }
 
 /** A module's view as a panel. */

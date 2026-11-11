@@ -160,7 +160,8 @@
         "serial-mux"
       ],
       "serial-mux": [],
-      "boardlab": []
+      "boardlab": [],
+      "terminal": []
     }
   },
   "maxLines": 800

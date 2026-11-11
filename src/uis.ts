@@ -3,5 +3,6 @@ import type { ModuleUi } from './ui/contract.ts'
 import { ui as local } from './modules/local/ui.ts'
 import { ui as homeAssistant } from './modules/home-assistant/ui.ts'
 import { ui as scriptSlots } from './modules/script-slots/ui.ts'
+import { ui as terminal } from './modules/terminal/ui.ts'
 
-export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots]
+export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, terminal]
