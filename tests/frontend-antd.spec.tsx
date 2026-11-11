@@ -32,7 +32,8 @@ beforeAll(async () => {
 
 const goTo = async (page: string) => { location.hash = page; fireEvent.click(await screen.findByRole('menuitem', { name: new RegExp(page === 'boards' ? '板子' : page === 'discover' ? '发现' : page === 'history' ? '历史' : '设置') }, wait)) }
 
-describe('Ant Design frontend', () => {
+// Ant Design renders slowly under jsdom; a loaded machine running the whole suite needs more than the default time.
+describe('Ant Design frontend', { timeout: 30_000 }, () => {
   it('lists every board with who has it, beside the chosen board\'s workspace', async () => {
     expect(await row('bsp-k1-musecard')).toBeTruthy()
     expect(screen.getAllByText('你在使用').length).toBeGreaterThan(0)

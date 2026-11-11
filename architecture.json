@@ -39,7 +39,11 @@
       "may": [
         "core",
         "shared"
-      ]
+      ],
+      "packages": [
+        "yaml"
+      ],
+      "$comment": "yaml: the configuration files of the systems modules manage (a bsp site), read and edited keeping their comments"
     },
     "module-catalog": {
       "paths": [
@@ -160,6 +164,9 @@
       "bsp": [
         "hosts",
         "serial-mux"
+      ],
+      "clients": [
+        "hosts"
       ],
       "serial-mux": [],
       "boardlab": [],

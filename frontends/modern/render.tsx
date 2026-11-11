@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { plain, type Badge, type Element, type Field, type Inline, type ModuleUi, type Operation, type PageState, type Rich, type Values, type View, type ViewContext } from '../../src/ui/contract.ts'
 import { stamp } from '../../src/ui/format.ts'
 import { TerminalPage } from '../../src/ui/terminal.tsx'
-import { Confirm, Icon, useUI } from './kit.tsx'
+import { Confirm, Icon, refreshNow, useUI } from './kit.tsx'
 
 let registered: ModuleUi[] = []
 export function registerModuleUis(uis: ModuleUi[]) { registered = uis }
@@ -42,7 +42,7 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
       const out = op.kind === 'action' ? await op.run(input())
         : (setLines([]), setFraction(null), await op.start(input(), { line: text => setLines(list => [...list.slice(-200), text]), progress: setFraction }, new AbortController().signal))
       ui.toast(out.message || `${op.label}：好了`); onDone?.()
-    } catch (error) { ui.fail(`${op.label}失败`, error) } finally { setBusy(false) }
+    } catch (error) { ui.fail(`${op.label}失败`, error) } finally { await refreshNow().catch(() => {}); setBusy(false) }
   }
   const trigger = () => op.confirm
     ? ui.layer(close => <Confirm title={op.confirm!.title} ok={op.confirm!.action} danger={op.intent === 'danger'} close={close} onOk={() => void go()}>{plain(op.confirm!.body)}</Confirm>)

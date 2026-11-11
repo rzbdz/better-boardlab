@@ -5,6 +5,34 @@ import { prefs } from '../../../src/ui/notify.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
 import { age, clock, Icon, middle, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
 import { canRediscover, useBoardActions } from '../actions.tsx'
+import { viewsFor } from '../render.tsx'
+
+/**
+ * A boardlab with no boards yet: what to set up, in order, each step a link to its place in settings, ticked off as
+ * boardd's state shows it done. Only the steps whose modules are installed show.
+ */
+export function FirstSteps({ state }: { state: PageState }) {
+  const views = new Map(viewsFor(state, 'settings').map(view => [view.id, view]))
+  const hosts = state.labs.length > 0, boards = state.boards.some(b => !b.lab?.empty)
+  const steps: Array<{ id: string, title: string, about: string, href: string, done: boolean, optional?: boolean }> = [
+    ...(views.has('bsp-hosts') ? [{ id: 'hosts', title: '添加板卡主机', about: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。', href: '#/settings/bsp-hosts', done: hosts }] : []),
+    ...(views.has('bsp-site') ? [{ id: 'site', title: 'SDK 与站点', about: 'SDK 在哪、怎么刷，同步到每台板卡主机。', href: '#/settings/bsp-site', done: views.get('bsp-site')?.status?.tone === 'ok' }] : []),
+    { id: 'discover', title: '发现板子', about: '在每台主机上按复位线、看串口，认出接着的板子。', href: '#/discover', done: boards },
+    ...(views.has('cli-machines') ? [{ id: 'cli', title: '命令行机器', about: '编译服务器和笔记本装上 boardlab 命令行，连到这里。', href: '#/settings/cli-machines', done: views.get('cli-machines')?.status?.tone === 'ok', optional: true }] : []),
+  ]
+  const next = steps.find(step => !step.done && !step.optional)
+  return (
+    <section className="panel first-steps"><h2><Icon name="rocket" />开始</h2><p className="lead">还没有板子。按顺序设置好，之后都在这里用。</p>
+      <ol className="steps">{steps.map((step, i) => (
+        <li key={step.id} className={step.done ? 'done' : step === next ? 'next' : ''}>
+          <span className="n">{step.done ? <Icon name="check" /> : i + 1}</span>
+          <div><b>{step.title}{step.optional && <span className="sub">（可选）</span>}</b><span className="sub">{step.about}</span></div>
+          <a className={`pill sm${step === next ? ' dark' : ''}`} href={step.href}>{step.done ? '看看' : '去设置'}</a>
+        </li>
+      ))}</ol>
+    </section>
+  )
+}
 
 type Filter = 'all' | 'free' | 'mine' | 'need'
 type Layout = 'cards' | 'hosts' | 'list'
@@ -38,6 +66,7 @@ export function HomePage({ state, watched, open }: { state: PageState, watched: 
       <section className="hero"><h1>板子</h1>
         <p>{real.length} 块，<b>{n(x => x.lock === 'free' && !x.flags.gone && !x.flags.attn)} 块空闲</b>{n(x => x.mine) ? `，你在用 ${n(x => x.mine)} 块` : ''}
           {n(x => !!x.flags.attn) ? <>，<b className="warn-t">{n(x => !!x.flags.attn)} 块等人操作</b></> : null}{n(x => x.flags.gone) ? `，${n(x => x.flags.gone)} 块串口离线` : ''}</p></section>
+      {!real.length && <FirstSteps state={state} />}
       <div className="bar">
         {layout !== 'hosts' && <div className="seg">{(Object.keys(FILTERS) as Filter[]).map(k => <button key={k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{FILTERS[k][0]}<em>{state.boards.filter(b => m(b).lock !== 'empty' && FILTERS[k][1](m(b), b)).length}</em></button>)}</div>}
         <div className="seg" aria-label="排列">{([['cards', 'grid', '卡片'], ['hosts', 'server', '按主机'], ['list', 'queue', '列表']] as const).map(([k, ic, l]) => <button key={k} className={layout === k ? 'on' : ''} onClick={() => setLayout(k)}><Icon name={ic} />{l}</button>)}</div>
@@ -58,8 +87,8 @@ function Actions({ board, m, watched, open }: { board: Board, m: Model, watched:
   const on = watched.includes(board.name)
   const look = (icon = 'eye', title = '看串口') => <button className="pill icon" title={title} aria-label={title} onClick={() => open(board.name)}><Icon name={icon} /></button>
   const watch = <button className={`pill icon${on ? ' on' : ''}`} title={on ? '不再关注' : '空闲时通知我'} aria-label={on ? '不再关注' : '关注'} onClick={() => { prefs.watch(board.name, !on); ui.toast(on ? `不再关注 ${upper(board.name)}` : `关注了 ${upper(board.name)}`, on ? '' : '它空出来时通知你') }}><Icon name="bell" /></button>
-  const confirm = m.flags.attn && m.canConfirm ? <button className="pill dark" disabled={!!act.busy} onClick={act.confirm}><Icon name="check" />我操作好了</button> : null
-  if (m.lock === 'empty') return <button className="pill" onClick={act.discoverSlot}><Icon name="radar" />发现这块板</button>
+  const confirm = m.flags.attn && m.canConfirm ? <button className="pill dark" disabled={act.has('confirm')} onClick={act.confirm}><Icon name="check" />我操作好了</button> : null
+  if (m.lock === 'empty') return <button className="pill" disabled={!!act.busy} onClick={act.discoverSlot}>{act.busy === 'discover' ? <span className="spin" /> : <Icon name="radar" />}发现这块板</button>
   if (m.lock === 'mine') return <>{confirm ?? <button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' && <span className="spin" />}释放</button>}<span className="sp" />
     {!m.flags.gone && <button className="pill icon" title="复位" aria-label="复位" disabled={!!act.busy} onClick={act.reset}>{act.busy === 'reset' ? <span className="spin" /> : <Icon name="power" />}</button>}{look('term', '串口')}</>
   if (m.flags.gone) return <><button className="pill" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'} {slotOf(board).host}</button><span className="sp" />{look()}</>
@@ -91,7 +120,7 @@ function Card({ board, m, you, watched, open }: { board: Board, m: Model, you: s
       onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(board.name) }} onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(board.name) }}>
       <div className="hd"><div><div className={`nm${name.length > 18 ? ' long' : ''}`} title={name}>{middle(name, 22)}</div><div className="wh">{host} · {slot}{product}</div></div>
         {board.soc && <span className="soc">{board.soc.toUpperCase()}</span>}</div>
-      <div className="mid"><div className="st">{m.word}{m.flags.pct != null && <span className="pct">{m.flags.pct}%</span>}</div><div className="ln">{l1}</div><div className="ln">{l2}</div></div>
+      <div className="mid"><div className="st">{m.flags.busy && <span className="spin" />}{m.word}{m.flags.pct != null && <span className="pct">{m.flags.pct}%</span>}</div><div className="ln">{l1}</div><div className="ln">{l2}</div></div>
       <div className="ft"><Actions board={board} m={m} watched={watched} open={open} /></div>
       {m.flags.pct != null && <div className="meter"><i style={{ width: `${m.flags.pct}%` }} /></div>}
     </article>
@@ -103,7 +132,7 @@ function Row({ board, m, you, watched, open }: { board: Board, m: Model, you: st
   return (
     <div className={`lrow ${m.key}`} tabIndex={0} data-board={board.name} onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(board.name) }} onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(board.name) }}>
       <span className={`dot ${m.tone}`} /><span className="nm" title={upper(board.name)}>{m.lock === 'empty' ? `${host} / ${slot}`.toUpperCase() : upper(board.name)}</span>
-      <span className="mono sub">{host} · {slot}</span><span>{m.word}{m.flags.pct != null ? ` ${m.flags.pct}%` : ''}</span>
+      <span className="mono sub">{host} · {slot}</span><span>{m.flags.busy && <span className="spin" />}{m.word}{m.flags.pct != null ? ` ${m.flags.pct}%` : ''}</span>
       <span>{m.holder ? <Who id={m.holder} you={you} max={18} /> : <span className="faint">—</span>}</span>
       <span className="sub">{m.since ? <Ticking fn={() => age(m.since)} /> : ''}</span><span className="sub">{m.flags.attn ?? m.purpose ?? ''}</span>
       <span className="ft"><Actions board={board} m={m} watched={watched} open={open} /></span>

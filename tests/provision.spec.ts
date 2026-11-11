@@ -91,6 +91,12 @@ describe('setting up a bsp board host', () => {
     } finally { delete process.env.FAKE_SSH_INHERIT }
   })
 
+  it.skipIf(process.getuid?.() !== 0)('installs on this very machine without ssh, and reaches it on its loopback port', async () => {
+    const hosts = new Hosts(join(dir, 'state'))
+    const done = await installHost(hosts, fakeBspTree(), { id: 'here', access: { address: 'localhost', user: 'root' } }, 'a'.repeat(48), () => {})
+    expect(done).toMatchObject({ target: 'local', url: 'bspd+http://127.0.0.1:8765', token: 'a'.repeat(48) })
+  })
+
   it('refuses addresses that would reach the shell', async () => {
     const hosts = new Hosts(join(dir, 'state'))
     await expect(hosts.reach({ address: 'lab-1; rm -rf /', user: 'root' })).rejects.toThrow(/不合法/)

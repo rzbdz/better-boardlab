@@ -48,6 +48,7 @@
     "vitest": "4.1.12"
   },
   "dependencies": {
-    "boardlab-core": "workspace:*"
+    "boardlab-core": "workspace:*",
+    "yaml": "2.9.1"
   }
 }

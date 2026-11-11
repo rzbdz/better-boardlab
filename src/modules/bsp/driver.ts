@@ -20,8 +20,8 @@ const RESET_TIMEOUT_MS = 30 * 60_000
 const BOOT_TIMEOUT_MS = 30 * 60_000
 
 export interface BspResult { code: number | null, stdout: string, stderr: string }
-/** `onStderr` gets the progress lines bsp prints while it works. */
-export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void }) => Promise<BspResult>
+/** `onStderr` gets the progress lines bsp prints while it works; `signal` stops it (the lock it runs under ended). */
+export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }) => Promise<BspResult>
 /** Starts `bsp … dut pipe`; its stdin and stdout are the pipe. */
 export type BspSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
@@ -53,10 +53,23 @@ interface BspDut {
   media_boot?: { method: string | null, available: boolean, why?: string } | null,
 }
 
-export function bspLab(options: BspOptions = {}): Backend {
+/** How a board's bsp record may be changed from boardlab (`bsp dut set`); fields left out stay as they are. */
+export interface BspBoardChange {
+  board?: string, soc?: string, description?: string, usb?: string,
+  resetPin?: string, pulseMs?: number, fdl?: 'strapped' | 'button' | 'unset', fdlPin?: string, sdks?: string[],
+}
+export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
+
+/** The bsp backend, and what only the bsp module asks of it. */
+export interface BspBackend extends Backend {
+  /** Change a board's record in bspd, holding its lease (`token`); says which fields changed. */
+  change(config: LabConfig, device: string, token: string | null, change: BspBoardChange): Promise<string[]>
+}
+
+export function bspLab(options: BspOptions = {}): BspBackend {
   const bin = options.bin ?? process.env.BOARDS_BSP ?? 'bsp'
-  const run: BspRunner = options.run ?? ((args, { env, timeoutMs, onStderr }) => new Promise(resolve => {
-    const child = execFile(bin, args, { env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+  const run: BspRunner = options.run ?? ((args, { env, timeoutMs, onStderr, signal }) => new Promise(resolve => {
+    const child = execFile(bin, args, { env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, signal }, (error, stdout, stderr) => {
       resolve({ code: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr: stderr || (error && !stdout ? error.message : '') })
     })
     if (onStderr) {
@@ -94,8 +107,9 @@ export function bspLab(options: BspOptions = {}): Backend {
     ...process.env, ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
     ...(options.sshKey && bspdUrl(config).startsWith('ssh://') ? { BSP_SSH_OPTIONS: `-i ${options.sshKey} -o IdentitiesOnly=yes` } : {}),
   })
-  const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string): Promise<T> => {
-    const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr })
+  const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal): Promise<T> => {
+    const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr, signal })
+    if (signal?.aborted) throw new Error(`bsp ${args.slice(0, 2).join(' ')} 停下了：${(signal.reason as Error | undefined)?.message ?? '锁已经结束'}`)
     let envelope: { ok: boolean, result?: T, error?: { code?: string, message?: string, hint?: string } } | null = null
     try { envelope = JSON.parse(result.stdout) } catch {}
     if (envelope?.ok) return envelope.result as T
@@ -193,10 +207,10 @@ export function bspLab(options: BspOptions = {}): Backend {
           attention: dut.needs_human?.message ?? null,
         })), ...empty]
       },
-      async refresh(config, target, options, progress) {
+      async refresh(config, target, options, progress, signal) {
         const args = ['dut', 'refresh', target.device, ...lease(target.lease), '--timeout', String(RESET_TIMEOUT_MS / 1000),
           ...(options.name ? ['--name', options.name] : options.rename ? ['--rename'] : [])]
-        const job = await bsp<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress)
+        const job = await bsp<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress, undefined, signal)
         if (job.status && job.status !== 'succeeded') throw new Error(job.error?.message ?? `bsp dut refresh ${job.status}`)
         const r = job.result ?? { dut: target.device }
         return {
@@ -208,9 +222,10 @@ export function bspLab(options: BspOptions = {}): Backend {
     },
 
     relay: {
-      // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `bsp dut confirm`.
-      reset: async (config, { device, lease: token }, notice) => { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice)) },
-      enterDownload: async (config, { device, lease: token }, notice) => { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice)) },
+      // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `bsp dut confirm`, until
+      // the lock it runs under ends.
+      reset: async (config, { device, lease: token }, notice, signal) => { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice), undefined, signal) },
+      enterDownload: async (config, { device, lease: token }, notice, signal) => { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice), undefined, signal) },
       confirm: async (config, { device }, note) => {
         const result = await bsp<{ confirmed: string, waited_s: number }>(config, ['dut', 'confirm', device, ...(note ? [note] : [])])
         return `已确认「${result.confirmed}」（等了 ${result.waited_s} 秒）`
@@ -380,6 +395,14 @@ export function bspLab(options: BspOptions = {}): Backend {
         return result.token
       },
       give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
+    },
+    async change(config, device, token, change) {
+      const flags: Array<[string, string | number | undefined]> = [['--board', change.board], ['--soc', change.soc], ['--description', change.description], ['--usb', change.usb],
+        ['--reset-pin', change.resetPin], ['--pulse-ms', change.pulseMs], ['--fdl', change.fdl], ['--fdl-pin', change.fdlPin], ['--sdks', change.sdks?.join(',')]]
+      const given = flags.filter(([, value]) => value !== undefined && value !== '').flatMap(([flag, value]) => [flag, String(value)])
+      if (!given.length) throw new Error('没有要改的')
+      const done = await bsp<{ changed: string[] }>(config, ['dut', 'set', device, ...lease(token), ...given], 120_000)
+      return done.changed ?? []
     },
   }
 }

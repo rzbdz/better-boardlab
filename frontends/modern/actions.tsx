@@ -7,7 +7,7 @@ import { useState, type ReactNode } from 'react'
 import { api } from '../../src/ui/api.ts'
 import { PURPOSES } from '../../src/ui/format.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { Confirm, Icon, holder, slotOf, upper, useUI, Who } from './kit.tsx'
+import { Confirm, Icon, holder, refreshNow, setAsked, slotOf, upper, useAsked, useUI, Who } from './kit.tsx'
 
 let current: { boards: Board[], you: string, rediscover: Set<string> } = { boards: [], you: '', rediscover: new Set() }
 /** The page tells the actions the latest state (who you are, every board, which labs can rediscover). */
@@ -30,23 +30,34 @@ function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: b
   )
 }
 
+/** boardd's operations (`Board.busy.kind`) as the buttons that start them. */
+const SERVER: Record<string, string> = { reset: 'reset', fastboot: 'fastboot', boot: 'boot', stage: 'boot', refresh: 'refresh', remove: 'remove', discover: 'discover', rebuild: 'rebuild', lock: 'lock' }
+
 export function useBoardActions(board: Board) {
   const ui = useUI()
-  const [busy, setBusy] = useState<string | null>(null)
+  // Busy while this page waits on boardd, or while boardd runs something on the board for anyone: every button that
+  // would start another operation is off until it ends. Confirming a person's step stays open (a running reset may be
+  // waiting for exactly that), and the operation it confirms stays the one shown.
+  const pending = useAsked(board.name)
+  const has = (key: string) => pending.includes(key)
+  const busy = pending.find(key => key !== 'confirm') ?? pending[0] ?? (board.busy ? SERVER[board.busy.kind] ?? board.busy.kind : null)
   const name = upper(board.name), host = slotOf(board).host, labId = board.lab?.id ?? ''
   const run = async (key: string, label: string, fn: () => Promise<unknown>, done?: string) => {
-    setBusy(key)
+    setAsked(board.name, key, true)
     try { const out = await fn() as { message?: string } | undefined; ui.toast(done ?? `${name} · ${label}好了`, out && typeof out === 'object' && out.message ? out.message : undefined) }
-    catch (error) { ui.fail(`${name} · ${label}失败`, error) } finally { setBusy(null) }
+    catch (error) { ui.fail(`${name} · ${label}失败`, error) }
+    finally { await refreshNow().catch(() => {}); setAsked(board.name, key, false) }
   }
   const ask = (title: string, body: ReactNode, ok: string, go: (reason: string) => void, opts: { danger?: boolean, reason?: string } = {}) =>
     ui.layer(close => <Confirm title={title} ok={ok} danger={opts.danger} reason={opts.reason} close={close} onOk={go}>{body}</Confirm>)
   const mb = board.lab?.mediaBoot
 
   return {
-    busy,
+    busy, has,
     lock: () => ui.layer(close => <PurposeDialog board={board} queue={false} close={close} onDone={async purpose => {
+      setAsked(board.name, 'lock', true)
       try { const out = await api.lock(board.name, purpose); ui.toast(out.queued ? `${name} 刚被人拿走了` : `拿到了 ${name}`, out.queued ? `已经帮你排队，第 ${out.queued.position} 位` : purpose) } catch (e) { ui.fail(`拿不到 ${name} 的锁`, e) }
+      finally { await refreshNow().catch(() => {}); setAsked(board.name, 'lock', false) }
     }} />),
     lockWith: (purpose: string) => run('lock', '拿锁', () => api.lock(board.name, purpose), `拿到了 ${name}`),
     queue: () => ui.layer(close => <PurposeDialog board={board} queue close={close} onDone={async purpose => {

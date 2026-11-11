@@ -5,30 +5,37 @@
 #   curl -fsSL <release>/install.sh | sh -s -- --from <source>   # another release
 #   sh install.sh --uninstall [--purge]
 #
-# A source is a release directory (URL or path, holding release.json and the tarball), a tarball, or a git repository
-# with the release on a branch (`git@host:group/repo.git#release`, for a server only reachable over ssh).
+# A source is a release directory (URL or path, holding release.json and the tarball), a tarball, a git repository
+# with the release on a branch (`git@host:group/repo.git#release`, for a server only reachable over ssh), or a git
+# server's project API with the release on a branch (`https://git.example/api/v4/projects/<id>#release`), where a private
+# project takes a token (--token or BOARDLAB_TOKEN; kept, readable by this user only, for updates):
+#
+#   curl -fsSL -H "PRIVATE-TOKEN: $T" "https://git.example/api/v4/projects/<id>/repository/files/install.sh/raw?ref=release" \
+#     | BOARDLAB_TOKEN=$T sh
 #
 # As root it sets boardlab up as a service: the program in /opt/boardlab (releases/<version>, `current` links the one in
 # use), state in /var/lib/boardlab, the `boardd` systemd unit, and `boardlab` on PATH. As another user it installs only
-# the CLI under ~/.local. Updating swaps `current` and restarts boardd once no board is locked; the state, boardd.json
-# and the page's settings are kept. Node >= 24 comes from PATH, /opt/node, or is fetched.
+# the CLI under ~/.local (so does --cli, as root too). Updating swaps `current` and restarts boardd once no board is locked; the state, boardd.json
+# and the page's settings are kept. Node >= 24 comes from --node (a node binary, a Node tarball, or its URL), PATH,
+# /opt/node, or is fetched from nodejs.org, else from a mirror (BOARDLAB_NODE_MIRROR, npmmirror.com by default).
 set -eu
 BASE=${BOARDLAB_RELEASE:-@RELEASE_SOURCE@}
 case $BASE in @*) BASE="" ;; esac
-FROM="" UNINSTALL="" PURGE="" PORT=38127 HOSTS="" ORIGIN="" FORCE=""
+FROM="" UNINSTALL="" PURGE="" PORT=38127 HOSTS="" ORIGIN="" FORCE="" NODE_GIVEN="" TOKEN=${BOARDLAB_TOKEN:-} CLI_ONLY=""
 while [ $# -gt 0 ]; do
   case $1 in
     --from) FROM=$2; shift 2 ;; --port) PORT=$2; shift 2 ;; --host) HOSTS="$HOSTS --host $2"; shift 2 ;; --origin) ORIGIN="$ORIGIN --origin $2"; shift 2 ;;
-    --uninstall) UNINSTALL=1; shift ;; --purge) PURGE=1; shift ;; --force) FORCE=1; shift ;;
+    --node) NODE_GIVEN=$2; shift 2 ;; --token) TOKEN=$2; shift 2 ;; --cli) CLI_ONLY=1; shift ;; --uninstall) UNINSTALL=1; shift ;; --purge) PURGE=1; shift ;; --force) FORCE=1; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
 say() { printf '==> %s\n' "$*"; }
 die() { printf '!! %s\n' "$*" >&2; exit 1; }
 
-if [ "$(id -u)" = 0 ]; then PREFIX=/opt/boardlab STATE=/var/lib/boardlab BIN=/usr/local/bin SERVICE=1; else PREFIX=$HOME/.local/share/boardlab STATE=$HOME/.local/state/boardlab BIN=$HOME/.local/bin SERVICE=""; fi
+if [ "$(id -u)" = 0 ] && [ -z "$CLI_ONLY" ]; then PREFIX=/opt/boardlab STATE=/var/lib/boardlab BIN=/usr/local/bin SERVICE=1; else PREFIX=$HOME/.local/share/boardlab STATE=$HOME/.local/state/boardlab BIN=$HOME/.local/bin SERVICE=""; fi
 # How boardd was set up the first time (port, extra addresses, the proxy's origin): an update keeps it unless told
 # otherwise.
+OFFERED=""
 if [ -f "$STATE/install.env" ]; then
   GIVEN_PORT=$PORT GIVEN_HOSTS=$HOSTS GIVEN_ORIGIN=$ORIGIN
   . "$STATE/install.env"
@@ -36,6 +43,9 @@ if [ -f "$STATE/install.env" ]; then
   [ -n "$GIVEN_HOSTS" ] && HOSTS=$GIVEN_HOSTS
   [ -n "$GIVEN_ORIGIN" ] && ORIGIN=$GIVEN_ORIGIN
 fi
+
+# The token a private release source takes, kept from the first install.
+[ -z "$TOKEN" ] && [ -r "$PREFIX/release-token" ] && TOKEN=$(cat "$PREFIX/release-token")
 
 if [ -n "$UNINSTALL" ]; then
   [ -n "$SERVICE" ] && { systemctl disable --now boardd.service 2>/dev/null || true; rm -f /etc/systemd/system/boardd.service; systemctl daemon-reload; }
@@ -47,21 +57,56 @@ fi
 # Node >= 24. On RISC-V, Node's Sparkplug compiler crashes some cores: off there, from the first run on.
 FLAGS=""; [ "$(uname -m)" = riscv64 ] && FLAGS="--no-sparkplug"
 NODE=""
-for n in "$(command -v node 2>/dev/null || true)" /opt/node/bin/node "$PREFIX/node/bin/node"; do
-  [ -n "$n" ] && [ -x "$n" ] && [ "$("$n" $FLAGS -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 24 ] && { NODE=$n; break; }
+node_ok() { [ -n "$1" ] && [ -x "$1" ] && [ "$("$1" $FLAGS -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 24 ]; }
+# A Node tarball (path or URL) unpacked as this install's own Node.
+unpack_node() {
+  rm -rf "$PREFIX/node.new"; mkdir -p "$PREFIX/node.new"
+  case $1 in
+    http://*|https://*) curl -fsSL --connect-timeout 15 "$1" ;;
+    *) cat "$1" ;;
+  esac | case $1 in *.tar.gz|*.tgz) tar -xz -C "$PREFIX/node.new" --strip-components=1 ;; *) tar -xJ -C "$PREFIX/node.new" --strip-components=1 ;; esac 2>/dev/null \
+    && node_ok "$PREFIX/node.new/bin/node" && rm -rf "$PREFIX/node" && mv "$PREFIX/node.new" "$PREFIX/node"
+}
+if [ -n "$NODE_GIVEN" ]; then
+  case $NODE_GIVEN in
+    *.tar.xz|*.tar.gz|*.tgz) mkdir -p "$PREFIX"; unpack_node "$NODE_GIVEN" || die "--node $NODE_GIVEN: not a Node >= 24 tarball for this machine" ;;
+    *) node_ok "$NODE_GIVEN" || die "--node $NODE_GIVEN: not a Node >= 24 that runs here"
+       mkdir -p "$PREFIX/node/bin"; [ "$NODE_GIVEN" -ef "$PREFIX/node/bin/node" ] || cp "$NODE_GIVEN" "$PREFIX/node/bin/node.new"; [ -f "$PREFIX/node/bin/node.new" ] && mv -f "$PREFIX/node/bin/node.new" "$PREFIX/node/bin/node" ;;
+  esac
+fi
+for n in "$PREFIX/node/bin/node" "$(command -v node 2>/dev/null || true)" /opt/node/bin/node; do
+  node_ok "$n" && { NODE=$n; break; }
 done
 if [ -z "$NODE" ]; then
-  case $(uname -m) in x86_64) NA=x64; NB=https://nodejs.org/dist ;; aarch64) NA=arm64; NB=https://nodejs.org/dist ;; riscv64) NA=riscv64; NB=https://unofficial-builds.nodejs.org/download/release ;; *) die "no Node >= 24 here and none to fetch for $(uname -m): install it" ;; esac
+  case $(uname -m) in
+    x86_64) NA=x64; NB="https://nodejs.org/dist ${BOARDLAB_NODE_MIRROR:-https://npmmirror.com/mirrors/node}" ;;
+    aarch64) NA=arm64; NB="https://nodejs.org/dist ${BOARDLAB_NODE_MIRROR:-https://npmmirror.com/mirrors/node}" ;;
+    riscv64) NA=riscv64; NB="https://unofficial-builds.nodejs.org/download/release ${BOARDLAB_NODE_MIRROR:-}" ;;
+    *) die "no Node >= 24 here and none to fetch for $(uname -m): install one, or give it with --node <path|tarball>" ;;
+  esac
   V=${BOARDLAB_NODE:-v24.13.0}; [ "$NA" = riscv64 ] && V=${BOARDLAB_NODE:-v24.11.1}
-  say "fetching Node $V for $(uname -m)"
-  mkdir -p "$PREFIX/node"
-  curl -fsSL "$NB/$V/node-$V-linux-$NA.tar.xz" | tar -xJ -C "$PREFIX/node" --strip-components=1 || die "could not fetch Node $V"
-  NODE=$PREFIX/node/bin/node
+  mkdir -p "$PREFIX"
+  for base in $NB; do
+    say "fetching Node $V for $(uname -m) from $base"
+    unpack_node "$base/$V/node-$V-linux-$NA.tar.xz" && { NODE=$PREFIX/node/bin/node; break; }
+  done
+  [ -n "$NODE" ] || die "could not fetch Node $V (no internet here?): copy a Node >= 24 for $(uname -m) and run again with --node <path to node or its tarball>"
 fi
 
 # The release: a tarball by URL or path, a directory holding release.json, or the release this script came from.
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-fetch() { case $1 in http://*|https://*) curl -fsSL "$1" -o "$2" ;; *) cp "$1" "$2" ;; esac; }
+fetch() { case $1 in http://*|https://*) curl -fsSL --connect-timeout 15 "$1" -o "$2" ;; *) cp "$1" "$2" ;; esac; }
+# The token goes only to the project API the source names.
+fetch_api() { if [ -n "$TOKEN" ]; then curl -fsSL --connect-timeout 15 -H "PRIVATE-TOKEN: $TOKEN" "$1" -o "$2"; else curl -fsSL --connect-timeout 15 "$1" -o "$2"; fi; }
+# The release's files: from a directory, or through a project API from the release branch.
+release_file() {
+  case $SRC in
+    */api/v4/projects/*) API=${SRC%%#*}; REF=release; case $SRC in *\#*) REF=${SRC#*#} ;; esac
+       HOW="with the token given"; [ -n "$TOKEN" ] || HOW="without a token (a private project needs --token)"
+       fetch_api "$API/repository/files/$1/raw?ref=$REF" "$2" || die "could not fetch $1 from $API, branch $REF, $HOW" ;;
+    *) fetch "$SRC/$1" "$2" || die "could not fetch $SRC/$1" ;;
+  esac
+}
 SRC=${FROM:-$BASE}
 [ -n "$SRC" ] || die "say where the release is: --from <url|file>, or BOARDLAB_RELEASE=<url>"
 case $SRC in
@@ -73,9 +118,9 @@ case $SRC in
      cp "$TMP/git/$FILE" "$TMP/boardlab.tar.gz"
      [ "$(sha256sum "$TMP/boardlab.tar.gz" | cut -d' ' -f1)" = "$SUM" ] || die "the tarball's sha256 does not match release.json" ;;
   *.tar.gz) fetch "$SRC" "$TMP/boardlab.tar.gz" ;;
-  *) SRC=${SRC%/}; fetch "$SRC/release.json" "$TMP/release.json"
+  *) SRC=${SRC%/}; release_file release.json "$TMP/release.json"
      FILE=$(sed -n 's/.*"file": *"\([^"]*\)".*/\1/p' "$TMP/release.json"); SUM=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$TMP/release.json")
-     fetch "$SRC/$FILE" "$TMP/boardlab.tar.gz"
+     release_file "$FILE" "$TMP/boardlab.tar.gz"
      [ "$(sha256sum "$TMP/boardlab.tar.gz" | cut -d' ' -f1)" = "$SUM" ] || die "the tarball's sha256 does not match release.json" ;;
 esac
 mkdir -p "$TMP/x"; tar -xzf "$TMP/boardlab.tar.gz" -C "$TMP/x"
@@ -87,10 +132,37 @@ mkdir -p "$PREFIX/releases" "$STATE" "$BIN"
 rm -rf "$PREFIX/releases/$VERSION-$REV"; mv "$DIR" "$PREFIX/releases/$VERSION-$REV"
 # Where updates come from: the release this came from (boardd checks it, `boardlab update` installs from it).
 case $SRC in *.tar.gz) ;; *) printf '%s\n' "$SRC" > "$PREFIX/release-source" ;; esac
+if [ -n "$TOKEN" ]; then (umask 077; printf '%s\n' "$TOKEN" > "$PREFIX/release-token"); fi
 # Replaced by a rename, never written over: this very script may be the one running (sh reads it as it goes).
 cp "$PREFIX/releases/$VERSION-$REV/install.sh" "$PREFIX/install.sh.new" 2>/dev/null && mv -f "$PREFIX/install.sh.new" "$PREFIX/install.sh" || true
 # On a service install, `boardlab` on this machine talks to the service's boardd (its state directory's socket).
 printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOARDS_STATE_DIR"} "exec $NODE $FLAGS \"$PREFIX/current/dist/cli.js\" \"\$@\"" > "$BIN/boardlab"; chmod 755 "$BIN/boardlab"; ln -sf boardlab "$BIN/boards"
+
+# boardd's config, made on the first install. Modules a release brings (updates and CLI machines on the page) are added
+# to an existing one once, by the first update that has them: one taken out afterwards stays out. OFFERED (kept in
+# install.env): those offered already.
+OFFER="system clients"
+offer_modules() {
+  if [ ! -f "$STATE/boardd.json" ]; then
+    printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "clients": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
+    OFFERED=$OFFER; return 0
+  fi
+  for m in $OFFER; do
+    case " $OFFERED " in *" $m "*) continue ;; esac
+    if "$NODE" $FLAGS -e '
+      const fs = require("fs"), [file, id] = process.argv.slice(1), config = JSON.parse(fs.readFileSync(file, "utf8"))
+      const isMap = value => value !== null && typeof value === "object" && !Array.isArray(value)
+      if (!isMap(config)) process.exit(1)
+      config.modules ??= {}
+      if (!isMap(config.modules)) process.exit(1)
+      if (!(id in config.modules)) {
+        config.modules[id] = {}
+        fs.writeFileSync(file + ".new", JSON.stringify(config, null, 2) + "\n", { mode: fs.statSync(file).mode & 0o777 })
+        fs.renameSync(file + ".new", file)
+      }' "$STATE/boardd.json" "$m" 2>/dev/null; then OFFERED="${OFFERED:+$OFFERED }$m"
+    else say "could not add the $m module to $STATE/boardd.json (not a JSON object with \"modules\"?): add it there by hand"; fi
+  done
+}
 
 if [ -n "$SERVICE" ]; then
   # Swap in the new version once no board is locked (a running boardd answers; a stopped one has nothing to wait for).
@@ -104,10 +176,8 @@ if [ -n "$SERVICE" ]; then
     done
   fi
   ln -sfn "releases/$VERSION-$REV" "$PREFIX/current.new" && mv -Tf "$PREFIX/current.new" "$PREFIX/current"
-  [ -f "$STATE/boardd.json" ] || printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
-  # Updating from a release that had no system module: add it, so updates show on the page.
-  grep -q '"system"' "$STATE/boardd.json" || sed -i 's/"modules": *{/"modules": { "system": {},/' "$STATE/boardd.json"
-  printf 'PORT=%s\nHOSTS="%s"\nORIGIN="%s"\n' "$PORT" "$HOSTS" "$ORIGIN" > "$STATE/install.env"
+  offer_modules
+  printf 'PORT=%s\nHOSTS="%s"\nORIGIN="%s"\nOFFERED="%s"\n' "$PORT" "$HOSTS" "$ORIGIN" "$OFFERED" > "$STATE/install.env"
   cat > /etc/systemd/system/boardd.service <<EOF
 [Unit]
 Description=boardd: the board lab (boardlab $VERSION)
@@ -128,6 +198,8 @@ EOF
   for i in $(seq 1 30); do curl -fsS -m 2 -o /dev/null -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 1; done
   ls -1dt "$PREFIX"/releases/* | tail -n +4 | xargs -r rm -rf
   say "boardd $VERSION is up: http://127.0.0.1:$PORT/ (on this machine; open it from elsewhere with --host <address> or through a proxy)"
+  command -v python3 >/dev/null || say "WARNING: no python3 here: the bsp module (board hosts, SDKs) runs the bsp CLI with it; install python3"
+  command -v ssh >/dev/null || say "WARNING: no ssh client here: boardd reaches board hosts and CLI machines with it; install openssh-client"
   say "next, on the page: Settings → bsp 板卡主机 → 添加板卡主机"
 else
   ln -sfn "releases/$VERSION-$REV" "$PREFIX/current.new" && mv -Tf "$PREFIX/current.new" "$PREFIX/current"

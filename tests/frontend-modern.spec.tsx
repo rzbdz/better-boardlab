@@ -55,6 +55,57 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board: string }).board === 'bsp-k1-musecard')?.body).toEqual({ board: 'bsp-k1-musecard', purpose: '临时开发任务' }), wait)
   })
 
+  it('shows what boardd is doing to a board, and holds back what would overlap it', async () => {
+    const slot = await card('bsp-host-a-s7')
+    expect(slot.textContent).toContain('发现中')
+    expect(slot.querySelector('.st .spin')).toBeTruthy()
+    expect((await button(/发现这块板/, slot)).disabled).toBe(true)
+    go('#/board/bsp-k1-flash')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K1-FLASH'), wait)
+    expect(document.querySelector('.flag.run')?.textContent).toContain('刷机中：flash rootfs')
+    const reset = (await button(/^复位/, document.querySelector('.controls') as HTMLElement))
+    expect(reset.disabled).toBe(true)
+    go('#/board/bsp-host-a-s7')
+    await waitFor(() => expect(document.querySelector('.tilebox')?.textContent).toContain('P13：没有串口反应'), wait)
+    expect((await button(/发现/, document.querySelector('.tilebox') as HTMLElement)).disabled).toBe(true)
+    go('#/')
+  })
+
+  it('spins the boot control for a boot only, and shows every other operation as the board\'s state', async () => {
+    const { model } = await import('../frontends/modern/kit.tsx')
+    const { mockState } = await import('./mock-boardd.ts')
+    const flash = mockState().boards.find(b => b.name === 'bsp-k1-flash')!
+    const doing = (kind: string, label: string) => model({ ...flash, busy: { ...flash.busy!, kind, label, line: null } }, flash.lease!.holder).flags
+    for (const [kind, label] of [['reset', '复位中'], ['fastboot', '进下载模式中'], ['lock', '拿锁中'], ['refresh', '读取中'], ['configure', '修改中']]) {
+      expect(doing(kind, label)).toMatchObject({ booting: null, progress: `${label}…`, busy: { kind } })
+    }
+    expect(doing('boot', '启动中').booting).toBe('启动中…')
+    expect(doing('stage', '加载固件中').booting).toBe('加载固件中…')
+    // A boot the lab reports (started elsewhere) counts too.
+    expect(model({ ...flash, busy: null, lab: { ...flash.lab!, progress: 'load 40%' } }, flash.lease!.holder).flags).toMatchObject({ booting: 'load 40%', pct: 40 })
+  })
+
+  it('keeps each pending call of a board apart: a confirm sent while a reset waits ends neither early', async () => {
+    const { renderHook, act } = await import('@testing-library/react')
+    const { useBoardActions } = await import('../frontends/modern/actions.tsx')
+    const { setAsked } = await import('../frontends/modern/kit.tsx')
+    const { mockState } = await import('./mock-boardd.ts')
+    const board = { ...mockState().boards.find(b => b.name === 'bsp-k1-flash')!, busy: null }
+    const { result, unmount } = renderHook(() => useBoardActions(board))
+    act(() => { setAsked(board.name, 'reset', true); setAsked(board.name, 'confirm', true) })
+    expect(result.current).toMatchObject({ busy: 'reset' })
+    expect(result.current.has('confirm')).toBe(true)
+    act(() => setAsked(board.name, 'confirm', false))              // the confirm is answered; the reset still waits
+    expect(result.current.busy).toBe('reset')
+    expect(result.current.has('confirm')).toBe(false)
+    act(() => { setAsked(board.name, 'confirm', true); setAsked(board.name, 'reset', false) })
+    expect(result.current.busy).toBe('confirm')
+    expect(result.current.has('reset')).toBe(false)
+    act(() => setAsked(board.name, 'confirm', false))
+    expect(result.current.busy).toBeNull()
+    unmount()
+  })
+
   it('opens a board: controls beside the console, log search with download and wget', async () => {
     go('#/board/bsp-k3-cm1')
     await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
@@ -100,6 +151,25 @@ describe('Modern frontend', () => {
     expect(dialog.textContent).toContain('忘掉串口不见的板子：BSP-K3-GONE')
     fireEvent.click(await button('重新发现', dialog))
     await waitFor(() => expect(calls.find(c => c.path === 'api/labs/rebuild')?.body).toEqual({ id: 'bsp', host: 'host-b', confirmed: true, keepInUse: true }), wait)
+  })
+
+  it('walks a boardlab with no boards through its first steps', async () => {
+    const { render } = await import('@testing-library/react')
+    const { FirstSteps } = await import('../frontends/modern/views/home.tsx')
+    const { mockState } = await import('./mock-boardd.ts')
+    const empty = { ...mockState(), boards: [], labs: [] }
+    const { container, unmount } = render(<FirstSteps state={empty as never} />)
+    const steps = [...container.querySelectorAll('.steps li')].map(li => li.querySelector('b')?.textContent)
+    expect(steps[0]).toBe('添加板卡主机')
+    expect(steps).toContain('发现板子')
+    expect(container.querySelector('li.next a')?.getAttribute('href')).toBe('#/settings/bsp-hosts')
+    unmount()
+  })
+
+  it('opens a settings section by its address', async () => {
+    go('#/settings/bsp-hosts')
+    await waitFor(() => expect(document.querySelector('.settings-nav button.on')?.textContent).toBe('bsp 板卡主机'), wait)
+    go('#/')
   })
 
   it('switches the frontend boardd serves from settings', async () => {

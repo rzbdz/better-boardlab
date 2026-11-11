@@ -42,6 +42,36 @@ export async function call<T>(method: 'GET' | 'POST', path: string, body?: unkno
   return (response.headers.get('content-type') ?? '').includes('json') ? JSON.parse(text) : text as T
 }
 
+/**
+ * POST to an endpoint that answers with events (a long job): its `out` lines go to `sink` as they come, its `exit`
+ * ({ok, message}) is the result, failing with the message when not ok.
+ */
+export async function stream(path: string, body: unknown, sink: { line(text: string): void }, signal?: AbortSignal): Promise<{ ok: boolean, message: string }> {
+  const user = identity.get()
+  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(user ? { 'X-Boards-User': user } : {}) }, body: JSON.stringify(body), signal })
+  if (!response.ok || !response.body) { let message = await response.text(); try { message = JSON.parse(message).error ?? message } catch {} throw new ApiError(response.status, message) }
+  const reader = response.body.getReader(), decoder = new TextDecoder()
+  let buffer = '', result: { ok: boolean, message: string } | null = null
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let at: number
+    while ((at = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, at); buffer = buffer.slice(at + 2)
+      const event = /^event: (.*)$/m.exec(block)?.[1]
+      const data = block.split('\n').filter(line => line.startsWith('data: ')).map(line => line.slice(6)).join('\n')
+      if (!data) continue
+      const parsed = JSON.parse(data)
+      if (event === 'out') sink.line(String(parsed.text ?? ''))
+      else if (event === 'exit') result = parsed
+    }
+  }
+  if (!result) throw new Error('连接断了，没收到结果')
+  if (!result.ok) throw new Error(result.message)
+  return result
+}
+
 export const api = {
   state: () => call<State>('GET', 'api/state').then(page),
   board: (name: string) => call<BoardDetail>('GET', `api/board?name=${encodeURIComponent(name)}`),

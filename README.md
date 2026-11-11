@@ -78,17 +78,25 @@ On the machine that will run boardlab (as root, to set it up as a service):
 curl -fsSL https://github.com/rzbdz/better-boardlab/releases/latest/download/install.sh | sh
 ```
 
-It installs boardlab in `/opt/boardlab` (Node 24 is fetched if the machine has none), keeps its state in
-`/var/lib/boardlab`, starts the `boardd` service, and prints its address. Add `-s -- --host <address>` to open the page on
-the network, or put it behind your reverse proxy (`--origin https://proxy/`). Run as another user, it installs only the
-CLI under `~/.local`.
+It installs boardlab in `/opt/boardlab` (Node 24 is fetched if the machine has none; offline, give one with
+`--node <node or its tarball>`), keeps its state in `/var/lib/boardlab`, starts the `boardd` service, and prints its
+address. Add `-s -- --host <address>` to open the page on the network, or put it behind your reverse proxy
+(`--origin https://proxy/`). Run as another user, or with `--cli`, it installs only the CLI under `~/.local`.
+
+A release can also be served from a git repository's branch (`--from git@host:group/repo.git#release`) or a git
+server's project API (`--from https://git.example/api/v4/projects/<id>#release`, with `--token` for a private project);
+updates come from the same place.
 
 Everything else is done on the page:
 
 - **Board hosts.** Settings → bsp 板卡主机 → 添加板卡主机: give the machine's address (an IP, a DNS name, or a name from
   this machine's ssh config) and a password, or nothing when this machine's ssh keys already get in. boardlab logs in,
   puts its own key there, installs bspd (it works out the machine's GPIO header itself), and adds the host as a lab.
-  Then 发现 finds the boards on it.
+  The host can be this machine itself (`localhost`). Then 发现 finds the boards on it.
+- **SDKs.** Settings → SDK 与站点: where each SDK lives, its build server and how it boots or flashes, kept in one site
+  (managed on the page, or a git repository you pull from and push to) and synced to every board host.
+- **Command-line machines.** Settings → 命令行机器: build servers and laptops get the `boardlab` CLI installed over ssh
+  and pointed at this boardd (boardd brings Node along when the machine has none).
 - **Updates.** Settings → 版本 → 检查更新 / 升级, or `boardlab update`. boardd checks for a newer release every few hours,
   installs it once no board is locked, and restarts; locks, queues and settings are kept, and the page reloads itself.
 - **Terminals.** Turn on `{ "terminal": { "enabled": true } }` in `/var/lib/boardlab/boardd.json` for a 终端 tab: shells on
@@ -118,7 +126,8 @@ cd better-boardlab
 pnpm install
 pnpm run build
 node dist/cli.js serve             # http://127.0.0.1:38127/
-node scripts/release.mjs           # or make a release: release/install.sh, the tarball and release.json
+node scripts/release.mjs --source <where>   # or make a release: release/install.sh, the tarball and release.json
+node scripts/publish.mjs git <repo>         # and publish it (or: publish.mjs github <owner/repo>)
 ```
 
 ## Configuration

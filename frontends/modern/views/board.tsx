@@ -114,8 +114,8 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
     <LockBox state={state} board={board} m={m} act={act} />
     {m.lock !== 'empty' && <>
       <div className="controls">{tiles.map(([key, icon, label, kbd, go, needsLock]) => {
-        const locked = needsLock && !m.mine, spinning = act.busy === key || (key === 'boot' && !!m.flags.progress && m.mine)
-        const off = locked || (needsLock && m.flags.gone) || (!!act.busy && act.busy !== key) || (key === 'boot' && !!m.flags.progress)
+        const locked = needsLock && !m.mine, spinning = act.busy === key || (key === 'boot' && !!m.flags.booting && m.mine)
+        const off = locked || (needsLock && m.flags.gone) || (needsLock && !!act.busy && act.busy !== key) || (key === 'boot' && !!m.flags.booting)
         return (
           <button key={key} className={`ctl${spinning ? ' busy' : ''}`} disabled={off || spinning} onClick={go}>
             <Icon name={icon} /><div><b>{label}{kbd && m.mine && <kbd>{kbd}</kbd>}</b><span>{spinning ? '进行中…' : locked ? '先拿锁' : sub[key]}</span></div>
@@ -123,7 +123,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
           </button>
         )
       })}</div>
-      {m.mine && last && !m.flags.progress && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} onClick={() => void act.boot(last.sdk, last.method)}><Icon name="rebuild" />再来一次：{last.sdk} · {last.method === 'load' ? '内存启动' : '刷机'}</button>}
+      {m.mine && last && !m.flags.booting && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} disabled={!!act.busy} onClick={() => void act.boot(last.sdk, last.method)}><Icon name="rebuild" />再来一次：{last.sdk} · {last.method === 'load' ? '内存启动' : '刷机'}</button>}
     </>}
     {extra.map(view => <div key={view.id} style={{ marginTop: 10 }}><ViewPanel view={view} /></div>)}
     <div className="sect">这块板子</div><Facts board={board} />
@@ -136,7 +136,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
   return <>
-    {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={!!act.busy} onClick={act.confirm}><Icon name="check" />我操作好了</button>}</div>}
+    {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div></div>}
     {m.flags.offline && <div className="flag"><Icon name="plug" /><div><b>串口不在线</b><span>板子可能没上电，或者串口线松了。</span></div></div>}
@@ -159,7 +159,9 @@ function LockBox({ state, board, m, act }: { state: PageState, board: Board, m: 
       {m.lock === 'busy' && <div className="acts">{m.queued ? <button className="pill" onClick={act.unqueue}><Icon name="x" />不排了（第 {m.queued} 位）</button> : <button className="pill dark" onClick={act.queue}><Icon name="queue" />排队</button>}
         <button className="pill ghost" onClick={act.steal}>抢锁…</button></div>}</div>
   )
-  if (m.lock === 'empty') return <div className="tilebox"><div className="lbl">空槽位</div><p>这个槽位现在没有板子。插上板子后，让 boardd 在这个槽位上找一下。</p><div className="acts"><button className="pill dark" onClick={act.discoverSlot}><Icon name="radar" />发现这块板</button></div></div>
+  if (m.lock === 'empty') return <div className="tilebox"><div className="lbl">{m.flags.busy ? <><span className="spin" />{m.flags.busy.label}</> : '空槽位'}</div>
+    <p>{m.flags.busy ? <>{holder(m.flags.busy.by).name} {hhmm(m.flags.busy.since)} 开始{m.flags.busy.line ? <>：<span className="mono">{m.flags.busy.line}</span></> : '，等第一条进展'}</> : '这个槽位现在没有板子。插上板子后，让 boardd 在这个槽位上找一下。'}</p>
+    <div className="acts"><button className="pill dark" disabled={!!act.busy} onClick={act.discoverSlot}>{act.busy === 'discover' ? <span className="spin" /> : <Icon name="radar" />}{act.busy === 'discover' ? '发现中…' : '发现这块板'}</button></div></div>
   return (
     <div className="tilebox"><div className="lbl"><span className="dot ok" />空闲</div><p>拿锁时说一下用来做什么，别人看得到：</p>
       <div className="chips">{PURPOSES.map(p => <button key={p} className={`chip${purpose === p ? ' on' : ''}`} onClick={() => setPurpose(p)}>{p}</button>)}</div>

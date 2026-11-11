@@ -243,7 +243,7 @@ function LabSettingsPanel({ lab }: { lab: LabSettings }) {
   )
 }
 
-export function SettingsPage({ state, theme, onTheme, onIdentity }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void }) {
+export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void, focus?: string }) {
   // One column of sections, and a list of them on the left that follows the scroll.
   const views = viewsFor(state, 'settings')
   const sections: Array<{ id: string, title: string, group: string, body: JSX.Element }> = [
@@ -267,7 +267,14 @@ export function SettingsPage({ state, theme, onTheme, onIdentity }: { state: Pag
     for (const item of sections) { const el = document.getElementById(`s-${item.id}`); if (el) seen.observe(el) }
     return () => seen.disconnect()
   }, [sections.map(item => item.id).join()])
-  const go = (id: string) => { document.getElementById(`s-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setCurrent(id) }
+  const go = (id: string) => { document.getElementById(`s-${id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); setCurrent(id) }
+  // `#/settings/<section>`: a module view by its id (bsp-hosts) or a section's own id (notify).
+  useEffect(() => {
+    if (!focus) return
+    const id = sections.some(item => item.id === `m-${focus}`) ? `m-${focus}` : focus
+    const timer = window.setTimeout(() => go(id), 60)
+    return () => window.clearTimeout(timer)
+  }, [focus])
   return (
     <div className="page settings">
       <section className="hero"><h1>设置</h1><p>实验室和模块、你自己、这台 boardlab。</p></section>

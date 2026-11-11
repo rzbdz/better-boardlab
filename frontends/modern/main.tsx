@@ -9,7 +9,7 @@ import { api, type PageState } from '../../src/ui/api.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, onPrefs, prefs, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
-import { hhmm, holder, Icon, model, setBoards, UIProvider, upper, useUI, where } from './kit.tsx'
+import { hhmm, holder, Icon, model, setBoards, setRefresher, UIProvider, upper, useUI, where } from './kit.tsx'
 import { registerModuleUis, ViewPage, viewsFor } from './render.tsx'
 import { BoardPage } from './views/board.tsx'
 import { HomePage } from './views/home.tsx'
@@ -38,7 +38,7 @@ function Banner({ board, you, fresh }: { board: Board, you: string, fresh: boole
     <div className={`b${fresh ? ' enter' : ''}`}><Icon name="hand" /><span className="t">{where(board)}</span>
       <span className="msg ell"><b>{upper(board.name)}</b> {board.lab?.attention}{m.holder ? ` · ${m.mine ? '你' : holder(m.holder).name}在等` : ''}</span>
       <span className="acts"><button className="pill sm" onClick={() => go(`#/board/${encodeURIComponent(board.name)}`)}>去看看</button>
-        {m.canConfirm && <button className="pill sm dark" disabled={!!act.busy} onClick={act.confirm}>{act.busy === 'confirm' && <span className="spin" />}我操作好了</button>}</span>
+        {m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') && <span className="spin" />}我操作好了</button>}</span>
     </div>
   )
 }
@@ -83,6 +83,7 @@ function Shell() {
     setRefreshKey(k => k + 1)
   }, [])
 
+  useEffect(() => setRefresher(refresh), [refresh])
   useEffect(() => {
     void refresh()
     const source = new EventSource('api/events')
@@ -147,7 +148,7 @@ function Shell() {
         : page === 'discover' ? <DiscoverPage state={state} open={name => go(`#/board/${encodeURIComponent(name)}`)} />
         : page === 'history' ? <HistoryPage state={state} refreshKey={refreshKey} initialBoard={where_.query.get('board') ?? ''} />
         : page === 'p' && pages.some(view => view.id === where_.arg) ? <ViewPage view={pages.find(view => view.id === where_.arg)!} />
-        : page === 'settings' ? <SettingsPage state={state} theme={theme} onTheme={setTheme} onIdentity={() => void refresh()} />
+        : page === 'settings' ? <SettingsPage state={state} theme={theme} onTheme={setTheme} onIdentity={() => void refresh()} focus={where_.arg} />
         : <HomePage state={state} watched={watched} open={name => go(`#/board/${encodeURIComponent(name)}`)} />}
     </main>
   </>

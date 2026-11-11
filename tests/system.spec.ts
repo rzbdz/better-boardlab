@@ -46,6 +46,16 @@ describe('the system module', () => {
     expect(asked).toBe(3)
   })
 
+  it('asks a project API for release.json on its branch, with the kept token', async () => {
+    const asked: Array<[string, Record<string, string> | undefined]> = []
+    const root = installed('0.2.0', 'aaa1111', 'https://git.example.test/api/v4/projects/7#release')
+    writeFileSync(join(dir, 'opt/boardlab/release-token'), 'glpat-x\n')
+    const fetch = async (url: string, headers?: Record<string, string>) => { asked.push([url, headers]); return JSON.stringify({ version: '0.3.0', revision: 'bbb2222' }) }
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [system({ root, fetch })] })
+    expect(await call(lab, 'GET', '/api/system/version?check=1')).toMatchObject({ newer: true, latest: { version: '0.3.0' } })
+    expect(asked).toEqual([['https://git.example.test/api/v4/projects/7/repository/files/release.json/raw?ref=release', { 'PRIVATE-TOKEN': 'glpat-x' }]])
+  })
+
   it('has nothing to check when run from source, and says so when asked to update', async () => {
     const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [system({ root: null })] })
     expect(await call(lab, 'GET', '/api/system/version')).toMatchObject({ version: 'dev', source: null, newer: false })

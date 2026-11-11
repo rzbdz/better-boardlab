@@ -46,6 +46,16 @@ export class Hosts {
     return readFileSync(`${this.keyFile}.pub`, 'utf8').trim()
   }
 
+  /**
+   * For programs that run ssh themselves (git): `ssh` command lines for each way in without a password, in order:
+   * boardd's own key, then this machine's ssh setup. Each is one shell word list, for GIT_SSH_COMMAND.
+   */
+  async sshCommands(): Promise<string[]> {
+    await this.publicKey()
+    const quote = (word: string) => /^[A-Za-z0-9_./=:%@+-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`
+    return (['key', 'inherit'] as const).map(mode => [this.ssh, ...this.options({ address: '' }, mode)].map(quote).join(' '))
+  }
+
   private options(access: Access, mode: 'key' | 'inherit' | 'password', askpass?: string): string[] {
     const common = ['-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=accept-new', '-o', `UserKnownHostsFile=${this.knownHosts} ~/.ssh/known_hosts`,
       '-o', 'ServerAliveInterval=15', ...(access.port ? ['-p', String(access.port)] : []), ...(access.jump ? ['-J', access.jump] : [])]

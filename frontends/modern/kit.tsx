@@ -2,8 +2,8 @@
  * Modern's building blocks: icons, names, a board's state as the page shows it, and the toasts and layers (dialogs,
  * the drawer) every view uses. Plain React with the page's own CSS (styles.css), no component library.
  */
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import type { Board } from 'boardlab-core/shared/types.ts'
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import type { Board, Busy } from 'boardlab-core/shared/types.ts'
 
 // ---------- icons ----------
 const P: Record<string, string> = {
@@ -82,7 +82,7 @@ export type Lock = 'free' | 'mine' | 'busy' | 'lab' | 'empty'
 export interface Model {
   lock: Lock, key: Lock | 'attn' | 'gone', word: string, tone: '' | 'ok' | 'warn' | 'bad' | 'yours', mine: boolean
   holder: string | null, since: string | null, purpose: string | null, queued: number, canConfirm: boolean
-  flags: { attn: string | null, gone: boolean, progress: string | null, pct: number | null, offline: boolean, error: string | null }
+  flags: { attn: string | null, gone: boolean, busy: Busy | null, progress: string | null, booting: string | null, pct: number | null, offline: boolean, error: string | null }
 }
 /**
  * The lock is the main state (free / yours / someone else's / the lab's / an empty slot). Waiting for a person, a lost
@@ -91,13 +91,18 @@ export interface Model {
 export function model(b: Board, you: string): Model {
   const lab = b.lab, l = b.lease, mine = !!l && l.holder === you, q = b.waiters.findIndex(w => w.holder === you)
   const lock: Lock = lab?.empty ? 'empty' : mine ? 'mine' : l ? 'busy' : lab?.heldBy ? 'lab' : 'free'
-  const pct = /(\d+)%/.exec(lab?.progress ?? '')?.[1]
+  // What boardd is doing to the board (its own operation, or a lab's job) is one in-between state with its latest line.
+  const busy = b.busy ?? null
+  const progress = lab?.progress ?? (busy ? `${busy.label}${busy.line ? `：${busy.line}` : '…'}` : null)
+  // Of those, a boot running (boardd's, or one the lab reports): what the boot control spins for.
+  const booting = lab?.progress ?? (busy && (busy.kind === 'boot' || busy.kind === 'stage') ? progress : null)
+  const pct = /(\d+)%/.exec(progress ?? '')?.[1]
   const flags = {
-    attn: lab?.attention ?? null, gone: !!lab?.slotGone, progress: lab?.progress ?? null, pct: pct != null ? Number(pct) : null,
+    attn: lab?.attention ?? null, gone: !!lab?.slotGone, busy, progress, booting, pct: pct != null ? Number(pct) : null,
     offline: !lab?.empty && !lab?.slotGone && b.chips.length > 0 && !b.chips.some(c => c.online), error: lab?.leaseError ?? null,
   }
   const key = lock === 'empty' ? 'empty' : flags.attn ? 'attn' : flags.gone ? 'gone' : lock
-  const word = lock === 'empty' ? '空槽位' : flags.attn ? '等人操作' : flags.gone ? '串口离线' : flags.progress ? (mine ? '运行中' : '忙碌中')
+  const word = flags.attn ? '等人操作' : busy ? busy.label : lock === 'empty' ? '空槽位' : flags.gone ? '串口离线' : flags.progress ? (mine ? '运行中' : '忙碌中')
     : b.mode === 'resetting' ? '复位中' : { mine: '你在用', busy: '使用中', lab: '实验室占用', free: '空闲' }[lock]
   const tone = flags.attn ? 'warn' : flags.gone ? 'bad' : ({ free: 'ok', mine: 'yours', busy: '', lab: '', empty: '' } as const)[lock]
   return { lock, key, word, tone, mine, holder: l?.holder ?? lab?.heldBy ?? null, since: l?.startedAt ?? null, purpose: l?.purpose ?? null, queued: q >= 0 ? q + 1 : 0, canConfirm: !!lab?.canConfirm, flags }
@@ -155,13 +160,33 @@ export function Confirm({ title, children, ok, danger, reason, onOk, close }: { 
   )
 }
 
+// ---------- one state for the page ----------
+// boardd's state is the model: every view derives from the latest copy. An action re-reads it as soon as it ends
+// (not only when boardd's events arrive), and what this page has asked for and not yet heard back is shared by every
+// view of the board, so a card, its row and the board page agree.
+let refresher: () => Promise<void> = async () => {}
+export const setRefresher = (fn: () => Promise<void>) => { refresher = fn }
+export const refreshNow = () => refresher()
+const NONE: readonly string[] = []
+const asked = new Map<string, readonly string[]>(), watchers = new Set<() => void>()
+/** This page asked boardd for `key` on `board` (`on`), or heard back from it; several can be waited on at once. */
+export function setAsked(board: string, key: string, on: boolean) {
+  const now = asked.get(board) ?? NONE, at = now.indexOf(key)
+  const next = on ? [...now, key] : at < 0 ? now : [...now.slice(0, at), ...now.slice(at + 1)]
+  if (next.length) asked.set(board, next); else asked.delete(board)
+  watchers.forEach(watch => watch())
+}
+const watchAsked = (watch: () => void) => { watchers.add(watch); return () => { watchers.delete(watch) } }
+/** What this page asked boardd to do to `board` and is still waiting on, oldest first. */
+export const useAsked = (board: string) => useSyncExternalStore(watchAsked, () => asked.get(board) ?? NONE)
+
 /** Run a boardd call with the button spinning; failures show boardd's message. */
 export function useRun() {
   const ui = useUI()
   const [busy, setBusy] = useState<string | null>(null)
   const run = async (key: string, label: string, fn: () => Promise<unknown>, done?: string) => {
     setBusy(key)
-    try { await fn(); ui.toast(done ?? `${label}：好了`) } catch (error) { ui.fail(`${label}失败`, error) } finally { setBusy(null) }
+    try { await fn(); ui.toast(done ?? `${label}：好了`) } catch (error) { ui.fail(`${label}失败`, error) } finally { await refreshNow().catch(() => {}); setBusy(null) }
   }
   return { busy, run }
 }

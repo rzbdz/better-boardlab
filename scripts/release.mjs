@@ -6,7 +6,7 @@
  *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>]
  *
  * Writes <out>/boardlab-<version>.tar.gz, <out>/install.sh, and <out>/release.json ({version, revision, file, sha256}),
- * which install.sh and `boardlab update` read. Run `pnpm run build` first.
+ * which install.sh and `boardlab update` read; scripts/publish.mjs puts it where they fetch it from.
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -27,6 +27,9 @@ const revision = git('rev-parse', '--short', 'HEAD')
 // Always from a fresh build of this very tree: a release must never carry an older dist/.
 if (!args.includes('--no-build')) { rmSync(join(root, 'dist'), { recursive: true, force: true }); execFileSync('pnpm', ['run', 'build'], { cwd: root, stdio: 'inherit' }) }
 if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/frontends.json'))) throw new Error('the build made no dist/')
+// The built CLI must start: a bundling problem only shows when it runs.
+try { execFileSync(process.execPath, [join(root, 'dist/cli.js'), 'help'], { stdio: 'pipe', env: { ...process.env, NODE_NO_WARNINGS: '1' } }) }
+catch (error) { throw new Error(`the built CLI does not start: ${String(error.stderr ?? error.message).trim().split('\n').slice(0, 6).join('\n')}`) }
 if (git('status', '--porcelain', '--untracked-files=no', '--', 'src', 'core', 'frontends', 'scripts', 'externals')) throw new Error('uncommitted changes: a release is made from a commit')
 
 const stage = join(out, `boardlab-${version}`)

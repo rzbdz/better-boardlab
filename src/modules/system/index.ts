@@ -14,13 +14,14 @@ import type { Module } from 'boardlab-core/core/module.ts'
 export interface Version { version: string, revision: string, source: string | null, latest: { version: string, revision: string } | null, checkedAt: string | null, error: string | null, updating: boolean, newer: boolean }
 
 /** `root`: the installed program (…/releases/<v>, `current` links it), found from the CLI's own place. */
-export function system(options: { root: string | null, ttlMs?: number, fetch?: (url: string) => Promise<string> }): Module {
+export function system(options: { root: string | null, ttlMs?: number, fetch?: (url: string, headers?: Record<string, string>) => Promise<string> }): Module {
   const ttl = options.ttlMs ?? 6 * 3600_000
   const read = (file: string) => { try { return readFileSync(file, 'utf8').trim() } catch { return null } }
   const root = options.root
   // releases/<v>/ in an installed boardlab: its prefix holds release-source and install.sh.
   const prefix = root && existsSync(join(dirname(dirname(root)), 'release-source')) ? dirname(dirname(root)) : null
-  const get = options.fetch ?? (async (url: string) => {
+  const token = () => prefix ? read(join(prefix, 'release-token')) : null
+  const get = options.fetch ?? (async (url: string, headers: Record<string, string> = {}) => {
     // A git source (`git@host:group/repo.git#release`): its release branch, fetched shallow.
     const git = /^(git\+)?(git@|ssh:\/\/|.*\.git(#|\/release\.json$))/.test(url)
     if (git) {
@@ -31,7 +32,7 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
         return await new Promise<string>((resolve, reject) => execFile('git', ['-C', dir, 'show', `HEAD:release.json`], { timeout: 30_000 }, (error, stdout) => error ? reject(error) : resolve(stdout)))
       } finally { rmSync(dir, { recursive: true, force: true }) }
     }
-    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) })
     if (!response.ok) throw new Error(`${url}：${response.status}`)
     return response.text()
   })
@@ -48,7 +49,10 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
         if (!source) return state()
         if (!force && checkedAt && lab.kernel.now() - Date.parse(checkedAt) < ttl) return state()
         try {
-          const release = JSON.parse(await get(/^(git\+)?(git@|ssh:\/\/)|\.git(#|$)/.test(source) ? source : `${source.replace(/\/$/, '')}/release.json`)) as { version: string, revision: string }
+          const release = JSON.parse(await (/\/api\/v4\/projects\//.test(source)
+            // A git server's project API (/api/v4/projects/<id>): release.json on its release branch, with the token install.sh kept (a private project).
+            ? get(`${source.split('#')[0]}/repository/files/release.json/raw?ref=${encodeURIComponent(source.split('#')[1] ?? 'release')}`, token() ? { 'PRIVATE-TOKEN': token()! } : {})
+            : get(/^(git\+)?(git@|ssh:\/\/)|\.git(#|$)/.test(source) ? source : `${source.replace(/\/$/, '')}/release.json`))) as { version: string, revision: string }
           latest = { version: release.version, revision: release.revision }; error = null
         } catch (failure) { error = (failure as Error).message }
         checkedAt = lab.kernel.iso()

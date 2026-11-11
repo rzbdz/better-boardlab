@@ -188,6 +188,12 @@ describe('bsp lab driver', () => {
     await human.relay.reset(config, on('slot-1', 'T'), message => notices.push(message))
     expect(notices).toEqual(['press RESET on slot-1 (board-x)', null])
     expect(await human.relay.confirm!(config, on('slot-1', 'T'), '')).toBe('已确认「reset」（等了 4.2 秒）')
+    // Its lock ending stops the waiting bsp.
+    const waiting = bspLab({ run: (_args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'aborted' }), { once: true })) })
+    const stop = new AbortController()
+    const reset = waiting.relay.reset(config, on('slot-1', 'T'), () => {}, stop.signal)
+    stop.abort(new Error('锁已经被抢走'))
+    await expect(reset).rejects.toThrow('bsp dut reset 停下了：锁已经被抢走')
     const broken = bspLab({ run: async () => ({ code: null, stdout: '', stderr: 'spawn bsp ENOENT' }) })
     await expect(broken.inventory!.devices(config)).rejects.toThrow('bsp dut list 失败（超时或没能运行）：spawn bsp ENOENT')
   })

@@ -439,3 +439,14 @@ body.console-full .detail{height:100vh}
 .settings-anchor{scroll-margin-top:64px}
 .settings-anchor .panel{margin:0}
 @media (max-width:900px){.settings-grid{grid-template-columns:1fr}.settings-nav{position:static;display:flex;flex-wrap:wrap;gap:6px}.settings-group{display:none}.settings-nav>div{display:contents}.settings-nav button{width:auto;height:28px}}
+/* first steps on an empty boardlab */
+.first-steps{margin-bottom:18px}
+.first-steps .steps{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.first-steps li{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;background:var(--elev)}
+.first-steps li>div{flex:1;min-width:0;display:flex;flex-direction:column}
+.first-steps li .sub{font-weight:400}
+.first-steps .n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--tile-2);font-weight:600;flex:none}
+.first-steps li.done .n{background:var(--ok);color:#fff}
+.first-steps li.done b{color:var(--sub)}
+.first-steps li.next{outline:1.5px solid var(--fg)}
+.first-steps .n svg{width:14px;height:14px}
