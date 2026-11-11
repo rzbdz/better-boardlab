@@ -25,7 +25,8 @@ export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, time
 /** Starts `bsp … dut pipe`; its stdin and stdout are the pipe. */
 export type BspSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
-export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner }
+/** `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). */
+export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string }
 
 /** A DUT spec as bsp probe proposes it (`bsp dut add` takes it back). */
 interface BspSpec {
@@ -84,12 +85,14 @@ export function bspLab(options: BspOptions = {}): Backend {
   // `url` is either one bspd reached directly (`bspd+http://127.0.0.1:8765`, this machine's on a board host), or a bsp
   // registry that lists several hosts (a plain URL, or empty for bsp's own site).
   const direct = (config: LabConfig) => config.url.startsWith('bspd+')
+  // `bspd+ssh://root@host:8765` (a host boardlab set up): the bsp CLI's `ssh://`, through boardd's own key.
   const bspdUrl = (config: LabConfig) => config.url.slice('bspd+'.length)
   const registryUrl = (config: LabConfig) => config.url
   const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', bspdUrl(config)]
     : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
   const env = (config: LabConfig): NodeJS.ProcessEnv => ({
     ...process.env, ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
+    ...(options.sshKey && bspdUrl(config).startsWith('ssh://') ? { BSP_SSH_OPTIONS: `-i ${options.sshKey} -o IdentitiesOnly=yes` } : {}),
   })
   const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string): Promise<T> => {
     const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr })

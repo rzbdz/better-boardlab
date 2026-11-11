@@ -7,6 +7,7 @@ export const entry: CatalogEntry = {
   // The bsp CLI: the settings' bin, else $BOARDS_BSP, else the bsp this distribution ships in externals/bsp, else `bsp` on PATH.
   create: (settings, context) => bsp({
     bin: text(settings, 'bin') ?? process.env.BOARDS_BSP ?? context.shipped('externals/bsp/bin/bsp') ?? undefined,
-    stateDir: context.stateDir, instances: instances(settings, 'bsp'),
+    stateDir: context.stateDir, instances: settings.instances === undefined ? [] : instances(settings, 'bsp'),
+    tree: context.shipped('externals/bsp/deploy/bspd-install.sh')?.replace(/\/deploy\/bspd-install\.sh$/, '') ?? null,
   }),
 }

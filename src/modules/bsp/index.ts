@@ -10,6 +10,8 @@ import { EventStream } from 'boardlab-core/core/api.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import { bspLab } from './driver.ts'
+import { hostsFor } from '../hosts/ssh.ts'
+import { installHost, uninstallHost } from './provision.ts'
 import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkRunner, type SdkStream } from './sdk.ts'
 
 export interface BspApi {
@@ -21,12 +23,22 @@ export interface BspApi {
   sdk(holder: string, args: string[], options: { json: boolean, group?: SdkGroup, onOutput: (stream: SdkStream, text: string) => void, signal?: AbortSignal }): Promise<{ code: number, download: string | null }>
 }
 
-export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner, instances?: string[] } = {}): Module<BspApi> {
+/** `tree`: the bsp source this distribution carries (externals/bsp), shipped to the hosts it sets up. */
+export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner, instances?: string[], tree?: string | null } = {}): Module<BspApi> {
   return {
     id: 'bsp',
     title: 'bsp 板卡主机',
     setup(lab) {
-      for (const id of options.instances ?? ['bsp']) lab.backends.register(id, bspLab({ bin: options.bin }))
+      const hosts = options.stateDir ? hostsFor(options.stateDir) : null
+      const sshKey = hosts?.keyFile
+      for (const id of options.instances ?? ['bsp']) lab.backends.register(id, bspLab({ bin: options.bin, sshKey }))
+      // A bsp lab is one board host: added on the page, set up there by installing bspd on the host over ssh.
+      lab.backends.offer({ kind: 'bsp', title: 'bsp 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 bspd 并接入', create: () => bspLab({ bin: options.bin, sshKey }) })
+      const access = (body: Record<string, unknown>) => {
+        const address = String(body.address ?? '').trim()
+        if (!address) throw new BoardError('invalid', '要填主机地址：IP、域名或 ssh 配置里的名字')
+        return { address, user: String(body.user ?? '').trim() || undefined, port: body.sshPort ? Number(body.sshPort) : undefined, password: typeof body.password === 'string' && body.password ? body.password : undefined, jump: String(body.jump ?? '').trim() || undefined }
+      }
       const runner = options.sdk ?? (options.stateDir ? bspSdk({ bin: options.bin, stateDir: options.stateDir }) : null)
       const api: BspApi = {
         async sdk(holder, args, run) {
@@ -63,6 +75,47 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
         },
       }
       lab.api.add('bsp', [{
+        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board）：ssh 过去装 bspd，接入实验室，输出边装边推送',
+        handle: ({ body, caller }) => {
+          if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 bsp，不能装主机')
+          const id = String(body.id ?? '')
+          const lab_ = lab.backends.get(id)
+          if (lab_.kind !== 'bsp') throw new BoardError('invalid', `${id} 不是 bsp 实验室`)
+          const how = access(body)
+          return new EventStream(async (emit, end) => {
+            try {
+              const done = await installHost(hosts, options.tree!, { id, access: how, board: String(body.board ?? '').trim() || undefined }, null, line => emit('out', { text: line }))
+              emit('out', { text: `bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…` })
+              await lab.backends.configure(caller.holder, id, { enabled: true, url: done.url, username: '', password: done.token, devices: '' })
+              const tested = await lab.backends.test(caller.holder, id).catch(error => ({ verifyMessage: (error as Error).message, verifyOk: false }))
+              lab.kernel.record(caller.holder, null, 'lab-install', `${id} ${done.target}`, true, done.version)
+              emit('exit', { ok: true, message: `装好了：${(tested as { verifyMessage?: string | null }).verifyMessage ?? ''}`, target: done.target, version: done.version })
+            } catch (error) {
+              lab.kernel.record(caller.holder, null, 'lab-install', `${id} ${how.address}`, false, (error as Error).message)
+              emit('exit', { ok: false, message: (error as Error).message })
+            }
+            end()
+          })
+        },
+      }, {
+        method: 'POST', path: '/api/bsp/uninstall', about: '从主机上卸掉 bspd（id；purge=true 连它的数据一起删），并删掉实验室',
+        handle: async ({ body, caller }) => {
+          if (!hosts) throw new BoardError('invalid', '这个 boardd 不能连主机')
+          const id = String(body.id ?? '')
+          const settings = lab.backends.labSettings().find(item => item.id === id)
+          if (!settings) throw new BoardError('not-found', `没有实验室 ${id}`)
+          const url = settings.url?.replace(/^bspd\+/, '') ?? ''
+          if (url.startsWith('ssh://')) {
+            const parsed = new URL(url)
+            await uninstallHost(hosts, { address: parsed.hostname, user: decodeURIComponent(parsed.username) || undefined }, body.purge === true, () => {})
+          }
+          await lab.backends.removeLab(caller.holder, id)
+          return { ok: true }
+        },
+      }, {
+        method: 'GET', path: '/api/bsp/key', about: 'boardd 登录主机用的公钥（放到主机的 authorized_keys 里，就不用密码）',
+        handle: async () => ({ key: hosts ? await hosts.publicKey() : null }),
+      }, {
         method: 'POST', path: '/api/sdk', about: '跑 bsp sdk|catalog|任意 bsp 命令（group），输出边跑边推送',
         handle: ({ body, caller, signal }) => {
           if (!Array.isArray(body.args) || body.args.some((arg: unknown) => typeof arg !== 'string')) throw new BoardError('invalid', 'args 要是字符串数组')
