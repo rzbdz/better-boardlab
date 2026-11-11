@@ -27,6 +27,15 @@ say() { printf '==> %s\n' "$*"; }
 die() { printf '!! %s\n' "$*" >&2; exit 1; }
 
 if [ "$(id -u)" = 0 ]; then PREFIX=/opt/boardlab STATE=/var/lib/boardlab BIN=/usr/local/bin SERVICE=1; else PREFIX=$HOME/.local/share/boardlab STATE=$HOME/.local/state/boardlab BIN=$HOME/.local/bin SERVICE=""; fi
+# How boardd was set up the first time (port, extra addresses, the proxy's origin): an update keeps it unless told
+# otherwise.
+if [ -f "$STATE/install.env" ]; then
+  GIVEN_PORT=$PORT GIVEN_HOSTS=$HOSTS GIVEN_ORIGIN=$ORIGIN
+  . "$STATE/install.env"
+  [ "$GIVEN_PORT" != 38127 ] && PORT=$GIVEN_PORT
+  [ -n "$GIVEN_HOSTS" ] && HOSTS=$GIVEN_HOSTS
+  [ -n "$GIVEN_ORIGIN" ] && ORIGIN=$GIVEN_ORIGIN
+fi
 
 if [ -n "$UNINSTALL" ]; then
   [ -n "$SERVICE" ] && { systemctl disable --now boardd.service 2>/dev/null || true; rm -f /etc/systemd/system/boardd.service; systemctl daemon-reload; }
@@ -98,6 +107,7 @@ if [ -n "$SERVICE" ]; then
   [ -f "$STATE/boardd.json" ] || printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
   # Updating from a release that had no system module: add it, so updates show on the page.
   grep -q '"system"' "$STATE/boardd.json" || sed -i 's/"modules": *{/"modules": { "system": {},/' "$STATE/boardd.json"
+  printf 'PORT=%s\nHOSTS="%s"\nORIGIN="%s"\n' "$PORT" "$HOSTS" "$ORIGIN" > "$STATE/install.env"
   cat > /etc/systemd/system/boardd.service <<EOF
 [Unit]
 Description=boardd: the board lab (boardlab $VERSION)
