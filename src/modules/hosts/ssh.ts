@@ -117,19 +117,24 @@ export class Hosts {
       const result = await this.exec(this.ssh, [...opts, target, 'true'], { env, timeoutMs: 25_000 })
       return result.code === 0 ? null : (result.stderr.trim().split('\n').filter(Boolean).at(-1) ?? `退出码 ${result.code}`)
     }
-    await this.publicKey()
+    const key = await this.publicKey()
+    const addKey = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qF '${key}' ~/.ssh/authorized_keys || echo '${key}' >> ~/.ssh/authorized_keys`
     for (const [mode, label] of [['key', 'boardd 自己的密钥'], ['inherit', '这台机器上的 ssh 设置（继承）']] as const) {
       const why = await ok(this.options(access, mode))
-      if (!why) { progress(`用${label}连上了 ${target}`); return this.executor(target, this.options(access, mode)) }
-      tries.push(`${label}：${why}`)
+      if (why) { tries.push(`${label}：${why}`); continue }
+      progress(`用${label}连上了 ${target}`)
+      if (mode === 'key') return this.executor(target, this.options(access, mode))
+      // In by this machine's own ssh setup: put boardd's key there too, so boardd (and the lab) logs in with its own.
+      const put = await this.exec(this.ssh, [...this.options(access, mode), target, addKey], { timeoutMs: 30_000 })
+      if (put.code === 0 && !(await ok(this.options(access, 'key')))) { progress('放好了 boardd 的密钥，以后用它登录'); return this.executor(target, this.options(access, 'key')) }
+      progress(`没能放 boardd 的密钥（${put.stderr.trim() || '用密钥还是登不上'}），继续用这台机器的 ssh 设置`)
+      return this.executor(target, this.options(access, mode))
     }
     if (access.password) {
       const why = await this.withPassword(access.password, env => ok(this.options(access, 'password'), env))
       if (!why) {
         progress(`用密码连上了 ${target}，放 boardd 的密钥上去`)
-        const key = await this.publicKey()
-        const add = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; grep -qF '${key}' ~/.ssh/authorized_keys || echo '${key}' >> ~/.ssh/authorized_keys`
-        const put = await this.withPassword(access.password, env => this.exec(this.ssh, [...this.options(access, 'password'), target, add], { env, timeoutMs: 30_000 }))
+        const put = await this.withPassword(access.password, env => this.exec(this.ssh, [...this.options(access, 'password'), target, addKey], { env, timeoutMs: 30_000 }))
         if (put.code !== 0) throw new Error(`放密钥到 ${target} 失败：${put.stderr.trim()}`)
         const again = await ok(this.options(access, 'key'))
         if (again) throw new Error(`放了密钥，但用它还是登不上 ${target}：${again}`)

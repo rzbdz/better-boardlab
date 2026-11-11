@@ -27,6 +27,7 @@ echo "ssh $target key=\${key:+yes} askpass=\${SSH_ASKPASS:+yes} :: $cmd" >> ${lo
 ok=""
 if [[ -n $key ]] && grep -qF "$(cat $key.pub)" ${remote}/root/.ssh/authorized_keys 2>/dev/null; then ok=1; fi
 if [[ -n $SSH_ASKPASS && "$($SSH_ASKPASS)" == opensesame ]]; then ok=1; fi
+if [[ -z $key && -z $SSH_ASKPASS && -n $FAKE_SSH_INHERIT ]]; then ok=1; fi
 [[ -n $ok ]] || { echo "Permission denied (publickey,password)." >&2; exit 255; }
 cd ${remote}; export HOME=${remote}/root
 cmd=\${cmd//\\/tmp\\//${remote}/tmp/}
@@ -73,6 +74,21 @@ describe('setting up a bsp board host', () => {
     const again = await hosts.reach({ address: 'lab-1', user: 'root' })
     expect(again.target).toBe('root@lab-1')
     expect(ssh.log().split('\n').filter(line => line.includes('key=yes')).length).toBeGreaterThan(2)
+  })
+
+  it('gets in by this machine\'s own ssh setup and puts boardd\'s key there too', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    process.env.FAKE_SSH_INHERIT = '1'
+    try {
+      const hosts = new Hosts(join(dir, 'state'))
+      const lines: string[] = []
+      const exec = await hosts.reach({ address: 'lab-2', user: 'root' }, line => lines.push(line))
+      expect(lines).toEqual(['用这台机器上的 ssh 设置（继承）连上了 root@lab-2', '放好了 boardd 的密钥，以后用它登录'])
+      expect(readFileSync(join(remote, 'root/.ssh/authorized_keys'), 'utf8')).toContain(await hosts.publicKey())
+      expect((await exec.run('echo hi')).stdout.trim()).toBe('hi')
+    } finally { delete process.env.FAKE_SSH_INHERIT }
   })
 
   it('refuses addresses that would reach the shell', async () => {
