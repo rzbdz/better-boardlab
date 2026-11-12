@@ -9,11 +9,20 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 ## 身份
 
-每条命令都以你的会话身份执行。后台启动的 Claude 已经设好环境变量 `BOARDS_HOLDER`（`claude:<会话 ID>`，协作项目成员是 `workspace:<项目>/<成员>`），不要改它；`echo $BOARDS_HOLDER` 为空时，才自己设：
+每条命令都以**持有人**的身份执行：拿锁、排队、历史、反馈都记在这个名字下。你是 agent，不是让你干活的这个人，所以你的持有人必须是你自己的 agent 身份（`claude:<会话>`、`codex:<会话>` 等）——**绝不能是 `user:<用户名>`**，也不要用别人的名字。用人的名字会让人以为是本人拿了锁、做了操作，排队和追责都会错人。
 
-```sh
-export BOARDS_HOLDER=claude:<当前会话 ID>
-```
+- Claude Code 会自动用 `claude:<会话 ID>`；其他 agent 先确认一次：
+  ```sh
+  boardlab status --json        # 看 "you"：应当是 claude:<会话> 或 <你的工具>:<会话>
+  ```
+  如果显示 `user:<用户名>`，立刻设成自己的身份再继续：
+  ```sh
+  export BOARDS_HOLDER=<你的工具>:<会话 ID>      # 例如 codex:fix-usb-1、opencode:ci-smoke
+  ```
+- 不要用 `--as user:<用户名>`（那是自称是本人）；用 `--as <你的工具>:<会话>` 或上面的环境变量。
+- 子 shell、脚本、后台任务里也显式带上 `--as <你的身份>` 或 export，不要依赖继承。
+- 看到 CLI 提示「以 user:… 的身份操作」时，停下来改身份，不要忽略。
+- 协作项目里的成员身份是 `workspace:<项目>/<成员>`，同样不是你应冒用的。
 
 ## 基本流程
 
