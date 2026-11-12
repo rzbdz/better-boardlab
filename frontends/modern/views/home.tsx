@@ -18,7 +18,7 @@ export function FirstSteps({ state }: { state: PageState }) {
     ...(views.has('bsp-hosts') ? [{ id: 'hosts', title: '添加板卡主机', about: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。', href: '#/settings/bsp-hosts', done: hosts }] : []),
     ...(views.has('bsp-site') ? [{ id: 'site', title: 'SDK 与站点', about: 'SDK 在哪、怎么刷，同步到每台板卡主机。', href: '#/settings/bsp-site', done: views.get('bsp-site')?.status?.tone === 'ok' }] : []),
     { id: 'discover', title: '发现板子', about: '在每台主机上按复位线、看串口，认出接着的板子。', href: '#/discover', done: boards },
-    ...(views.has('cli-machines') ? [{ id: 'cli', title: '命令行机器', about: '编译服务器和笔记本装上 boardlab 命令行，连到这里。', href: '#/settings/cli-machines', done: views.get('cli-machines')?.status?.tone === 'ok', optional: true }] : []),
+    ...(views.has('cli-machines') ? [{ id: 'cli', title: '客户端配置', about: '编译服务器和笔记本装上 boardlab 命令行，连到这里。', href: '#/settings/cli-machines', done: views.get('cli-machines')?.status?.tone === 'ok', optional: true }] : []),
   ]
   const next = steps.find(step => !step.done && !step.optional)
   return (

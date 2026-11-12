@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { Access, Executor, Hosts } from '../hosts/ssh.ts'
+import { shipHostTools } from './host-tools.ts'
 
 export interface HostSetup { id: string, access: Access, port?: number, board?: string }
 export interface Installed { target: string, port: number, token: string, version: string, url: string }
@@ -224,8 +225,11 @@ export async function syncHost(hosts: Hosts, url: string | null | undefined, bun
   return takeSite(exec, sudo, where.port, reloads, progress, waitSeconds)
 }
 
-/** `site`: makes the site bundle in the directory given, or says there is none to ship; shipped before bspd starts. */
-export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetup, token: string | null, progress: (line: string) => void, site?: (dir: string) => Promise<string | null>): Promise<Installed> {
+/**
+ * `site`: makes the site bundle in the directory given, or says there is none to ship; shipped before bspd starts.
+ * `hostTools`: the host tools this distribution carries (host-tools.ts), beside the bsp tree; none when it is absent.
+ */
+export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetup, token: string | null, progress: (line: string) => void, site?: (dir: string) => Promise<string | null>, hostTools = join(bspTree, '../../host-tools')): Promise<Installed> {
   if (!existsSync(join(bspTree, 'deploy/bspd-install.sh'))) throw new Error(`这个 boardlab 没带 bsp（${bspTree}/deploy/bspd-install.sh 不在）`)
   progress(`连 ${setup.access.address}…`)
   const exec = await hosts.reach(setup.access, progress)
@@ -241,14 +245,25 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     progress('传过去…')
     await exec.run(`mkdir -p ${remote}`)
     await exec.put(bundle, `${remote}/bsp.tgz`)
+    await shipHostTools(exec, sudo, hostTools, facts.stdout.split('\n')[0] ?? '', remote, progress)
     const siteBundle = site ? await site(dir) : null
     if (siteBundle) await shipSite(exec, sudo, siteBundle, progress)
     const made = token ?? randomBytes(24).toString('hex')
     const port = setup.port ?? 8765
     progress('在那台机器上装 bspd（第一次要建 Python 环境，几分钟）…')
+    // The installer starts each stage with `--> [n/N] <what>`: passed on as `[n/N] <what>` (the page shows step n of N
+    // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
+    let stage: string | null = null
     const run = await exec.run(
       `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 127.0.0.1 --token '${made}' ${setup.board ? `--board '${setup.board}'` : ''}; cd /; rm -rf ${remote}`,
-      { timeoutMs: 1_800_000, onLine: line => { if (line.trim()) progress(line) } })
+      {
+        timeoutMs: 1_800_000, onLine: line => {
+          if (!line.trim()) return
+          const step = /^--> (\[\d+\/\d+\] .+)$/.exec(line.trim())
+          if (step) progress(stage = step[1]!)
+          else progress(stage && !/^BSPD-READY /.test(line) ? `${stage} · ${line.trim()}` : line)
+        },
+      })
     const ready = /BSPD-READY (\S+) (\d+) (\S+)/.exec(run.stdout)
     if (run.code !== 0 || !ready) {
       const failed = `装 bspd 失败：${(run.stderr || run.stdout).trim().split('\n').slice(-4).join(' / ')}`

@@ -81,12 +81,21 @@ curl -fsSL https://github.com/rzbdz/better-boardlab/releases/latest/download/ins
 
 It installs boardlab in `/opt/boardlab` (Node 24 is fetched if the machine has none; offline, give one with
 `--node <node or its tarball>`), keeps its state in `/var/lib/boardlab`, starts the `boardd` service, and prints its
-address. Add `-s -- --host <address>` to open the page on the network, or put it behind your reverse proxy
-(`--origin https://proxy/`). Run as another user, or with `--cli`, it installs only the CLI under `~/.local`.
+address. Add `-s -- --host <address>` to open the page on the network. Run as another user, or with `--cli`, it
+installs only the CLI under `~/.local`. `--origin https://proxy/` is the address people open when boardlab sits behind
+your reverse proxy; boardd accepts the page from there, and updates keep it.
 
-A release can also be served from a git repository's branch (`--from git@host:group/repo.git#release`) or a git
-server's project API (`--from https://git.example/api/v4/projects/<id>#release`, with `--token` for a private project);
-updates come from the same place.
+install.sh is a thin bootstrap: it fetches a release and runs that release's own setup. To install from your own
+(private) repository, point it there with `--from`, a git repository's branch or a git server's project API:
+
+```sh
+curl -fsSL https://github.com/rzbdz/better-boardlab/releases/latest/download/install.sh \
+  | sh -s -- --from https://git.example/api/v4/projects/<id>#release --token <token>
+```
+
+`--from` also takes `git@host:group/repo.git#release` or an https directory. Updates come from the same place; to
+switch it later, use Settings → 版本 → 发布源 (检查 shows the version there, 保存 keeps it) or
+`boardlab update --set-source <source> [--token T]` (`--show-source` shows it, `--from <source>` switches and updates).
 
 Everything else is done on the page:
 
@@ -96,7 +105,7 @@ Everything else is done on the page:
   The host can be this machine itself (`localhost`). Then 发现 finds the boards on it.
 - **SDKs.** Settings → SDK 与站点: where each SDK lives, its build server and how it boots or flashes, kept in one site
   (managed on the page, or a git repository you pull from and push to) and synced to every board host.
-- **Command-line machines.** Settings → 命令行机器: build servers and laptops get the `boardlab` CLI installed over ssh
+- **Clients.** Settings → 客户端配置: build servers and laptops get the `boardlab` CLI installed over ssh
   and pointed at this boardd (boardd brings Node along when the machine has none).
 - **Updates.** Settings → 版本 → 检查更新 / 升级, or `boardlab update`. boardd checks for a newer release every few hours,
   installs it once no board is locked, and restarts; locks, queues and settings are kept, and the page reloads itself.

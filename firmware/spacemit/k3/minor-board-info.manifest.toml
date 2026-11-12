@@ -1,0 +1,48 @@
+schema_version = 1
+created_at = "2026-10-27T14:15:48.392033+00:00"
+status = "built-not-boot-tested"
+boot_tested = false
+target = "SpacemiT K3; SDK-known DEB/COM260/EVB EEPROM wiring"
+target_board = "unknown; no individual board selected or tested"
+path_base = "Artifact paths are relative to this manifest directory"
+
+[source]
+tree = "SpacemiT K3 SDK U-Boot 2022.10"
+revision = "b2c4a669976be247df1f5e54a4882d98a8c7b631"
+changes = "diagnostic change adding k3_minor_board_info_defconfig (EEPROM probe, print, halt), and a UART compatible change in arch/riscv/dts/k3.dtsi; not shipped"
+
+[build]
+defconfig = "k3_minor_board_info_defconfig"
+compiler = "riscv64-unknown-linux-gnu-gcc (gd094d3a8c4f) 15.2.0"
+target = "spl/u-boot-spl.bin (also produces FSBL.bin via vendor config.mk)"
+configure_command = "make CROSS_COMPILE=riscv64-unknown-linux-gnu- k3_minor_board_info_defconfig"
+build_command = "make CROSS_COMPILE=riscv64-unknown-linux-gnu- spl/u-boot-spl.bin"
+
+[reuse]
+prebuilt_firmware = "none"
+source = "Vendor K3 SPL startup, UART, legacy I2C, EEPROM candidate table and FSBL packaging"
+packaging_config = "board/spacemit/k3/configs/fsbl.json in the source tree"
+key_note = "Existing SDK default key configuration used by packaging; no private keys included in artifacts"
+secure_flag = 0
+secure_boot_validation = "not performed"
+
+[boot]
+method = "boot ROM USB fastboot"
+initial_state = "K3 boot ROM USB fastboot"
+image_order = ["minor-board-info.bin"]
+commands = ["fastboot stage minor-board-info.bin", "fastboot continue"]
+command_sequence = "fastboot stage minor-board-info.bin && fastboot continue"
+payload_offset = 4096
+fsbl_header_load_address = "0xc0800000"
+spl_link_address = "0xc0801000"
+fit_configuration = "not applicable"
+pxe_tftp = "not applicable"
+additional_images = "none"
+console = "UART0 115200 baud per SDK DTS"
+output = "UART Product Name from validated EEPROM TLV, or UNKNOWN; then halt until reset"
+
+[[artifacts]]
+path = "minor-board-info.bin"
+kind = "stageable FSBL container"
+size = 460800
+sha256 = "eb8c02ebf6dcc64fb8cf0bdd96cf1876b0636859e33520f112c00da56cb4b7c8"

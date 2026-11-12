@@ -40,8 +40,25 @@ export interface View {
   /** A badge beside the title: how this part stands. */
   status?: Badge
   body: Element[]
+  /** A help page about this part, by name (`docs/help/<name>.md`, served at `api/docs/<name>`): frontends offer it beside the title. */
+  help?: string
+  /** What an AI assistant needs to help someone set this part up (see Hint). */
+  hint?: Hint
   /** Anything else this module wants a frontend that knows it to have (see Extra). */
   extra?: Extra
+}
+
+/**
+ * For a prompt a person copies into an AI assistant to get help with a part of the page: the part's help page (the
+ * view's `help`) and these, with where boardd is (see help.ts). Nothing secret goes in.
+ */
+export interface Hint {
+  /** The `boardlab` CLI commands that do what this part does. */
+  commands?: string[]
+  /** How this part is set up now, as text (YAML, a list): nothing secret. */
+  context?: () => string | Promise<string>
+  /** What the assistant should produce in the end: `the YAML of a build server`, `the commands to run`. */
+  produce?: string
 }
 
 /**
@@ -83,8 +100,8 @@ export type Element =
   | { kind: 'live', stream: Stream, height?: 'small' | 'large' }
   /** More detail behind a disclosure (raw evidence): loaded when opened. */
   | { kind: 'details', summary: Rich, load: () => Promise<Element[]> }
-  /** A group of elements, side by side when there is room. */
-  | { kind: 'group', title?: string, status?: Badge, body: Element[], layout?: 'stack' | 'columns' }
+  /** A group of elements, side by side when there is room. `help`: a help page about it, as a view's. */
+  | { kind: 'group', title?: string, status?: Badge, body: Element[], layout?: 'stack' | 'columns', help?: string }
   /**
    * Something only some frontends render: `type` names it (`<module>.<what>`, documented by the module), `data` is
    * whatever it is (a tree, values, callbacks). Every frontend that does not know `type` renders `fallback` instead.
@@ -101,7 +118,8 @@ export interface ListItem {
   extra?: Extra
 }
 
-export type Field =
+/** `doc`: a help page about the field, by name, as a view's `help`. */
+export type Field = ({ doc?: string }) & (
   | { kind: 'text', id: string, label: string, initial?: string, placeholder?: string, required?: boolean, help?: Rich, pattern?: string, disabled?: boolean, wide?: boolean }
   /** A secret: never shown back. `stored` says one is kept (left empty, it stays). */
   | { kind: 'secret', id: string, label: string, stored?: boolean, placeholder?: string, help?: Rich }
@@ -110,6 +128,7 @@ export type Field =
   | { kind: 'code', id: string, label: string, initial?: string, placeholder?: string, required?: boolean, rows?: number, help?: Rich }
   | { kind: 'switch', id: string, label: string, initial?: boolean, help?: Rich }
   | { kind: 'choice', id: string, label: string, options: Array<{ value: string, label: string }>, initial?: string }
+)
 
 export type Values = Record<string, string | number | boolean | string[]>
 
@@ -120,7 +139,7 @@ export interface Outcome { message?: string, data?: unknown }
 
 /** Where a job reports while it runs. */
 export interface Sink {
-  /** A line of what it is doing now. */
+  /** A line of what it is doing now; one starting `[n/N]` says it is at step n of N (frontends may show that). */
   line(text: string): void
   /** How far it is (0..1), when it can tell. */
   progress(fraction: number): void

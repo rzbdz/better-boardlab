@@ -304,7 +304,7 @@ describe('the CLI machines on the page', () => {
   it('shows each machine\'s version against this boardd\'s', () => {
     const views = ui.views({ clients: clientsView([machine('a', status('0.3.0', 'abc1234')), machine('b', status('0.2.0', 'old0000')), machine('c', status(null, null, { reachable: false }))]) } as never, {})
     expect(views).toHaveLength(1)
-    expect(views[0]).toMatchObject({ id: 'cli-machines', slot: 'settings', title: '命令行机器', status: { tone: 'warn', text: '3 台' } })
+    expect(views[0]).toMatchObject({ id: 'cli-machines', slot: 'settings', title: '客户端配置', help: 'clients', status: { tone: 'warn', text: '3 台' } })
     const list = views[0]!.body.find(element => element.kind === 'list') as { items: Array<{ key: string, status: { text: string } }> }
     expect(list.items.map(item => [item.key, item.status.text])).toEqual([['a', '0.3.0'], ['b', '旧版 0.2.0'], ['c', '连不上']])
     expect(ui.views({} as never, {})).toEqual([])

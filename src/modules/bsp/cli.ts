@@ -1,12 +1,13 @@
 /**
  * The bsp module's commands, boardlab's wrapper of the bsp CLI: SDK work (`sdk`), the registry's SDK catalog
- * (`registry`), and any bsp command (`bsp`), each run by the bsp on boardd's machine, so this one needs no bsp.
+ * (`registry`), and any bsp command (`bsp`), each run by the bsp on boardd's machine, so this one needs no bsp; and the
+ * site boardd keeps for its board hosts (`site`).
  */
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { BoardsClient } from 'boardlab-core/shared/client.ts'
-import { write, type Command, type CommandGroup } from 'boardlab-core/cli/command.ts'
+import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
+import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
 
 /**
  * `boardlab sdk <bsp sdk arguments>`: SDK work on the build servers, run by boardd's bsp. Local files given to `put` are
@@ -76,6 +77,142 @@ async function runCatalog(client: BoardsClient, raw: string[], json: boolean) {
   process.exitCode = result.code
 }
 
+/** What the site endpoints answer; see site.ts. */
+interface SiteDoc { kind: string, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
+interface SiteStatus {
+  source: 'managed' | 'git', url: string, branch: string, ready: boolean, revision: string | null
+  commit: { subject: string, at: string } | null, ahead: number, docs: SiteDoc[], socs: Array<{ soc: string, layer: string }>
+  problems: string[], hosts: Record<string, { revision: string, at: string, ok: boolean, message: string }>, syncing: boolean
+  images: { ok: boolean, message: string, missing: string[], optional?: string[] } | null
+}
+interface SyncExit { ok: boolean, message: string, revision?: string, results?: Array<{ lab: string, ok: boolean, message: string }> }
+
+/** The words a person uses for a kind of site document, and the kind the site keeps it under. */
+const SITE_KINDS: Record<string, string> = { sdk: 'instances', instance: 'instances', server: 'servers', workspace: 'workspaces', family: 'families' }
+const SITE_USAGE = `用法：
+  boardlab site show [<种类> <id>]        来源、版本、问题、编译服务器和它们上面的 SDK；给出文档时打印它的 YAML
+  boardlab site pull | push               git 来源：拉取、推送
+  boardlab site sync [--lab <主机>]        把站点同步到所有 bsp 主机（或一台）
+  boardlab site set <种类> <id> --file <YAML 文件|->
+                                          添加或改写一个文档（- 从标准输入读）
+  boardlab site remove <种类> <id>         删掉一个文档（还有别的在用它时不删）
+  种类：sdk、server、workspace（源码树）、family（编译方式）。`
+
+function siteKind(word: string | undefined) {
+  const kind = word ? SITE_KINDS[word] : undefined
+  if (!kind) throw new BoardsApiError(400, `不认识的种类 ${word ?? '（没写）'}：sdk、server、workspace 或 family\n${SITE_USAGE}`, 'invalid')
+  return kind
+}
+
+function printSite(site: SiteStatus) {
+  console.log(`来源  ${site.source === 'git' ? `git ${site.url} 分支 ${site.branch}` : '这台 boardd 管理'}`)
+  console.log(`版本  ${site.revision ? `${site.revision}${site.commit ? ` · ${site.commit.subject} · ${site.commit.at}` : ''}` : '（还没有提交）'}${site.ahead ? `（${site.ahead} 个提交还没推送）` : ''}`)
+  for (const problem of site.problems) console.log(`问题  ${problem}`)
+  const sdks = site.docs.filter(doc => doc.kind === 'instances')
+  const workspaces = new Map(site.docs.filter(doc => doc.kind === 'workspaces').map(doc => [doc.id, doc.fields.server ?? '']))
+  const serverOf = (sdk: SiteDoc) => sdk.fields.server || workspaces.get(sdk.fields.workspace ?? '') || ''
+  const line = (sdk: SiteDoc) => `    ${sdk.id}${sdk.fields.family ? `  ${sdk.fields.family}` : ''}${sdk.fields.workspace ? `  源码树 ${sdk.fields.workspace}` : sdk.fields.path ? `  ${sdk.fields.path}` : ''}${sdk.fields.description ? `  ${sdk.fields.description}` : ''}`
+  const servers = site.docs.filter(doc => doc.kind === 'servers')
+  console.log(servers.length ? '编译服务器' : '编译服务器  （还没有）')
+  for (const server of servers) {
+    console.log(`  ${server.id}  ${server.fields.user ? `${server.fields.user}@` : ''}${server.fields.host ?? ''}${server.layer === 'site' ? '' : `  （${server.layer}）`}`)
+    for (const sdk of sdks.filter(sdk => serverOf(sdk) === server.id)) console.log(line(sdk))
+  }
+  const elsewhere = sdks.filter(sdk => !servers.some(server => server.id === serverOf(sdk)))
+  if (elsewhere.length) { console.log('别处的 SDK'); for (const sdk of elsewhere) console.log(line(sdk)) }
+  const hosts = Object.entries(site.hosts)
+  if (hosts.length) console.log(`主机  ${hosts.map(([lab, host]) => `${lab} ${host.revision || '？'}${host.ok ? '' : '（上次没同步上）'}`).join('，')}`)
+  if (site.images && !site.images.ok) console.log(`镜像  ${site.images.message}`)
+  if (site.images?.optional?.length) console.log(`可选  ${site.images.optional.join('、')}：没有时发现板子读不到型号`)
+}
+
+/** POST the sync and print its lines as they come; resolves with its exit. */
+function streamSync(client: BoardsClient, body: unknown, line: (text: string) => void): Promise<SyncExit> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const req = client.open('POST', '/api/bsp/site/sync', { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Content-Length': String(Buffer.byteLength(payload)) })
+    req.on('response', response => {
+      if ((response.statusCode ?? 500) >= 400) {
+        const chunks: Buffer[] = []
+        response.on('data', chunk => chunks.push(chunk))
+        response.on('end', () => {
+          let message = Buffer.concat(chunks).toString('utf8')
+          try { message = JSON.parse(message).error ?? message } catch {}
+          reject(new BoardsApiError(response.statusCode ?? 500, message, null))
+        })
+        return
+      }
+      let buffer = '', done = false
+      response.setEncoding('utf8')
+      response.on('data', chunk => {
+        buffer += chunk
+        let index
+        while ((index = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, index); buffer = buffer.slice(index + 2)
+          const event = block.match(/^event: (.*)$/m)?.[1]
+          const data = block.match(/^data: (.*)$/m)?.[1]
+          if (!data) continue
+          const value = JSON.parse(data)
+          if (event === 'out') line(value.text)
+          else if (event === 'exit') { done = true; resolve(value) }
+        }
+      })
+      response.on('end', () => { if (!done) reject(new Error('boardd 在同步结束前断开了')) })
+    })
+    req.on('error', reject)
+    req.end(payload)
+  })
+}
+
+async function siteCommand({ client, args, flag, json, out }: CommandContext) {
+  const [what, word, id] = args
+  if (what === 'show' && word) {
+    const kind = siteKind(word)
+    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const doc = site.docs.find(doc => doc.kind === kind && doc.id === id)
+    if (!doc) throw new BoardsApiError(404, `站点里没有 ${word} ${id ?? ''}`.trim(), 'not-found')
+    return out(doc, () => process.stdout.write(doc.text.endsWith('\n') ? doc.text : `${doc.text}\n`))
+  }
+  if (what === 'show') {
+    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    return out(site, () => printSite(site))
+  }
+  if (what === 'pull' || what === 'push') {
+    const result = await client.call<{ message: string }>('POST', `/api/bsp/site/${what}`, {})
+    return out(result, () => console.log(result.message))
+  }
+  if (what === 'sync') {
+    const lab = flag('lab')
+    const exit = await streamSync(client, lab ? { lab } : {}, text => { if (!json) console.log(text) })
+    out(exit, () => console.log(exit.message))
+    if (!exit.ok) process.exitCode = 1
+    return
+  }
+  if (what === 'set') {
+    const kind = siteKind(word)
+    const file = flag('file')
+    if (!id || !file) throw new BoardsApiError(400, `要给 id 和 --file\n${SITE_USAGE}`, 'invalid')
+    const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
+    // Writing over the site's own document of that id is an edit; anything else adds one (or takes over from a pack's).
+    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const original = site.docs.some(doc => doc.kind === kind && doc.id === id && doc.layer === 'site') ? id : undefined
+    const result = await client.call<{ file: string }>('POST', '/api/bsp/site/doc', { kind, id, text, ...(original ? { original } : {}) })
+    return out(result, () => console.log(`写好了 ${result.file}；boardlab site sync 同步到主机`))
+  }
+  if (what === 'remove') {
+    const kind = siteKind(word)
+    if (!id) throw new BoardsApiError(400, `要给 id\n${SITE_USAGE}`, 'invalid')
+    const result = await client.call<{ message: string }>('POST', '/api/bsp/site/remove', { kind, id })
+    return out(result, () => console.log(result.message))
+  }
+  console.log(SITE_USAGE)
+}
+
+const site: Command = {
+  name: 'site', noBoard: true, usage: ['site show | pull | push | sync | set <种类> <id> --file <YAML> | remove <种类> <id>\tbsp 站点：SDK、编译服务器和 SoC 资料，boardd 保存、同步到每台板卡主机（见 boardlab site help）'],
+  run: siteCommand,
+}
+
 const sdk: Command = {
   name: 'sdk', noBoard: true, usage: ['sdk <操作> …\tSDK：在构建服务器上租源码树、编译、读写文件、跑命令（boardd 那边的 bsp sdk 执行，见 boardlab sdk help）'],
   run: ({ client, argv, json }) => sdkCommand(client, argv, json),
@@ -97,4 +234,4 @@ const bsp: Command = {
   },
 }
 
-export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [sdk, registry, bsp] }
+export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [sdk, site, registry, bsp] }

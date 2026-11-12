@@ -3,11 +3,11 @@
  * every few hours (or when asked), and says when a newer one is out; one run from source has nothing to check.
  */
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
-import { system } from '../src/modules/system/index.ts'
+import { sourcePattern, system } from '../src/modules/system/index.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -56,9 +56,57 @@ describe('the system module', () => {
     expect(asked).toEqual([['https://git.example.test/api/v4/projects/7/repository/files/release.json/raw?ref=release', { 'PRIVATE-TOKEN': 'glpat-x' }]])
   })
 
+  it('switches the release source: checks it first, keeps it and its token readable only by the owner, masks the token', async () => {
+    const asked: Array<[string, Record<string, string> | undefined]> = []
+    const root = installed('0.2.0', 'aaa1111', 'https://example.test/boardlab/')
+    const prefix = join(dir, 'opt/boardlab')
+    const fetch = async (url: string, headers?: Record<string, string>) => {
+      asked.push([url, headers])
+      if (url.includes('missing')) throw new Error(`${url}：404`)
+      return JSON.stringify({ version: '0.4.0', revision: 'ddd4444' })
+    }
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [system({ root, fetch })] })
+    expect(await call(lab, 'GET', '/api/system/source')).toEqual({ source: 'https://example.test/boardlab/', token: null })
+    const api = 'https://git.example.test/api/v4/projects/9#stable'
+    // check: only what is there, nothing kept.
+    expect(await call(lab, 'POST', '/api/system/source', { source: api, token: 'glpat-secret1234', check: true })).toMatchObject({ version: '0.4.0', revision: 'ddd4444' })
+    expect(asked.at(-1)).toEqual(['https://git.example.test/api/v4/projects/9/repository/files/release.json/raw?ref=stable', { 'PRIVATE-TOKEN': 'glpat-secret1234' }])
+    expect(readFileSync(join(prefix, 'release-source'), 'utf8')).toBe('https://example.test/boardlab/')
+    expect(existsSync(join(prefix, 'release-token'))).toBe(false)
+    // save.
+    expect(await call(lab, 'POST', '/api/system/source', { source: api, token: 'glpat-secret1234' })).toMatchObject({ source: api, version: '0.4.0' })
+    expect(readFileSync(join(prefix, 'release-source'), 'utf8').trim()).toBe(api)
+    expect(readFileSync(join(prefix, 'release-token'), 'utf8').trim()).toBe('glpat-secret1234')
+    expect(statSync(join(prefix, 'release-token')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(prefix, 'release-source')).mode & 0o777).toBe(0o600)
+    const shown = await call(lab, 'GET', '/api/system/source') as { source: string, token: string }
+    expect(shown).toEqual({ source: api, token: '••••1234' })
+    expect(await call(lab, 'GET', '/api/system/version')).toMatchObject({ source: api, newer: true, latest: { version: '0.4.0' } })
+    // No token given: the kept one is used and kept; an empty one removes it.
+    await call(lab, 'POST', '/api/system/source', { source: 'https://git.example.test/api/v4/projects/9#release' })
+    expect(asked.at(-1)?.[1]).toEqual({ 'PRIVATE-TOKEN': 'glpat-secret1234' })
+    await call(lab, 'POST', '/api/system/source', { source: 'git@git.example.test:lab/boardlab.git#release', token: '' })
+    expect(existsSync(join(prefix, 'release-token'))).toBe(false)
+    expect(asked.at(-1)?.[0]).toBe('git@git.example.test:lab/boardlab.git#release')
+    // A source with nothing there, or not a source at all, changes nothing.
+    await expect(call(lab, 'POST', '/api/system/source', { source: 'https://example.test/missing/' })).rejects.toThrow(/拿不到 release.json/)
+    await expect(call(lab, 'POST', '/api/system/source', { source: 'https://x.test/a; rm -rf /' })).rejects.toThrow(/来源不认识/)
+    expect(readFileSync(join(prefix, 'release-source'), 'utf8').trim()).toBe('git@git.example.test:lab/boardlab.git#release')
+  })
+
+  it('takes the source forms install.sh takes, and nothing a shell could read more into', () => {
+    for (const good of ['https://example.test/boardlab/', 'http://10.0.0.5:8080/rel', 'git@git.example.test:lab/boardlab.git#release',
+      'ssh://git@git.example.test:2222/lab/boardlab.git#v1', 'https://git.example.test/lab/boardlab.git#release',
+      'https://git.example.test/api/v4/projects/42#release', 'https://git.example.test/api/v4/projects/lab%2Fboardlab#main'])
+      expect(sourcePattern.test(good), good).toBe(true)
+    for (const bad of ['', 'ftp://x.test/a', 'https://x.test/a b', 'https://x.test/$(id)', 'git@x.test:a.git#b;id', 'https://x.test/`id`', '-oProxyCommand=id', 'file:///etc', 'https://x.test/a\nb'])
+      expect(sourcePattern.test(bad), bad).toBe(false)
+  })
+
   it('has nothing to check when run from source, and says so when asked to update', async () => {
     const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [system({ root: null })] })
     expect(await call(lab, 'GET', '/api/system/version')).toMatchObject({ version: 'dev', source: null, newer: false })
     await expect(call(lab, 'POST', '/api/system/update', {})).rejects.toThrow(/不是用 install.sh 装的/)
+    await expect(call(lab, 'POST', '/api/system/source', { source: 'https://example.test/boardlab/' })).rejects.toThrow(/不是用 install.sh 装的/)
   })
 })

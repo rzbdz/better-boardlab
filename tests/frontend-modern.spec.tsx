@@ -2,7 +2,8 @@
 /**
  * The Modern frontend against the mock boardd: the board cards and their states, the board page with the lock and its
  * purpose, log search with download and wget, discovery with rebuild held back by locks, settings with the frontend
- * switch, the pinned banner for a board waiting for a person, and flashing a package from a link or an uploaded file.
+ * switch, the pinned banner for a board waiting for a person, flashing a package from a link or an uploaded file, and
+ * help pages with their AI hints.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -205,6 +206,58 @@ describe('Modern frontend', () => {
   it('opens a settings section by its address', async () => {
     go('#/settings/bsp-hosts')
     await waitFor(() => expect(document.querySelector('.settings-nav button.on')?.textContent).toBe('bsp 板卡主机'), wait)
+    go('#/')
+  })
+
+  it('renders help pages as plain elements, and builds the AI hint from the page, boardd\'s address and the setup', async () => {
+    const { render } = await import('@testing-library/react')
+    const { Markdown } = await import('../frontends/modern/markdown.tsx')
+    const { hintPrompt } = await import('../src/ui/help.ts')
+    const { container, unmount } = render(<Markdown text={'# 标题\n\n<b>不是标签</b> 和 [好](https://example.com) [坏](javascript:alert(1))\n\n- 一\n- 二'} />)
+    expect(container.querySelector('h2')?.textContent).toBe('标题')
+    expect(container.querySelector('b')).toBeNull()
+    expect([...container.querySelectorAll('a')].map(a => a.getAttribute('href'))).toEqual(['https://example.com'])
+    expect(container.querySelectorAll('li')).toHaveLength(2)
+    unmount()
+    const prompt = await hintPrompt({ title: '站点', help: 'site', hint: { commands: ['boardlab site show'], context: () => 'servers: [build-a]' } })
+    expect(prompt).toContain('「站点」')
+    expect(prompt).toContain(`boardlab remote set ${location.origin}/`)
+    expect(prompt).toContain('- `boardlab site show`')
+    expect(prompt).toContain('# 帮助：site')
+    expect(prompt).toContain('servers: [build-a]')
+    expect(prompt).toContain('一次只问我一个问题')
+  })
+
+  it('lists the site by build server, each with its SDKs, and keeps the rest under 高级', async () => {
+    go('#/settings/bsp-site')
+    const panel = await waitFor(() => { const found = [...document.querySelectorAll('section.panel')].find(el => el.querySelector('h2')?.textContent?.startsWith('SDK 与站点')); expect(found).toBeTruthy(); return found as HTMLElement }, wait)
+    const nav = [...document.querySelectorAll('.settings-nav button')].map(el => el.textContent)
+    expect(nav.indexOf('bsp 板卡主机')).toBeLessThan(nav.indexOf('SDK 与站点'))
+    await waitFor(() => expect(panel.textContent).toContain('这台 boardd 管理（还没连 git 仓库）'), wait)
+    expect(panel.textContent).toContain('Add SDK vendor-a')
+    const server = [...panel.querySelectorAll('.mv-group')].find(el => el.firstElementChild?.textContent?.startsWith('build-a')) as HTMLElement
+    expect(server.textContent).toContain('vendor-a')
+    expect(server.textContent).not.toContain('upstream')
+    expect(within(server).getAllByRole('button').some(el => el.textContent === '添加 SDK')).toBe(true)
+    expect(panel.textContent).toContain('用源码树或别的服务器的 SDK')
+    expect(panel.textContent).toContain('高级')
+    expect(panel.textContent).toContain('可选：k1/fsbl（FSBL.bin）探测用镜像没有，发现板子时就读不到型号')
+    fireEvent.click(within(server).getAllByRole('button').find(el => el.textContent === '添加 SDK')!)
+    const dialog = await screen.findByRole('dialog', {}, wait)
+    expect(dialog.textContent).toContain('在 build-a 上添加 SDK')
+    expect((within(dialog).getAllByRole('combobox')[1] as HTMLSelectElement).value).toBe('build-a')
+    expect(dialog.querySelector('textarea')?.value).toContain('download:')
+    expect(within(dialog).getAllByRole('button', { name: '帮助' }).length).toBeGreaterThan(0)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('[role=dialog]')).toBeNull(), wait)
+    fireEvent.click(within(panel.querySelector('h2')!).getByRole('button', { name: '帮助' }))
+    await waitFor(() => expect(document.querySelector('[role=dialog] .md h2')?.textContent).toBe('帮助：site'), wait)
+    expect(document.querySelector('[role=dialog] .md a')?.getAttribute('href')).toBe('https://example.com/a')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.click(within(panel.querySelector('h2')!).getByRole('button', { name: 'AI 提示' }))
+    await waitFor(() => expect((document.querySelector('[role=dialog] textarea') as HTMLTextAreaElement)?.value).toContain('boardlab site show'), wait)
+    expect((document.querySelector('[role=dialog] textarea') as HTMLTextAreaElement).value).toContain('# sdk/servers/build-a.yaml')
+    fireEvent.keyDown(window, { key: 'Escape' })
     go('#/')
   })
 

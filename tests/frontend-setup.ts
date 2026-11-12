@@ -16,6 +16,21 @@ const history = {
   scans: [],
 }
 
+// The bsp site: one build server with one SDK, one SDK on a source tree, a SoC whose probe image is not there.
+const doc = (kind: string, id: string, fields: Record<string, string>, layer = 'site') => ({ kind, id, file: `sdk/${kind}/${id}.yaml`, layer, text: `id: ${id}\n`, fields })
+const site = {
+  source: 'managed', url: '', branch: 'main', ready: true, revision: 'abc1234', commit: { subject: 'Add SDK vendor-a', at: '2026-11-10T09:00:00Z' }, ahead: 0,
+  docs: [
+    doc('servers', 'build-a', { host: '192.0.2.10', user: 'dev' }),
+    doc('instances', 'vendor-a', { family: 'make-bsp', server: 'build-a', path: '/home/dev/a', soc: 'k1', load: 'ready', download: 'todo' }),
+    doc('instances', 'upstream', { family: 'make-bsp', workspace: 'tree', load: 'ready', download: 'todo' }),
+    doc('workspaces', 'tree', { server: 'build-a', path: '/home/dev/tree' }),
+    doc('families', 'make-bsp', { runner: 'make' }, 'spacemit'),
+  ],
+  socs: [{ soc: 'k1', layer: 'spacemit' }], problems: [], hosts: {}, syncing: false,
+  images: { at: '2026-11-10T09:00:00Z', ok: true, message: '镜像 0 个在', fetched: [], present: [], failed: [], missing: [], optional: ['k1/fsbl（FSBL.bin）'] },
+}
+
 function reply(body: unknown) { return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }) }
 
 globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -28,6 +43,8 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
   if (path === '/api/frontends') return reply({ default: 'antd', current: 'antd', frontends: [{ name: 'antd', title: 'Ant Design' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
+  if (path === '/api/bsp/site') return reply(site)
+  if (path.startsWith('/api/docs/')) return reply({ name: path.slice('/api/docs/'.length), title: '帮助', text: `# 帮助：${path.slice('/api/docs/'.length)}\n\n说明文字，[看这里](https://example.com/a) 和 [别点](javascript:alert(1))。\n\n\`\`\`yaml\nid: x\n\`\`\`` })
   if (path.startsWith('/api/files/')) return reply({ sha256: path.slice('/api/files/'.length), present: false })
   if (path === '/api/flash/package' && method === 'POST') return reply({ output: 'job flash-1 succeeded' })
   if (path === '/api/logs') return reply({ lines: ['[2026-11-10 08:59:58] U-Boot SPL 2022.10', '[2026-11-10 09:00:00] ERROR: mmc0 timeout'], matched: 2, truncated: false, source: 'backend' })

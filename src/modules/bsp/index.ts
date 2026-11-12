@@ -5,7 +5,7 @@
  * every host reads (SoC profiles, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
  */
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync, rmSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { EventStream } from 'boardlab-core/core/api.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
@@ -13,6 +13,7 @@ import type { Module } from 'boardlab-core/core/module.ts'
 import { bspLab, FDL_STRATEGIES, type BspBackend, type BspBoardChange } from './driver.ts'
 import { hostsFor } from '../hosts/ssh.ts'
 import { installHost, uninstallHost } from './provision.ts'
+import { panelEndpoints } from './panel.ts'
 import { Site } from './site.ts'
 import { siteEndpoints } from './site-api.ts'
 import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkRunner, type SdkStream } from './sdk.ts'
@@ -107,7 +108,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
               const { done, tested } = await lab.kernel.doing([`lab:${id}`], 'install', '安装中', caller.holder, async line => {
                 const say = (text: string) => { emit('out', { text }); line(text) }
                 const shipped = siteFor(say)
-                const done = await installHost(hosts, options.tree!, { id, access: how, board: String(body.board ?? '').trim() || undefined }, null, say, shipped.bundle)
+                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board) }, null, say, shipped.bundle)
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
@@ -164,6 +165,9 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           return { message: `改了 ${changed.join('、')}` }
         },
       }, {
+        method: 'GET', path: '/api/bsp/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',
+        handle: () => ({ boards: hostBoards(options.tree ?? null) }),
+      }, {
         method: 'GET', path: '/api/bsp/key', about: 'boardd 登录主机用的公钥（放到主机的 authorized_keys 里，就不用密码）',
         handle: async () => ({ key: hosts ? await hosts.publicKey() : null }),
       }, {
@@ -177,8 +181,32 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
             end()
           })
         },
-      }, ...(site ? siteEndpoints(lab, site, hosts) : [])])
+      }, ...(site ? siteEndpoints(lab, site, hosts) : []), ...panelEndpoints(lab, { sshKey })])
       return api
     },
   }
+}
+
+/** `auto` (from the device tree), `none` (no GPIO: reset by a person), or a header map's id; nothing else. */
+function boardChoice(value: unknown): string | undefined {
+  const board = String(value ?? '').trim()
+  if (!board || board === 'auto') return undefined
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(board)) throw new BoardError('invalid', `主机型号不合法：${board}`)
+  return board
+}
+
+/** The host models bsp has a header map for (each pack's boards/<id>.yaml): its id, and its `name:`. */
+export function hostBoards(tree: string | null): Array<{ id: string, name: string }> {
+  if (!tree || !existsSync(join(tree, 'packs'))) return []
+  const found: Array<{ id: string, name: string }> = []
+  for (const pack of readdirSync(join(tree, 'packs'))) {
+    const dir = join(tree, 'packs', pack, 'boards')
+    if (!existsSync(dir)) continue
+    for (const file of readdirSync(dir).filter(name => name.endsWith('.yaml')).sort()) {
+      const id = file.slice(0, -'.yaml'.length)
+      const name = /^name:\s*(.+?)\s*$/m.exec(readFileSync(join(dir, file), 'utf8'))?.[1]?.replace(/^["']|["']$/g, '') ?? id
+      found.push({ id, name })
+    }
+  }
+  return found
 }

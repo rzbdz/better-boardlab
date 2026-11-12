@@ -55,9 +55,15 @@ export interface ClientsOptions {
 export function clients(options: ClientsOptions): Module {
   return {
     id: 'clients',
-    title: '命令行机器',
+    title: '客户端配置',
     setup(lab) {
       const hosts = options.hosts ?? hostsFor(options.stateDir)
+      // Node builds kept for machines of another architecture with no internet: <state>/clients/node/<uname -m>/node.
+      const nodeFor = (arch: string) => {
+        if (!/^[A-Za-z0-9_]+$/.test(arch)) return null
+        const path = join(options.stateDir, 'clients', 'node', arch, 'node')
+        return existsSync(path) ? path : null
+      }
       const hub = options.machine ?? localHub()
       const port = options.port ?? DEFAULT_PORT
       const settings = lab.kernel.settings('clients')
@@ -160,7 +166,7 @@ export function clients(options: ClientsOptions): Module {
             return new EventStream(async (emit, end) => {
               const out = (text: string) => emit('out', { text })
               try {
-                const done = await installCli(hosts, hub, options.release!, { id, access: access(machine, password), tunnel: to, node: options.node }, out)
+                const done = await installCli(hosts, hub, options.release!, { id, access: access(machine, password), tunnel: to, node: options.node, nodeFor }, out)
                 saveMachines(machines().map(item => item.id === id ? { ...item, key: done.key } : item))
                 setStatus(id, { reachable: true, version: done.version, revision: done.revision, remote: done.remote, checkedAt: lab.kernel.iso(), error: done.problem })
                 lab.kernel.record(caller.holder, null, 'client-install', `${id} ${done.target}`, done.checked, done.problem ?? done.version)

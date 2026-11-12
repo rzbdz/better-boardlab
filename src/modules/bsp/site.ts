@@ -35,8 +35,13 @@ export interface ImagesState {
   at: string, ok: boolean, message: string
   /** `<soc>/<image>` */
   fetched: string[], present: string[], failed: Array<{ image: string, error: string }>
-  /** Listed with no file in any layer and no source to fetch it from. */
+  /** Listed with no file in any layer and no source to fetch it from, and staged by an SDK's or SoC's boot steps. */
   missing: string[]
+  /**
+   * Listed with no file and no source, and staged by nothing but discovery (a SoC's probe images): nothing fails
+   * without them, a board found is just not told apart by model.
+   */
+  optional?: string[]
 }
 export interface SiteStatus {
   source: 'managed' | 'git', url: string, branch: string
@@ -44,6 +49,8 @@ export interface SiteStatus {
   ready: boolean
   /** Short commit, `-dirty` when files changed outside boardd; null before the first commit. */
   revision: string | null
+  /** That commit's subject and when it was made. */
+  commit: { subject: string, at: string } | null
   /** Commits here the source does not have yet (git). */
   ahead: number
   docs: SiteDoc[]
@@ -362,6 +369,15 @@ export class Site {
     return `${head.stdout.trim()}${dirty ? '-dirty' : ''}`
   }
 
+  /** The subject and time of the commit the copy is at. */
+  private async head(): Promise<{ subject: string, at: string } | null> {
+    if (!this.ready) return null
+    const head = await this.git(['log', '-1', '--format=%cI%x00%s'])
+    if (head.code !== 0 || !head.stdout.trim()) return null
+    const [at, subject] = head.stdout.trim().split('\0')
+    return { subject: subject ?? '', at: at ?? '' }
+  }
+
   private async ahead(): Promise<number> {
     if (this.source !== 'git' || !this.ready) return 0
     const tracked = (await this.git(['rev-parse', '--verify', '-q', `refs/remotes/origin/${this.branch}`])).code === 0
@@ -422,7 +438,7 @@ export class Site {
     const hosts: Record<string, HostSync> = {}
     for (const lab of labs) { const record = this.hostSync(lab); if (record) hosts[lab] = record }
     return {
-      source: this.source, url: this.url, branch: this.branch, ready: this.ready, revision: await this.revision(), ahead: await this.ahead(),
+      source: this.source, url: this.url, branch: this.branch, ready: this.ready, revision: await this.revision(), commit: await this.head(), ahead: await this.ahead(),
       docs: docs ? KINDS.flatMap(kind => [...docs[kind].values()].map(doc => ({ kind, id: doc.id, file: doc.rel, layer: doc.layer, text: doc.text, fields: fields(doc) }))) : [],
       socs, problems: this.ready ? [...problems, ...validate(docs!)] : [`站点还没从 ${this.url} 取下来：点拉取`],
       hosts, syncing: this.syncing, images: this.lastImages(),
@@ -545,6 +561,31 @@ export class Site {
     })
   }
 
+  /**
+   * The images something stages besides discovery, as `<soc>/<image>` (`any/<image>` for an SDK with no SoC): an SDK's
+   * boot steps (`image:` of its SoC) and a SoC profile's media boot steps, in any layer.
+   */
+  private usedImages(): Set<string> {
+    const used = new Set<string>()
+    const steps = (value: unknown): Data[] => Array.isArray(value) ? value.filter(isData) : []
+    for (const doc of this.load().docs.instances.values()) {
+      const boot = isData(doc.data.boot) ? doc.data.boot : {}
+      for (const method of Object.values(boot)) for (const step of steps(isData(method) ? method.steps : null))
+        if (typeof step.image === 'string') used.add(`${typeof doc.data.soc === 'string' ? doc.data.soc : 'any'}/${step.image}`)
+    }
+    for (const layer of this.layers()) {
+      const at = join(layer.root, 'socs')
+      if (!existsSync(at)) continue
+      for (const soc of readdirSync(at)) {
+        let profile: unknown = null
+        try { profile = parse(readFileSync(join(at, soc, 'soc.yaml'), 'utf8')) } catch { continue }
+        const media = isData(profile) && isData(profile.media_boot) ? profile.media_boot : {}
+        for (const step of steps(media.steps)) if (typeof step.image === 'string') used.add(`${soc}/${step.image}`)
+      }
+    }
+    return used
+  }
+
   lastImages(): ImagesState | null {
     try { return JSON.parse(this.settings.get('images') ?? 'null') as ImagesState | null } catch { return null }
   }
@@ -571,19 +612,24 @@ export class Site {
       got = { present: (result.present ?? []).filter(name => !fetched.has(name)), failed: result.failed ?? [] }
       if (!got.failed.length) break
     }
-    let missing: string[] = []
+    // Images nobody can fetch: missing when a boot step stages them, optional when only discovery does.
+    const missing: string[] = [], optional: string[] = []
     if (got) {
       const listed = answer(await exec(bin, ['--json', 'images', 'list'], this.dir, env))
-      if (listed?.ok && Array.isArray(listed.result))
-        missing = (listed.result as Data[]).filter(row => row.state === 'missing').map(row => `${str(row.soc)}/${str(row.image)}（${str(row.file)}）`)
+      const used = this.usedImages()
+      if (listed?.ok && Array.isArray(listed.result)) for (const row of (listed.result as Data[]).filter(row => row.state === 'missing')) {
+        const name = `${str(row.soc)}/${str(row.image)}（${str(row.file)}）`
+        if (used.has(`${str(row.soc)}/${str(row.image)}`) || used.has(`any/${str(row.image)}`)) missing.push(name)
+        else optional.push(name)
+      }
     }
     const failed = got?.failed ?? [], have = fetched.size + (got?.present.length ?? 0)
     for (const item of failed) say(`镜像 ${item.image} 没取到：${item.error}`)
-    for (const name of missing) say(`镜像 ${name} 哪儿都没有，也没写从哪取`)
+    for (const name of missing) say(`镜像 ${name} 有启动步骤要用，却哪儿都没有，也没写从哪取`)
     const message = !got ? `没取成镜像：${error}`
       : !have && !failed.length && !missing.length ? '没有要取的镜像'
       : [`镜像 ${have} 个在${fetched.size ? `（新取到 ${fetched.size} 个）` : ''}`, failed.length ? `${failed.length} 个没取到` : '', missing.length ? `${missing.length} 个缺` : ''].filter(Boolean).join('，')
-    const state: ImagesState = { at: new Date().toISOString(), ok: !!got && !failed.length && !missing.length, message, fetched: [...fetched], present: got?.present ?? [], failed, missing }
+    const state: ImagesState = { at: new Date().toISOString(), ok: !!got && !failed.length && !missing.length, message, fetched: [...fetched], present: got?.present ?? [], failed, missing, optional }
     this.settings.set('images', JSON.stringify(state))
     return state
   }
@@ -601,13 +647,16 @@ export class Site {
   /** Whether there is something to ship that hosts can load. */
   shippable(): boolean { return this.ready && SHIPPED.some(name => existsSync(join(this.dir, name))) && !this.problems().length }
 
-  /** The parts the hosts get, as a gzipped tar (no .git; not what the site's .bspignore names). */
+  /**
+   * The parts the hosts get, as a gzipped tar (no .git; not what the site's .bspignore names). Only those: whatever else
+   * the site's repository holds (hosts/, docs, notes, deploy scripts) stays here. A site with none of them is an empty
+   * bundle, and a host synced with it has an empty site.
+   */
   async bundle(out: string): Promise<void> {
     if (!this.ready) throw new BoardError('invalid', '站点还没有：先选来源')
     const present = SHIPPED.filter(name => existsSync(join(this.dir, name)))
-    if (!present.length) throw new BoardError('invalid', `站点是空的：没有 ${SHIPPED.join('、')}，没什么可同步`)
     const ignore = join(this.dir, '.bspignore')
-    const made = await exec('tar', ['-czf', out, '--exclude=.git', ...(existsSync(ignore) ? ['-X', ignore] : []), ...present], this.dir)
+    const made = await exec('tar', ['-czf', out, '--exclude=.git', ...(existsSync(ignore) ? ['-X', ignore] : []), ...(present.length ? present : ['-T', '/dev/null'])], this.dir)
     if (made.code !== 0) throw new Error(`打包站点失败：${last(made)}`)
   }
 }

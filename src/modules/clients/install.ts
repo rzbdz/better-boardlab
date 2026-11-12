@@ -200,7 +200,7 @@ export interface Installed extends Found {
  * Install (or update) the CLI there and point it at this boardd. `node`: a Node binary for machines of `nodeArch`
  * (`uname -m`) that have no Node 24, so they need no internet; others fetch theirs through install.sh.
  */
-export async function installCli(hosts: Hosts, hub: Hub, release: Release, setup: { id: string, access: Access, tunnel: Tunnel, node?: { path: string, arch: string } | null }, progress: (line: string) => void): Promise<Installed> {
+export async function installCli(hosts: Hosts, hub: Hub, release: Release, setup: { id: string, access: Access, tunnel: Tunnel, node?: { path: string, arch: string } | null, nodeFor?: (arch: string) => string | null }, progress: (line: string) => void): Promise<Installed> {
   checkTunnel(setup.tunnel)
   const { exec, facts: known } = await normalUser(hosts, setup.access, progress)
   progress(`那台机器：${known.arch}，Node ${known.node || '没有'}`)
@@ -209,15 +209,19 @@ export async function installCli(hosts: Hosts, hub: Hub, release: Release, setup
   try {
     await exec.run(`mkdir -p ${remote}`)
     if (Math.max(Number(known.node) || 0, Number(known.ownnode) || 0) < 24) {
-      if (setup.node && setup.node.arch === known.arch) {
-        progress(`那台机器上没有 Node 24 以上：传这台 boardd 用的 Node（${process.version}）过去…`)
-        await exec.put(setup.node.path, `${remote}/node`)
+      // boardd's own Node when the machine has its architecture, else one kept for that architecture (see nodeFor).
+      const own = setup.node && setup.node.arch === known.arch ? setup.node.path : null
+      const kept = own ? null : setup.nodeFor?.(known.arch) ?? null
+      if (own || kept) {
+        progress(own ? `那台机器上没有 Node 24 以上：传这台 boardd 用的 Node（${process.version}）过去…` : `那台机器上没有 Node 24 以上：传 boardd 为 ${known.arch} 存的 Node 过去…`)
+        await exec.put((own ?? kept)!, `${remote}/node`)
         const moved = await exec.run(`set -e; mkdir -p "${PREFIX}/node/bin"; mv ${remote}/node "${PREFIX}/node/bin/node"; chmod 755 "${PREFIX}/node/bin/node"`)
         if (moved.code !== 0) throw new Error(`放 Node 失败：${tail(moved.stderr)}`)
         // A Node linked against the libraries of boardd's machine may not run there: then install.sh finds its own.
         const runs = await exec.run(`"${PREFIX}/node/bin/node" -v || { rm -rf "${PREFIX}/node"; exit 1; }`)
         if (runs.code !== 0) progress(`这台 boardd 的 Node 在那台机器上跑不起来（${tail(runs.stderr, 1)}）：install.sh 去下载`)
-      } else progress(`那台机器上没有 Node 24 以上，也不是这台 boardd 的架构（${setup.node?.arch ?? '?'}）：install.sh 去下载（那台机器要能上网）`)
+      } else progress(`那台机器上没有 Node 24 以上，也不是这台 boardd 的架构（${setup.node?.arch ?? '?'}）：install.sh 去下载（那台机器要能上网；`
+        + `不能上网就把 ${known.arch} 的 Node 24 放到 boardd 的 clients/node/${known.arch}/node 再装）`)
     }
     // The release as install.sh takes it: a tarball of boardlab-<version>/.
     progress(`打包 boardlab ${release.version}（${release.revision}）…`)

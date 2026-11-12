@@ -51,7 +51,7 @@ function install(clients: Clients, machine: Machine | null): Element[] {
   return [
     text(machine
       ? '用这台 boardd 的版本重新装一遍（升级、修好），再连一次。'
-      : '新的命令行机器：boardd 用 ssh 过去，用这台 boardd 的版本装好 boardlab 命令行（装在那个用户的 ~/.local 下），设成经 ssh 隧道连到这台 boardd，最后在那边跑一次 boardlab status。'),
+      : '新的客户端：boardd 用 ssh 过去，用这台 boardd 的版本装好 boardlab 命令行（装在那个用户的 ~/.local 下），设成经 ssh 隧道连到这台 boardd，最后在那边跑一次 boardlab status。'),
     {
       kind: 'form', fields, submitLabel: machine ? '更新' : '添加并安装',
       submit: job('install', machine ? '更新' : '添加并安装', async (input, sink, signal) => (await stream('api/clients/install', {
@@ -73,7 +73,7 @@ function remove(machine: Machine): Element[] {
 
 function hubForm(clients: Clients): Element[] {
   return [
-    text('命令行机器经 ssh 连到这台 boardd：以隧道用户登录这台机器，只能转发到 boardd 的端口。改了以后，更新一下各台机器。'),
+    text('客户端经 ssh 连到这台 boardd：以隧道用户登录这台机器，只能转发到 boardd 的端口。改了以后，更新一下各台机器。'),
     {
       kind: 'form', submitLabel: '保存',
       fields: [
@@ -86,6 +86,18 @@ function hubForm(clients: Clients): Element[] {
   ]
 }
 
+const hubUrl = (clients: Clients) => clients.hub.url ?? `ssh://${clients.hub.tunnel}@${clients.hub.address ?? (here() || '<地址>')}`
+
+/** The clients as text for an AI assistant: how they reach this boardd, and each machine (no password is kept). */
+function clientsContext(clients: Clients): string {
+  return [
+    `这台 boardd：${clients.release ? `boardlab ${clients.release.version}（${clients.release.revision}）` : '从源码跑的（不能从页面给别的机器装命令行）'}`,
+    `客户端连过来用：${hubUrl(clients)}（隧道用户 ${clients.hub.tunnel}，ssh 端口 ${clients.hub.sshPort ?? 22}）`,
+    '已经加的机器：',
+    ...(clients.machines.length ? clients.machines.map(machine => `- ${machine.id}：${describe(machine)}；${badge(machine, clients).text}`) : ['（还没有）']),
+  ].join('\n')
+}
+
 export const ui: ModuleUi = {
   module: 'clients',
   views(state: PageState): View[] {
@@ -94,14 +106,19 @@ export const ui: ModuleUi = {
     const noRelease = clients.release ? undefined : '这个 boardd 是从源码跑的'
     const behind = clients.machines.filter(machine => badge(machine, clients).tone !== 'ok')
     return [{
-      id: 'cli-machines', slot: 'settings', title: '命令行机器',
+      id: 'cli-machines', slot: 'settings', title: '客户端配置', help: 'clients',
+      hint: {
+        commands: [`boardlab remote set ${hubUrl(clients)}`, 'boardlab remote show', 'boardlab status', 'boardlab install'],
+        context: () => clientsContext(clients),
+        produce: '在那台机器上要跑的命令（装命令行、连到这台 boardd、给 agent 装 skill），或者在页面上「添加机器」要填的内容',
+      },
       status: clients.machines.length ? { tone: behind.length ? 'warn' : 'ok', text: `${clients.machines.length} 台` } : undefined,
       body: [
         text('用 boardlab 命令行的机器（编译服务器、笔记本）。boardd 用 ssh 过去装好命令行，让它经 ssh 隧道连到这台 boardd，人和 agent 就在那边拿板子。'),
         {
           kind: 'facts', items: [
             { label: '这台 boardd', value: clients.release ? `boardlab ${clients.release.version}（${clients.release.revision}）` : '从源码跑的' },
-            { label: '连过来用', value: { code: clients.hub.url ?? `ssh://${clients.hub.tunnel}@${here() || '<地址>'}` } },
+            { label: '连过来用', value: { code: hubUrl(clients) } },
           ],
         },
         ...(clients.release ? [] : [notice('这个 boardd 是从源码跑的，没有发布包可装。用 install.sh 装的 boardd 才能给别的机器装命令行；也可以在那台机器上自己跑 install.sh，再 boardlab remote set。')]),
@@ -119,11 +136,11 @@ export const ui: ModuleUi = {
               open('remove', '删除', `删除 ${machine.id}`, () => remove(machine), { intent: 'danger', blocked: machine.busy ? '正在装' : undefined }),
             ],
           })),
-        }] : [notice('还没有命令行机器。添加一台：给出地址和那边的用户，boardd 会装好命令行并连过来。', 'neutral')]),
+        }] : [notice('还没有客户端。添加一台：给出地址和那边的用户，boardd 会装好命令行并连过来。', 'neutral')]),
         {
           kind: 'actions', actions: [
-            open('add', '添加机器', '添加命令行机器', () => install(clients, null), { intent: 'primary', blocked: noRelease }),
-            open('hub', '连接设置', '命令行机器怎么连过来', () => hubForm(clients)),
+            open('add', '添加机器', '添加客户端', () => install(clients, null), { intent: 'primary', blocked: noRelease }),
+            open('hub', '连接设置', '客户端怎么连过来', () => hubForm(clients)),
             action('check-all', '全部检查', async () => {
               const now = await call<Clients>('POST', 'api/clients/check', {})
               const ok = now.machines.filter(machine => badge(machine, now).tone === 'ok').length

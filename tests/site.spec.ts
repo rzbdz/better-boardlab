@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { parse } from 'yaml'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import type { Settings } from 'boardlab-core/core/kernel.ts'
@@ -58,12 +58,13 @@ describe('the bsp site', () => {
     await expect(site.setSource('user:alice', { source: 'git', url: join(dir, 'nowhere.git') })).rejects.toThrow(/取不到/)
     expect(settings.values.get('source')).toBeUndefined()                          // a source that fails is not kept
     // Fetched, then its images (here, the fake CLI's one way in gets none of them).
-    expect(await site.setSource('user:alice', { source: 'git', url: remote, branch: 'main' })).toMatch(/^取下了.*；镜像 0 个在，2 个没取到，1 个缺$/)
+    expect(await site.setSource('user:alice', { source: 'git', url: remote, branch: 'main' })).toMatch(/^取下了.*；镜像 0 个在，2 个没取到$/)
     let status = await site.status()
     expect(status).toMatchObject({ source: 'git', url: remote, branch: 'main', ready: true, ahead: 0, problems: [] })
     expect(status.docs.filter(doc => doc.kind === 'instances').map(doc => doc.id)).toContain('bsp-a')
     expect(status.socs.map(item => item.soc)).toEqual(['soc-a', 'soc-b'])
     expect(status.revision).toBe(git(remote, 'rev-parse', '--short', 'main'))
+    expect(status.commit).toEqual({ subject: 'site', at: git(remote, 'log', '-1', '--format=%cI', 'main') })
 
     // Someone pushes to the source; an edit is made here; pulling puts the edit after theirs.
     const theirs = other()
@@ -178,6 +179,30 @@ describe('the bsp site', () => {
     expect(status.problems).toEqual([])
     // With nothing under it, still refused while used.
     await expect(site.remove('user:bob', 'families', 'make-bsp')).rejects.toThrow(/还在用：vendor-p/)
+  })
+
+  it('takes a whole site repository: what it does not use is left alone, and only socs, sdk and hooks are shipped', async () => {
+    // A repository that also holds the hosts' own files, deploy scripts, docs and notes.
+    const seed = join(dir, 'catalog'), remote = join(dir, 'catalog.git')
+    cpSync(EXAMPLE, seed, { recursive: true })
+    for (const [path, text] of [['docs/index.md', '# lab\n'], ['notes/todo.txt', 'later\n'], ['deploy/run.sh', 'echo deploy\n'], ['hosts/broken.yaml', 'not: [valid\n'], ['sdk/README.md', 'the catalog\n']])
+      mkdirSync(dirname(join(seed, path)), { recursive: true }), writeFileSync(join(seed, path), text)
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
+    git(dir, 'init', '-q', '-b', 'main', seed); git(seed, 'add', '-A'); git(seed, 'commit', '-qm', 'lab site'); git(seed, 'push', '-q', remote, 'main')
+
+    const site = new Site(join(dir, 'state', 'bsp', 'site'), memory())
+    await site.setSource('user:alice', { source: 'git', url: remote })
+    const status = await site.status()
+    expect(status.problems).toEqual([])
+    expect(status.docs.filter(doc => doc.kind === 'servers').map(doc => doc.id)).toEqual(['build-a', 'build-b'])
+    expect(status.commit?.subject).toBe('lab site')
+    const bundle = join(dir, 'site.tgz')
+    await site.bundle(bundle)
+    const tops = new Set(execFileSync('tar', ['-tzf', bundle], { encoding: 'utf8' }).trim().split('\n').map(path => path.split('/')[0]))
+    expect([...tops].sort()).toEqual(['hooks', 'sdk', 'socs'])
+    // An edit here touches only its own file.
+    await site.putServer('user:alice', { id: 'build-c', host: 'build-c.example.test', user: 'dev' })
+    expect(git(site.dir, 'show', '--name-only', '--format=', 'HEAD')).toBe('sdk/servers/build-c.yaml')
   })
 
   it('tries the next way into the source only when one does not get in, and keeps what the source said', async () => {
@@ -379,8 +404,9 @@ describe('the site\'s images', () => {
     const lines: string[] = [], bundle = join(dir, 'site.tgz')
     const { revision, images } = await site.ship(bundle, line => lines.push(line))
     expect(revision).toBe(git(root, 'rev-parse', '--short', 'HEAD'))               // .blobs/ is not part of the revision
-    expect(images).toMatchObject({ ok: false, fetched: ['soc-a/helper'], failed: [{ image: 'soc-a/rom', error: 'no rom.bin at v1' }], missing: ['soc-b/probe（probe.bin）'], message: '镜像 1 个在（新取到 1 个），1 个没取到，1 个缺' })
-    expect(lines).toEqual(['取到了镜像 soc-a/helper', '镜像 soc-a/rom 没取到：no rom.bin at v1', '镜像 soc-b/probe（probe.bin） 哪儿都没有，也没写从哪取', images!.message])
+    // soc-b/probe is only for discovery: optional, not a failure.
+    expect(images).toMatchObject({ ok: false, fetched: ['soc-a/helper'], failed: [{ image: 'soc-a/rom', error: 'no rom.bin at v1' }], missing: [], optional: ['soc-b/probe（probe.bin）'], message: '镜像 1 个在（新取到 1 个），1 个没取到' })
+    expect(lines).toEqual(['取到了镜像 soc-a/helper', '镜像 soc-a/rom 没取到：no rom.bin at v1', images!.message])
     expect(execFileSync('tar', ['-tzf', bundle], { encoding: 'utf8' })).toContain(`.blobs/${'a'.repeat(64)}/helper.bin`)
     // The CLI worked on this copy, with no user file of its own; each way into git tried while images failed.
     const calls = bsp.log().trim().split('\n')
@@ -394,6 +420,12 @@ describe('the site\'s images', () => {
     // No bsp CLI: said, kept, and the site still bundles.
     const without = new Site(root, memory(), { bin: join(dir, 'no-such-bsp') })
     expect((await without.ship(bundle)).images).toMatchObject({ ok: false, message: expect.stringMatching(/^没取成镜像：.*no-such-bsp/) })
+
+    // A boot step staging it (the SoC's media boot here): then it is missing, and said.
+    writeFileSync(join(root, 'socs/soc-b/soc.yaml'), `${readFileSync(join(root, 'socs/soc-b/soc.yaml'), 'utf8')}media_boot:\n  name: probe\n  steps:\n    - {do: stage, image: probe}\n`)
+    lines.length = 0
+    expect((await site.ship(bundle, line => lines.push(line))).images).toMatchObject({ missing: ['soc-b/probe（probe.bin）'], optional: [], message: '镜像 1 个在（新取到 1 个），1 个没取到，1 个缺' })
+    expect(lines).toContain('镜像 soc-b/probe（probe.bin） 有启动步骤要用，却哪儿都没有，也没写从哪取')
   })
 })
 
@@ -482,7 +514,9 @@ describe('syncing the site to board hosts', () => {
       expect(existsSync(`${host.site}.previous`)).toBe(false)
     } finally { await old.close() }
     await expect(syncHost(hosts, null, bundle, () => {})).rejects.toThrow(/还没装好/)
-    await expect(new Site(join(dir, 'empty'), memory()).status().then(() => new Site(join(dir, 'empty'), memory()).bundle(join(dir, 'x.tgz')))).rejects.toThrow(/站点是空的/)
+    // An empty site bundles to nothing: a host synced with it has an empty site.
+    await new Site(join(dir, 'empty'), memory()).status().then(() => new Site(join(dir, 'empty'), memory()).bundle(join(dir, 'x.tgz')))
+    expect(execFileSync('tar', ['-tzf', join(dir, 'x.tgz')], { encoding: 'utf8' })).toBe('')
   }, 30_000)
 
   it('ships the site before an install, and puts the old one back when bspd does not come up on it', async () => {
@@ -523,7 +557,8 @@ describe('syncing the site to board hosts', () => {
       expect((await events('/api/bsp/site/sync')).exit).toMatchObject({ ok: false, message: expect.stringMatching(/还没有 bsp 主机/) })
       await lab.backends.add('user:alice', 'lab1', 'bsp')
       await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: `bspd+ssh://root@lab-1:${bspd.port}` })
-      expect((await events('/api/bsp/site/sync')).exit).toMatchObject({ ok: false, message: expect.stringMatching(/站点是空的/) })
+      // Nothing in the site yet: synced all the same (the host's site is then empty too).
+      expect((await events('/api/bsp/site/sync')).exit).toMatchObject({ ok: true, results: [{ lab: 'lab1', ok: true }] })
 
       const root = join(stateDir, 'bsp', 'site')
       cpSync(join(EXAMPLE, 'sdk'), join(root, 'sdk'), { recursive: true })
@@ -538,10 +573,10 @@ describe('syncing the site to board hosts', () => {
 
       const synced = await events('/api/bsp/site/sync')
       const revision = (await call('GET', '/api/bsp/site')).revision
-      // Images that are not there are said, and do not stop the sync.
-      expect(synced.exit).toMatchObject({ ok: true, revision, results: [{ lab: 'lab1', ok: true }], images: { ok: false }, message: expect.stringMatching(/^1 台主机都是站点 \S+ 了；镜像 .*1 个缺$/) })
+      // Images that are not there are said, and do not stop the sync; one only discovery stages is not even said.
+      expect(synced.exit).toMatchObject({ ok: true, revision, results: [{ lab: 'lab1', ok: true }], images: { ok: false, optional: ['soc-b/probe（probe.bin）'] }, message: expect.stringMatching(/^1 台主机都是站点 \S+ 了；镜像 .*没取到$/) })
       expect(synced.lines).toContain('  bspd 重新读了站点：2 个 SDK，1 个 SoC')
-      expect(synced.lines).toContain('镜像 soc-b/probe（probe.bin） 哪儿都没有，也没写从哪取')
+      expect(synced.lines.join('\n')).not.toContain('soc-b/probe')
       expect(existsSync(join(host.site, 'sdk/servers/build-c.yaml'))).toBe(true)
       const status = await call('GET', '/api/bsp/site')
       expect(status.hosts.lab1).toMatchObject({ revision, ok: true })

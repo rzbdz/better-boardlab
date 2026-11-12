@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { plain, type Badge, type Element, type Field, type Inline, type ModuleUi, type Operation, type PageState, type Rich, type Values, type View, type ViewContext } from '../../src/ui/contract.ts'
 import { stamp } from '../../src/ui/format.ts'
 import { TerminalPage } from '../../src/ui/terminal.tsx'
+import { HelpButtons } from './help.tsx'
 import { Confirm, Icon, refreshNow, useUI } from './kit.tsx'
 
 let registered: ModuleUi[] = []
@@ -34,20 +35,27 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   const [busy, setBusy] = useState(false)
   const [lines, setLines] = useState<string[]>([])
   const [fraction, setFraction] = useState<number | null>(null)
+  const [step, setStep] = useState<string | null>(null)
+  // A line `[n/N] …` says the job is at step n of N (Sink in src/ui/contract.ts).
+  const line = (text: string) => {
+    const at = /^\[(\d+)\/(\d+)\]/.exec(text)
+    if (at && Number(at[2]) > 0) { setStep(`${at[1]}/${at[2]}`); setFraction(Math.min(1, Number(at[1]) / Number(at[2]))) }
+    setLines(list => [...list.slice(-200), text])
+  }
   const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? []])) })
   const go = async () => {
     if (op.kind === 'open') { ui.layer(close => <><h2>{op.title}</h2><div className="mv" style={{ marginTop: 12 }}><Elements body={op.body()} ctx={ctx} onDone={close} /></div></>, 'wide'); return }
     setBusy(true)
     try {
       const out = op.kind === 'action' ? await op.run(input())
-        : (setLines([]), setFraction(null), await op.start(input(), { line: text => setLines(list => [...list.slice(-200), text]), progress: setFraction }, new AbortController().signal))
+        : (setLines([]), setFraction(null), setStep(null), await op.start(input(), { line, progress: setFraction }, new AbortController().signal))
       ui.toast(out.message || `${op.label}：好了`); onDone?.()
     } catch (error) { ui.fail(`${op.label}失败`, error) } finally { await refreshNow().catch(() => {}); setBusy(false) }
   }
   const trigger = () => op.confirm
     ? ui.layer(close => <Confirm title={op.confirm!.title} ok={op.confirm!.action} danger={op.intent === 'danger'} close={close} onOk={() => void go()}>{plain(op.confirm!.body)}</Confirm>)
     : void go()
-  return { trigger, busy, lines, fraction }
+  return { trigger, busy, lines, fraction, step }
 }
 
 function OpButton({ op, ctx, values = () => ({}), onDone }: { op: Operation, ctx: Ctx, values?: () => Values, onDone?: () => void }) {
@@ -57,6 +65,7 @@ function OpButton({ op, ctx, values = () => ({}), onDone }: { op: Operation, ctx
       <button className={`pill sm${op.intent === 'primary' ? ' dark' : op.intent === 'danger' ? ' danger-o' : ''}`} disabled={!!op.blocked || run.busy} title={op.blocked} onClick={run.trigger}>{run.busy && <span className="spin" />}{op.label}</button>
       {op.kind === 'job' && (run.busy || run.lines.length > 0) && (
         <div style={{ flexBasis: '100%', display: 'grid', gap: 6 }}>
+          {run.step && <span className="sub small">步骤 {run.step}</span>}
           {run.fraction !== null && <div className="mv-progress"><i style={{ width: `${Math.round(run.fraction * 100)}%` }} /></div>}
           <pre className="mv-pre">{run.lines.slice(-30).join('\n')}</pre>
         </div>
@@ -69,7 +78,8 @@ const initial = (fields: Field[]): Values => Object.fromEntries(fields.map(f => 
 
 function FieldInput({ field, values, set }: { field: Field, values: Values, set: (id: string, value: Values[string]) => void }) {
   const value = values[field.id]
-  const wrap = (control: ReactNode, wide = false) => <label className={`field${wide ? ' wide' : ''}`}>{field.label}{control}{'help' in field && field.help && <span className="sub small" style={{ fontWeight: 400 }}>{rich(field.help)}</span>}</label>
+  const label = field.doc ? <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{field.label}<HelpButtons view={{ title: field.label, help: field.doc }} ai={false} /></span> : field.label
+  const wrap = (control: ReactNode, wide = false) => <label className={`field${wide ? ' wide' : ''}`}>{label}{control}{'help' in field && field.help && <span className="sub small" style={{ fontWeight: 400 }}>{rich(field.help)}</span>}</label>
   switch (field.kind) {
     case 'switch': return <div className="toggle wide"><span>{field.label}</span><button type="button" className={`sw${value ? ' on' : ''}`} aria-label={field.label} onClick={() => set(field.id, !value)} /></div>
     case 'choice': return wrap(<select className="select" value={String(value ?? '')} onChange={e => set(field.id, e.target.value)}>{field.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>)
@@ -163,7 +173,7 @@ function One({ element, ctx, onDone }: { element: Element, ctx: Ctx, onDone?: ()
     case 'details': return <Details element={element} ctx={ctx} />
     case 'group': return element.layout === 'columns'
       ? <div className="mv-cols"><Elements body={element.body} ctx={ctx} onDone={onDone} /></div>
-      : <div className="mv-group">{element.title && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>{element.title}{badge(element.status)}</div>}<Elements body={element.body} ctx={ctx} onDone={onDone} /></div>
+      : <div className="mv-group">{element.title && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>{element.title}{badge(element.status)}{element.help && <HelpButtons view={{ title: element.title, help: element.help }} ai={false} />}</div>}<Elements body={element.body} ctx={ctx} onDone={onDone} /></div>
     case 'custom': return element.type === 'terminal.page' ? <TerminalWithToasts api={String((element.data as { api?: string }).api ?? 'api/terminals')} /> : <Elements body={element.fallback} ctx={ctx} onDone={onDone} />
   }
 }
@@ -190,7 +200,7 @@ export function ViewPanel({ view }: { view: View }) {
   const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }
   return (
     <section className="panel">
-      {view.title && <h2>{view.title}{badge(view.status)}</h2>}
+      {view.title && <h2>{view.title}{badge(view.status)}<HelpButtons view={view} /></h2>}
       <div className="mv" style={{ marginTop: view.title ? 10 : 0 }}><Elements body={view.body} ctx={ctx} /></div>
     </section>
   )

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Make a release of this distribution: one tarball with everything boardd and the CLI need and nothing they don't (the
- * built CLI and pages need only Node itself), plus the bsp tree boardd installs on board hosts and install.sh.
+ * built CLI and pages need only Node itself), plus the bsp tree boardd installs on board hosts, install.sh (the bootstrap
+ * that fetches a release) and setup.sh (this release's installer, which install.sh runs).
  *
  *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>]
  *
@@ -35,8 +36,10 @@ if (git('status', '--porcelain', '--untracked-files=no', '--', 'src', 'core', 'f
 const stage = join(out, `boardlab-${version}`)
 rmSync(stage, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
-const files = ['dist', 'skills', 'LICENSE', 'README.md'].filter(path => existsSync(join(root, path)))
+const files = ['dist', 'skills', 'docs/help', 'LICENSE', 'README.md'].filter(path => existsSync(join(root, path)))
 if (existsSync(join(root, 'firmware'))) files.push('firmware')
+// The tools board hosts get beside bspd (src/modules/bsp/host-tools.ts), when this distribution carries any.
+if (existsSync(join(root, 'host-tools'))) files.push('host-tools')
 execFileSync('tar', ['-cf', '-', ...files], { cwd: root, maxBuffer: 1 << 30 }).length
 execFileSync('sh', ['-c', `tar -cf - ${files.join(' ')} | tar -xf - -C '${stage}'`], { cwd: root })
 // The bsp tree board hosts are set up from: the files git tracks there, with serial-mux's.
@@ -47,8 +50,11 @@ if (existsSync(join(bsp, 'deploy/bspd-install.sh'))) {
   writeFileSync(join(stage, 'externals/bsp/REVISION'), execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
 }
 writeFileSync(join(stage, 'VERSION'), `${version}\n`)
+// install.sh is the thin bootstrap (fetch a release, run its setup.sh); setup.sh is this release's own installer. Both
+// ship in the tarball: an installed machine keeps install.sh and every update runs the fetched release's setup.sh.
 const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8').replace('@RELEASE_SOURCE@', source)
 writeFileSync(join(stage, 'install.sh'), installer, { mode: 0o755 })
+writeFileSync(join(stage, 'setup.sh'), readFileSync(join(root, 'scripts/setup.sh'), 'utf8'), { mode: 0o755 })
 writeFileSync(join(stage, 'REVISION'), `${revision}\n`)
 writeFileSync(join(stage, 'package.json'), JSON.stringify({ name: 'boardlab', version, type: 'module', private: true }, null, 2))
 const file = `boardlab-${version}.tar.gz`

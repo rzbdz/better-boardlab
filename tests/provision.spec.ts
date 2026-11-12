@@ -4,10 +4,12 @@
  * and its installer run as root, and the lab is pointed at the bspd it started.
  */
 import { describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Hosts } from '../src/modules/hosts/ssh.ts'
 import { installHost } from '../src/modules/bsp/provision.ts'
+import { hostArch, readHostTools } from '../src/modules/bsp/host-tools.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -43,12 +45,14 @@ dest=\${args[1]#*:}; dest=\${dest//\\/tmp\\//${remote}/tmp/}; mkdir -p "$(dirnam
   return { bin, log: () => existsSync(log) ? readFileSync(log, 'utf8') : '' }
 }
 
-/** A bsp tree whose installer only says it is ready (and that it ran as root with the token given). */
-function fakeBspTree() {
+/** A bsp tree whose installer only says it is ready (and that it ran as root with the token given), after `steps`. */
+function fakeBspTree(steps = '') {
   const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
   writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
 id=""; token=""; while [[ $# -gt 0 ]]; do case $1 in --id) id=$2; shift 2;; --token) token=$2; shift 2;; *) shift;; esac; done
-echo "--> installing $id"; echo "token-len \${#token}"; echo "BSPD-READY $id 8765 f61b6f8"
+echo "--> installing $id"; echo "token-len \${#token}"
+${steps}
+echo "BSPD-READY $id 8765 f61b6f8"
 `)
   writeFileSync(join(tree, 'REVISION'), 'f61b6f8\n')
   return tree
@@ -76,6 +80,28 @@ describe('setting up a bsp board host', () => {
     expect(ssh.log().split('\n').filter(line => line.includes('key=yes')).length).toBeGreaterThan(2)
   })
 
+  it('passes the installer\'s stages on as step n of N, the lines under a stage carrying it', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    const hosts = new Hosts(join(dir, 'state'))
+    const lines: string[] = []
+    const steps = [
+      'echo "--> [1/3] creating the Python environment (a few minutes the first time)"', 'echo "    ... 5s"',
+      'echo "--> [2/3] installing bsp"', 'echo "    Collecting pyyaml"', 'echo "--> [3/3] checking health"',
+    ].join('\n')
+    await installHost(hosts, fakeBspTree(steps), { id: 'lab1', access: { address: 'lab-1', user: 'root', password: 'opensesame' } }, null, line => lines.push(line))
+    expect(lines.slice(lines.indexOf('token-len 48'))).toEqual([
+      'token-len 48',
+      '[1/3] creating the Python environment (a few minutes the first time)',
+      '[1/3] creating the Python environment (a few minutes the first time) · ... 5s',
+      '[2/3] installing bsp',
+      '[2/3] installing bsp · Collecting pyyaml',
+      '[3/3] checking health',
+      'BSPD-READY lab1 8765 f61b6f8',
+    ])
+  })
+
   it('gets in by this machine\'s own ssh setup and puts boardd\'s key there too', async () => {
     const remote = join(dir, 'remote')
     const ssh = fakeSsh(remote)
@@ -95,6 +121,51 @@ describe('setting up a bsp board host', () => {
     const hosts = new Hosts(join(dir, 'state'))
     const done = await installHost(hosts, fakeBspTree(), { id: 'here', access: { address: 'localhost', user: 'root' } }, 'a'.repeat(48), () => {})
     expect(done).toMatchObject({ target: 'local', url: 'bspd+http://127.0.0.1:8765', token: 'a'.repeat(48) })
+  })
+
+  it('puts the host tools for the host\'s architecture in /opt/bspd/tools, and none when there are none', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    // The host says it is a riscv64 machine.
+    writeFileSync(join(ssh.bin, 'uname'), '#!/bin/bash\n[[ $1 == -m ]] && { echo riscv64; exit 0; }\nexec command -p uname "$@"\n')
+    chmodSync(join(ssh.bin, 'uname'), 0o755)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    process.env.FAKE_SSH_INHERIT = '1'
+    try {
+      const tools = join(dir, 'host-tools')
+      const entries = ['amd64', 'riscv64'].map(arch => {
+        mkdirSync(join(tools, arch), { recursive: true })
+        writeFileSync(join(tools, arch, 'flasher'), `#!/bin/sh\necho ${arch}\n`)
+        return { arch, name: 'flasher', sha256: createHash('sha256').update(`#!/bin/sh\necho ${arch}\n`).digest('hex') }
+      })
+      writeFileSync(join(tools, 'host-tools.json'), JSON.stringify(entries))
+      const hosts = new Hosts(join(dir, 'state'))
+      const setup = { id: 'lab3', access: { address: 'lab-3', user: 'root' } }
+      const lines: string[] = []
+      await installHost(hosts, fakeBspTree(), setup, null, line => lines.push(line), undefined, tools)
+      expect(lines).toContain('放主机工具：flasher')
+      const shipped = join(remote, 'opt/bspd/tools/flasher')
+      expect(readFileSync(shipped, 'utf8')).toContain('echo riscv64')
+      expect(statSync(shipped).mode & 0o777).toBe(0o755)
+      // A file that is not what host-tools.json says does not go.
+      rmSync(join(remote, 'opt'), { recursive: true })
+      writeFileSync(join(tools, 'riscv64/flasher'), 'something else')
+      await expect(installHost(hosts, fakeBspTree(), setup, null, () => {}, undefined, tools)).rejects.toThrow(/riscv64\/flasher.*sha256/)
+      expect(existsSync(join(remote, 'opt/bspd/tools'))).toBe(false)
+      // Without host-tools/ nothing is put there.
+      const quiet: string[] = []
+      await installHost(hosts, fakeBspTree(), setup, null, line => quiet.push(line), undefined, join(dir, 'absent'))
+      expect(quiet.some(line => line.includes('主机工具'))).toBe(false)
+      expect(existsSync(join(remote, 'opt/bspd/tools'))).toBe(false)
+    } finally { delete process.env.FAKE_SSH_INHERIT }
+  })
+
+  it('ships host tools that match their sha256 in host-tools.json', () => {
+    for (const tool of readHostTools(join(import.meta.dirname, '../host-tools'))) {
+      expect(createHash('sha256').update(readFileSync(tool.path)).digest('hex')).toBe(tool.sha256)
+      expect(statSync(tool.path).mode & 0o111).toBeTruthy()
+    }
+    expect(['x86_64', 'aarch64', 'riscv64'].map(hostArch)).toEqual(['amd64', 'arm64', 'riscv64'])
   })
 
   it('refuses addresses that would reach the shell', async () => {

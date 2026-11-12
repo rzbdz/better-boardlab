@@ -134,7 +134,7 @@ boardlab list
 scripts/install-client.sh me@build-server --remote ssh://boardlab@boardd-host --grant root@boardd-host
 ```
 
-用 install.sh 装的 boardd 也可以在网页上做这件事：设置 →「命令行机器」→「添加机器」，填机器地址、那边的普通用户（不能是 root）和这台 boardd 的地址，密码可选、只用一次（之后用 boardd 自己的密钥）。boardd 把自己运行的版本传过去，以那个用户装在 `~/.local` 下（那边的 Node 低于 24、架构又相同时，带上 boardd 自己的 Node），让那台机器的 ssh 密钥只能经隧道用户转发到 boardd 的端口，再 `boardlab remote set`、`boardlab status` 检查。boardd 以 root 运行时隧道用户默认是 `boardlab`（没有就建一个不能登录的），否则是 boardd 自己的用户；boardd 改不了那个用户的 `authorized_keys` 时，会给出要在它的机器上运行的命令。列表里每台机器显示装的版本、连不连得上（每半小时看一次，也可以点「检查」）；「更新」用这台 boardd 的版本重装，「删除」让那边不再连过来、收回隧道授权，可以连命令行一起卸掉。boardd 的机器要允许隧道用户 ssh 登录和 TCP 转发（`AllowTcpForwarding`）。
+用 install.sh 装的 boardd 也可以在网页上做这件事：设置 →「客户端配置」→「添加机器」，填机器地址、那边的普通用户（不能是 root）和这台 boardd 的地址，密码可选、只用一次（之后用 boardd 自己的密钥）。boardd 把自己运行的版本传过去，以那个用户装在 `~/.local` 下（那边的 Node 低于 24、架构又相同时，带上 boardd 自己的 Node），让那台机器的 ssh 密钥只能经隧道用户转发到 boardd 的端口，再 `boardlab remote set`、`boardlab status` 检查。boardd 以 root 运行时隧道用户默认是 `boardlab`（没有就建一个不能登录的），否则是 boardd 自己的用户；boardd 改不了那个用户的 `authorized_keys` 时，会给出要在它的机器上运行的命令。列表里每台机器显示装的版本、连不连得上（每半小时看一次，也可以点「检查」）；「更新」用这台 boardd 的版本重装，「删除」让那边不再连过来、收回隧道授权，可以连命令行一起卸掉。boardd 的机器要允许隧道用户 ssh 登录和 TCP 转发（`AllowTcpForwarding`）。
 
 设置存在 `~/.config/boardlab/remote.json`（权限 600；老版本写在 `~/.config/boards/` 的照样读），也可以用环境变量 `BOARDS_REMOTE`（加 `BOARDS_USER`、`BOARDS_PASSWORD`）临时指定；`boardlab remote show` 看当前用的是哪个，`boardlab remote clear` 改回本机。远程时你在 boardd 那边是 `user:<登录名>`（ssh 方式是 `--user` 或本机的 `$USER`），agent 照常用 `BOARDS_HOLDER=claude:<会话>`，代表的就是这个人。远程拿到的锁凭证存在同一目录的 `tokens.json`。`boardlab boot` 给的本机文件会先传到 boardd（`PUT /api/files/<sha256>`，按内容核对，同一个文件只传一次，3 天没用的删掉），再按 sha256 启动，所以在构建服务器上编完直接 `boardlab boot <板子> fsbl u-boot-opensbi ./Image.itb` 就行。
 

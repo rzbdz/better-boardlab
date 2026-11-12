@@ -6,7 +6,7 @@
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 export type SdkStream = 'stdout' | 'stderr'
@@ -26,6 +26,7 @@ export const CATALOG_ACTIONS = new Set(['list', 'get', 'put', 'recipe', 'rm', 'h
 
 export function bspSdk(options: { bin?: string, stateDir: string }): SdkRunner {
   const bin = options.bin ?? process.env.BOARDS_BSP ?? 'bsp'
+  const site = join(options.stateDir, 'bsp', 'site')
   return {
     run: (args, { holder, json, group = 'sdk', onOutput, signal }) => new Promise(resolve => {
       const dir = join(options.stateDir, 'bsp-holders', createHash('sha256').update(holder).digest('hex').slice(0, 16))
@@ -34,7 +35,9 @@ export function bspSdk(options: { bin?: string, stateDir: string }): SdkRunner {
         // BSP_CONFIG names the holder's own configuration directory: bsp keeps lease tokens next to it. Leases taken
         // through the raw passthrough are `bsp:<holder>`, which boardd sees as someone using the board in bsp (its own
         // leases are boardlab:<holder>).
-        env: { ...process.env, BSP_CONFIG: join(dir, 'remotes.json'), BSP_HOLDER: `${group === 'raw' ? 'bsp' : 'boardlab'}:${holder}`, PYTHONUNBUFFERED: '1' },
+        // BSP_SITE: the site boardd keeps and ships to its board hosts (SDKs, build servers), so SDK commands see the same.
+        env: { ...process.env, ...(existsSync(site) ? { BSP_SITE: site } : {}), BSP_CONFIG: join(dir, 'remotes.json'),
+          BSP_HOLDER: `${group === 'raw' ? 'bsp' : 'boardlab'}:${holder}`, PYTHONUNBUFFERED: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
       const stop = () => child.kill('SIGTERM')

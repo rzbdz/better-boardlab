@@ -6,6 +6,7 @@ import { ask, onPrefs, permission, prefs, support, TOPICS, type Topic } from '..
 import type { Board, LabSettings, Proposal } from 'boardlab-core/shared/types.ts'
 import { age, Confirm, fmtAt, Icon, model, slotOf, upper, useUI, Who } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
+import type { View } from '../../../src/ui/contract.ts'
 
 export type Theme = 'system' | 'light' | 'dark'
 const KIND: Record<Proposal['kind'], string> = { 'new-board': '新板子', 'replace-board': '换了板子', 'serial-moved': '串口换了', 'download-moved': '下载口换了', 'product-changed': '型号变了', 'slot-empty': '槽位空了' }
@@ -245,7 +246,10 @@ function LabSettingsPanel({ lab }: { lab: LabSettings }) {
 
 export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void, focus?: string }) {
   // One column of sections, and a list of them on the left that follows the scroll.
-  const views = viewsFor(state, 'settings')
+  // The lab's setup in the order it is done: board hosts, then the machines that use boardlab, then the site.
+  const FIRST = ['bsp-hosts', 'cli-machines', 'bsp-site']
+  const rank = (view: View) => { const at = FIRST.indexOf(view.id); return at < 0 ? FIRST.length : at }
+  const views = viewsFor(state, 'settings').map((view, index) => ({ view, index })).sort((a, b) => rank(a.view) - rank(b.view) || a.index - b.index).map(item => item.view)
   const sections: Array<{ id: string, title: string, group: string, body: JSX.Element }> = [
     { id: 'me', title: '我是谁', group: '你', body: <Identity you={state.you} onSaved={onIdentity} /> },
     { id: 'look', title: '外观', group: '你', body: <Appearance theme={theme} onTheme={onTheme} /> },

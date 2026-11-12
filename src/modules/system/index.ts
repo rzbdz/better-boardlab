@@ -5,11 +5,21 @@
  * locked and restarts boardd. The page reloads itself when it sees a new version.
  */
 import { execFile, spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
+
+/**
+ * Where releases come from, as install.sh takes it: a directory over http(s), a git repository and its branch
+ * (`git@host:group/repo.git#release`, `ssh://host/group/repo.git#release`, `https://host/group/repo.git#release`) or a
+ * git server's project API (`https://host/api/v4/projects/<id>#release`). Nothing else, so no shell ever sees more.
+ */
+export const sourcePattern = /^(https?:\/\/[\w.:@-]+(\/[\w.~%+-]*)*|git@[\w.-]+:[\w.~\/-]+\.git|ssh:\/\/[\w.@:-]+(\/[\w.~-]+)+\.git)(#[\w.\/-]+)?$/
+
+/** A token shown without giving it away. */
+const mask = (token: string) => token.length > 8 ? `••••${token.slice(-4)}` : '••••'
 
 export interface Version { version: string, revision: string, source: string | null, latest: { version: string, revision: string } | null, checkedAt: string | null, error: string | null, updating: boolean, newer: boolean }
 
@@ -42,17 +52,18 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
     setup(lab) {
       const version = (root && read(join(root, 'VERSION'))) ?? 'dev'
       const revision = (root && read(join(root, 'REVISION'))) ?? 'dev'
-      const source = prefix ? read(join(prefix, 'release-source')) : null
+      let source = prefix ? read(join(prefix, 'release-source')) : null
       let latest: Version['latest'] = null, checkedAt: string | null = null, error: string | null = null, updating = false
       const state = (): Version => ({ version, revision, source, latest, checkedAt, error, updating, newer: !!latest && latest.revision !== revision })
+      // release.json of a source, with the token a private project API takes.
+      const fetchRelease = async (from: string, tok: string | null) => JSON.parse(await (/\/api\/v4\/projects\//.test(from)
+        ? get(`${from.split('#')[0]}/repository/files/release.json/raw?ref=${encodeURIComponent(from.split('#')[1] ?? 'release')}`, tok ? { 'PRIVATE-TOKEN': tok } : {})
+        : get(/^(git\+)?(git@|ssh:\/\/)|\.git(#|$)/.test(from) ? from : `${from.replace(/\/$/, '')}/release.json`))) as { version: string, revision: string }
       const check = async (force: boolean) => {
         if (!source) return state()
         if (!force && checkedAt && lab.kernel.now() - Date.parse(checkedAt) < ttl) return state()
         try {
-          const release = JSON.parse(await (/\/api\/v4\/projects\//.test(source)
-            // A git server's project API (/api/v4/projects/<id>): release.json on its release branch, with the token install.sh kept (a private project).
-            ? get(`${source.split('#')[0]}/repository/files/release.json/raw?ref=${encodeURIComponent(source.split('#')[1] ?? 'release')}`, token() ? { 'PRIVATE-TOKEN': token()! } : {})
-            : get(/^(git\+)?(git@|ssh:\/\/)|\.git(#|$)/.test(source) ? source : `${source.replace(/\/$/, '')}/release.json`))) as { version: string, revision: string }
+          const release = await fetchRelease(source, token())
           latest = { version: release.version, revision: release.revision }; error = null
         } catch (failure) { error = (failure as Error).message }
         checkedAt = lab.kernel.iso()
@@ -64,6 +75,26 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
       setInterval(() => void check(false), ttl).unref()
       lab.api.add('system', [
         { method: 'GET', path: '/api/system/version', about: '这个 boardlab 的版本、有没有新版（缓存几个小时；check=1 现在就问）', handle: ({ query }) => check(query.get('check') === '1') },
+        { method: 'GET', path: '/api/system/source', about: '新版从哪里来（令牌只显示末尾几位）', handle: () => { const tok = token(); return { source, token: tok ? mask(tok) : null } } },
+        {
+          method: 'POST', path: '/api/system/source', about: '换新版的来源：source（https 目录、git 仓库#分支或项目 API#分支）、token（私有项目；空则删掉）；check=true 只看那里的版本不保存', handle: async ({ body }) => {
+            if (!prefix) throw new BoardError('invalid', '这个 boardlab 不是用 install.sh 装的（比如从源码跑的）：没有来源可换')
+            const from = typeof body.source === 'string' ? body.source.trim() : ''
+            if (!sourcePattern.test(from)) throw new BoardError('invalid', `来源不认识：${from || '（空）'}。要 https 目录、git@host:组/仓库.git#分支、ssh://…#分支、https://….git#分支 或 https://host/api/v4/projects/<id>#分支`)
+            const given = typeof body.token === 'string' ? body.token.trim() : undefined
+            if (given && !/^[\x21-\x7e]+$/.test(given)) throw new BoardError('invalid', '令牌里不能有空白或特殊字符')
+            let release: { version: string, revision: string }
+            try { release = await fetchRelease(from, given === undefined ? token() : given || null) } catch (failure) { throw new BoardError('invalid', `那里拿不到 release.json：${(failure as Error).message}`) }
+            if (body.check === true) return { source: from, version: release.version, revision: release.revision, message: `${from} 上是 ${release.version}（${release.revision}）` }
+            writeFileSync(join(prefix, 'release-source'), `${from}\n`, { mode: 0o600 }); chmodSync(join(prefix, 'release-source'), 0o600)
+            if (given) { writeFileSync(join(prefix, 'release-token'), `${given}\n`, { mode: 0o600 }); chmodSync(join(prefix, 'release-token'), 0o600) }
+            else if (given === '') rmSync(join(prefix, 'release-token'), { force: true })
+            source = from
+            latest = { version: release.version, revision: release.revision }; error = null; checkedAt = lab.kernel.iso()
+            lab.kernel.changed(null)
+            return { source: from, version: release.version, revision: release.revision, message: `来源换成 ${from}，那里是 ${release.version}（${release.revision}）` }
+          },
+        },
         {
           method: 'POST', path: '/api/system/update', about: '升级到新版：等没人拿锁时换上并重启 boardd（force=true 不等）', handle: async ({ body, caller }) => {
             if (!prefix || !source) throw new BoardError('invalid', '这个 boardlab 不是用 install.sh 装的（比如从源码跑的）：在源码里 git pull 再 build')
