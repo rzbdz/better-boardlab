@@ -20,6 +20,8 @@ interface Live {
   focus(): void
   /** Connect again now, if not live. */
   reconnect(): void
+  /** Clear the screen and everything scrolled out of it; the console stays connected. */
+  clear(): void
   dispose(): void
 }
 const lives = new Map<string, Live>()
@@ -56,6 +58,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     },
     focus() { term.focus() },
     reconnect() { if (live.status !== 'live' && !disposed) { window.clearTimeout(retry); connect() } },
+    clear() { term.clear(); term.focus() },
     dispose() { disposed = true; window.clearTimeout(retry); source?.close(); term.dispose(); el.remove(); lives.delete(key) },
   }
   const set = (status: ConsoleStatus) => { live.status = status; live.onStatus(status) }
@@ -104,6 +107,9 @@ window.addEventListener('pagehide', () => { for (const live of [...lives.values(
 
 /** Connect a board's console again now (a frontend's 重连 button). */
 export function reconnectConsole(board: string, die?: string) { lives.get(`${board}\0${die ?? ''}`)?.reconnect() }
+
+/** Clear a board's console (a frontend's 清屏 button): the screen and its scrollback, without disconnecting. */
+export function clearConsole(board: string, die?: string) { lives.get(`${board}\0${die ?? ''}`)?.clear() }
 
 export function SerialConsole({ board, die, dark, onStatus, className = 'bl-terminal' }: { board: string, die?: string, dark: boolean, onStatus?: (status: ConsoleStatus) => void, className?: string }) {
   const host = useRef<HTMLDivElement>(null)

@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { calls, state } from './frontend-setup.ts'
 
-vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
+vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
 const card = async (board: string) => { await waitFor(() => expect(document.querySelector(`[data-board="${board}"]`)).toBeTruthy(), wait); return document.querySelector(`[data-board="${board}"]`) as HTMLElement }
@@ -166,6 +166,15 @@ describe('Modern frontend', () => {
     expect(within(dialog()).queryAllByRole('button').some(el => /^刷机包/.test(el.textContent ?? ''))).toBe(false)
     fireEvent.click(await button('取消', dialog()))
     state.boards.find(b => b.name === 'bsp-k3-deb1')!.lab!.canFlashPackage = true
+    go('#/')
+  })
+
+  it('clears the console without disconnecting it', async () => {
+    const consoleUi = await import('../src/ui/console.tsx')
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    fireEvent.click(await button('清屏', document.querySelector('.ctb') as HTMLElement))
+    expect(consoleUi.clearConsole).toHaveBeenCalledWith('bsp-k3-cm1', 'die0')
     go('#/')
   })
 

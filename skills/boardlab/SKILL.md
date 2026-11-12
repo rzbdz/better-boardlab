@@ -45,6 +45,19 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 - 多芯片板用 `<board>.<die>` 指定芯片，例如 `boardlab send evb.die1 ...`。
 - 每条命令都支持 `--json`，解析结果用它。
 
+## 等结果，不要 sleep
+
+要等的东西几乎都能阻塞等到，不要用 `sleep` 盲等，也不要反复短轮询来猜：
+
+- **串口输出**：`boardlab send <board> '<命令>' --wait '<正则>' --timeout 30s` 一直等到匹配，退出码说明等到没有；
+  要看持续输出用 `boardlab console <board>`（长连接、断线自动重连），事后看用 `boardlab log <board>`。
+- **启动/刷机**是后台任务：`boardlab boot …` 会跟着任务直到结束；`--timeout` 给比预期略长的值，等不到就
+  `boardlab cancel <board>`，不要一直挂着。
+- **板子在等人**（`lab.attention`）：等用户，不要 sleep 猜；用户说做完了再 `boardlab confirm <board>`。
+- **`--timeout` 按工作内容定**：一般命令 10–30 秒，开机 60–180 秒，刷机可以几分钟到 30 分钟；取用户能接受的
+  值，不要用一个特别大的超时掩盖失败。
+- 确实没有阻塞接口时才轮询：间隔从短到长（0.5 秒、1 秒、2 秒…）并设总超时，拿到结果立即继续。
+
 ## SDK：编译、改代码、启动
 
 SDK 源码树在构建服务器上，也通过 boardlab 用（boardd 那边的 bsp 执行，用法和 `bsp sdk` 一样，`boardlab sdk help` 列出全部）：
@@ -105,6 +118,7 @@ boardlab registry hosts                             # 每台主机拿到的目�
 - 扫描（`boardlab scan --yes`）会逐个切换槽位上的板子，并重启所有串口守护进程。只要有任何一块板被拿着锁，boardd 就拒绝扫描；不要为了扫描去放别人的锁。
 - 烧录、擦除、修改板上的持久配置（`saveenv`、写 EEPROM 等）可以在持锁时做，结论里写明做了什么、用的什么镜像。
 - 抢别人的锁只有人能做，你只能请用户处理。
+- 等板子、等编译、等刷机用阻塞等待（`--wait`/`--timeout`/任务跟着走），不要 `sleep` 盲等，见上面「等结果，不要 sleep」。
 
 `boardlab stage <board> <固件名>` 只往内存加载 boardd 自带、sha256 和 `firmware.json` 一致的固件（`boardlab firmware` 列出），不会写板子；用之前仍要说明目的。`minor-board-info` 是扫描读型号用的，读完就停住。
 
