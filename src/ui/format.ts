@@ -29,6 +29,9 @@ export const ACTIONS: Record<string, string> = {
   'lab-config': '配置实验室', 'lab-test': '验证实验室', 'lab-sync': '实验室板子变动', 'lab-lease': '实验室租约', 'lab-discover': '发现板子',
   'lab-rebuild': '重建主机', 'lab-bind': '用空闲端口登记', 'lab-ports': '接线变化', confirm: '确认人工操作', 'console-input': '串口交互',
   flash: '刷机', sdk: 'SDK 操作', relay: '继电器', refresh: '重新读取', 'lab-slot': '槽位换板',
+  yield: '让给 AI', 'yield-request': 'AI 请求让出', cancel: '取消操作', 'lab-install': '装板卡主机', 'lab-remove': '删板卡主机',
+  'bsp-board': '改 bsp 登记', update: '升级 boardlab', catalog: 'SDK 目录', bsp: 'bsp 命令', 'lab-sync-host': '同步站点',
+  'flash-package': '刷机包', configure: '改操作',
 }
 /** One-click purposes when taking or queueing for a lock. */
 export const PURPOSES = ['临时调试', 'boardlab 调试', '临时开发任务']
