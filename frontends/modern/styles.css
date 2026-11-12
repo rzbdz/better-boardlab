@@ -447,7 +447,8 @@ body.console-full .detail{height:100vh}
 .settings-heading{margin:0;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--faint)}
 .settings-anchor{scroll-margin-top:64px}
 .settings-anchor .panel{margin:0}
-@media (max-width:900px){.settings-grid{grid-template-columns:1fr}.settings-nav{position:static;display:flex;flex-wrap:wrap;gap:6px}.settings-group{display:none}.settings-nav>div{display:contents}.settings-nav button{width:auto;height:28px}}
+/* A narrow screen: the sections as a strip above, and a column that may shrink (minmax(0,…), or a long line widens it). */
+@media (max-width:900px){.settings-grid{grid-template-columns:minmax(0,1fr);gap:16px}.settings-nav{position:static;display:flex;flex-wrap:wrap;gap:6px}.settings-group{display:none}.settings-nav>div{display:contents}.settings-nav button{width:auto;height:28px}.settings-flow{min-width:0;max-width:none}.settings-anchor,.settings-anchor .panel{min-width:0}.panel>h2{flex-wrap:wrap}}
 /* first steps on an empty boardlab */
 .first-steps{margin-bottom:18px}
 .first-steps .steps{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
