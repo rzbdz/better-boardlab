@@ -69,6 +69,20 @@ describe.runIf(has('tmux') && has('python3'))('web terminals', () => {
     } finally { await b.close() }
   }, 30_000)
 
+  it('resizing a terminal whose shell has ended is a no-op, not an EPIPE', async () => {
+    const b = await boardd()
+    try {
+      const made = await b.call('POST', '/api/terminals', { name: '要结束的' })
+      // The stream resizes the pty at once and again 60 ms later; the session ends in between.
+      const reading = b.watch(made.id, /$^/).catch(() => {})
+      await new Promise(resolve => setTimeout(resolve, 20))
+      await b.call('POST', '/api/terminals/remove', { id: made.id })
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(await b.call('POST', '/api/terminals/resize', { id: made.id, rows: 30, cols: 90 })).toEqual({ ok: true })
+      await reading
+    } finally { await b.close() }
+  }, 30_000)
+
   it('refuses names that are empty after trimming or too long, and terminals it does not have', async () => {
     const b = await boardd()
     try {

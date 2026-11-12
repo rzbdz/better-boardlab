@@ -108,12 +108,18 @@ export function terminal(options: { stateDir: string, tmux?: string, python?: st
           if (bridges.get(row.id) === made) bridges.delete(row.id)
           for (const fn of made.ended) fn(code === 0 ? '终端里的 shell 退出了' : `终端断开（${code ?? '信号'}）`)
         })
-        child.stdin!.on('error', () => {})
+        child.stdin!.on('error', () => {})        // a shell that ended while typing: drop the write
+        ;(child.stdio[3] as NodeJS.WritableStream | null)?.on('error', () => {})
         return made
+      }
+      /** The pty beside the shell: resizing it after the shell is gone must be a no-op, not an EPIPE. */
+      const control = (made: Bridge): NodeJS.WritableStream | null => {
+        const fd = made.child.stdio[3] as NodeJS.WritableStream | null
+        return fd && made.child.exitCode === null && !made.child.killed ? fd : null
       }
       const resize = (made: Bridge, rows: number, cols: number) => {
         made.rows = rows; made.cols = cols
-        ;(made.child.stdio[3] as NodeJS.WritableStream | null)?.write(`${rows} ${cols}\n`)
+        try { control(made)?.write(`${rows} ${cols}\n`) } catch { /* the terminal ended meanwhile */ }
       }
 
       const api: TerminalApi = {
