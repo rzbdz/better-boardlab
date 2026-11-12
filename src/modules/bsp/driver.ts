@@ -349,8 +349,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
     },
 
-    async cancel(config, { device }) {
-      const done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device], 60_000)
+    async cancel(config, { device, lease: token }) {
+      const done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device, ...lease(token)], 60_000)
       return `让 ${done.cancelled?.join('、') ?? '它'} 停下`
     },
 
