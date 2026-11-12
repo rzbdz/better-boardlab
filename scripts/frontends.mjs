@@ -5,6 +5,7 @@
  *
  *   node scripts/frontends.mjs [--out dist/ui] [--only <name>]
  */
+import { createHash } from 'node:crypto'
 import { build } from 'esbuild'
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -30,6 +31,14 @@ for (const { name } of list.frontends.filter(item => !only || item.name === only
   for (const file of await readdir(src)) if (file === 'index.html' || file.endsWith('.css')) await copyFile(join(src, file), join(dest, file))
   // Every frontend has the serial console, drawn with xterm.
   await copyFile(require.resolve('@xterm/xterm/css/xterm.css'), join(dest, 'xterm.css'))
+  // Its assets with a hash of what they hold: an update changes every URL, so a page (or a proxy in front of it) can
+  // never run the previous version's script against the new server.
+  let html = await readFile(join(dest, 'index.html'), 'utf8')
+  for (const file of ['main.js', 'styles.css', 'xterm.css']) {
+    const version = createHash('sha1').update(await readFile(join(dest, file))).digest('hex').slice(0, 10)
+    html = html.replace(new RegExp(`(src|href)="${file.replace('.', '\\.')}"`), `$1="${file}?v=${version}"`)
+  }
+  await writeFile(join(dest, 'index.html'), html)
 }
 await writeFile(join(out, 'frontends.json'), JSON.stringify({ default: list.default, frontends: list.frontends.map(({ name, title }) => ({ name, title })) }, null, 2))
 console.log(`Built the frontends ${list.frontends.map(item => item.name).join(', ')} into ${out} (default ${list.default}).`)
