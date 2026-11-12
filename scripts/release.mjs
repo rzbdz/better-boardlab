@@ -4,16 +4,18 @@
  * built CLI and pages need only Node itself), plus the bsp tree boardd installs on board hosts, install.sh (the bootstrap
  * that fetches a release) and setup.sh (this release's installer, which install.sh runs).
  *
- *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>]
+ *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>] [--since <ref>]
  *
- * Writes <out>/boardlab-<version>.tar.gz, <out>/install.sh, and <out>/release.json ({version, revision, file, sha256}),
- * which install.sh and `boardlab update` read; scripts/publish.mjs puts it where they fetch it from.
+ * Writes <out>/boardlab-<version>.tar.gz, <out>/install.sh, <out>/CHANGELOG.md (what changed since the previous release,
+ * which publish.mjs puts on the release) and <out>/release.json ({version, revision, file, sha256}), which install.sh and
+ * `boardlab update` read; scripts/publish.mjs puts it where they fetch it from.
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { changelog, previousRelease, subjectsSince } from './changelog.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -65,6 +67,12 @@ const file = `boardlab-${version}.tar.gz`
 execFileSync('tar', ['-czf', join(out, file), '-C', out, `boardlab-${version}`])
 rmSync(stage, { recursive: true, force: true })
 const sha256 = createHash('sha256').update(readFileSync(join(out, file))).digest('hex')
+// What changed since the previous release, for the release itself to publish (publish.mjs puts it in its notes and the
+// git release branch). The previous release is the one release.json in `out` names while it is an ancestor, else the
+// newest version tag; `--since` says otherwise.
+const previous = previousRelease(root, out)
+const since = option('since') ?? previous?.revision ?? ''
+writeFileSync(join(out, 'CHANGELOG.md'), changelog(version, revision, subjectsSince(since, 'HEAD', root), { since: previous?.version ?? option('since') }))
 writeFileSync(join(out, 'release.json'), JSON.stringify({ version, revision, file, sha256 }, null, 2) + '\n')
 writeFileSync(join(out, 'install.sh'), installer, { mode: 0o755 })
 console.log(`release ${version} (${revision}): ${join(out, file)} sha256 ${sha256.slice(0, 16)}…`)

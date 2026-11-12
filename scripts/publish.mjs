@@ -3,11 +3,13 @@
  * Publish a release made by scripts/release.mjs, where install.sh and boardd's update checks fetch it from:
  *
  *   node scripts/publish.mjs git <repository> [--branch release] [--out release]
- *       the release as the only commit of a branch (replaced each time): for a server reached over ssh
- *       (`--source <repository>#release`) or through a git server's project API (`--source <api>/projects/<id>#release`)
- *   node scripts/publish.mjs github <owner/repo> [--out release]
- *       a GitHub release v<version> with the tarball, release.json and install.sh, marked latest
- *       (`--source https://github.com/<owner/repo>/releases/latest/download`)
+ *       the release as the only commit of a branch (replaced each time), with its CHANGELOG.md and a v<version> tag:
+ *       for a server reached over ssh (`--source <repository>#release`) or through a git server's project API
+ *       (`--source <api>/projects/<id>#release`)
+ *   node scripts/publish.mjs github <owner/repo> [--out release] [--keep 3]
+ *       a GitHub release v<version> with the tarball, release.json, install.sh and the changelog as its notes, marked
+ *       latest, and deletes every release and tag but the newest `keep` (3) (`--source
+ *       https://github.com/<owner/repo>/releases/latest/download`)
  *
  * The commit is signed when git is set up to sign (user.signingkey), with this repository's identity and signing
  * settings (gpg.format, gpg.program, gpg.ssh.program).
@@ -17,6 +19,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { changelog, subjectsSince } from './changelog.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const [how, where, ...rest] = process.argv.slice(2)
@@ -29,6 +32,10 @@ if (!how || !where || !['git', 'github'].includes(how)) {
 const release = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'))
 const files = ['install.sh', 'release.json', release.file].map(file => join(out, file))
 for (const file of files) if (!existsSync(file)) throw new Error(`${file} is missing: run scripts/release.mjs first`)
+// What release.mjs wrote beside the tarball; a release made before changelog.mjs existed falls back to a line.
+const notesFile = join(out, 'CHANGELOG.md')
+const notes = existsSync(notesFile) ? readFileSync(notesFile, 'utf8') : `# boardlab ${release.version}\n\n${release.revision}\n`
+if (!existsSync(notesFile)) writeFileSync(notesFile, notes)
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim()
 const own = name => { try { return git(root, 'config', name) } catch { return '' } }
 
@@ -38,13 +45,15 @@ if (how === 'git') {
   try {
     git(work, 'init', '-q'); git(work, 'checkout', '-q', '--orphan', branch)
     for (const file of files) copyFileSync(file, join(work, file.split('/').at(-1)))
+    writeFileSync(join(work, 'CHANGELOG.md'), notes)
     writeFileSync(join(work, 'README.md'), `# boardlab ${release.version}
 
 The release boardlab installs and updates from. On the machine that will run boardlab, as root:
 
     git clone -q --depth 1 -b ${branch} ${where} /tmp/boardlab-release && sh /tmp/boardlab-release/install.sh; rm -rf /tmp/boardlab-release
 
-\`release.json\` names the tarball and its sha256. Each release replaces this branch's one commit.
+\`release.json\` names the tarball and its sha256. [CHANGELOG.md](CHANGELOG.md) says what changed since the previous
+release; the \`v${release.version}\` tag names the commit it was built from. Each release replaces this branch's one commit.
 `)
     git(work, 'add', '-A')
     // The key and how to sign with it (an ssh key, a gpg program of its own), as this repository has them.
@@ -53,12 +62,37 @@ The release boardlab installs and updates from. On the machine that will run boa
     const signoff = own('user.name') && own('user.email') ? ['-m', `Signed-off-by: ${own('user.name')} <${own('user.email')}>`] : []
     git(work, ...identity, 'commit', '-q', ...sign, '-m', `release ${release.version} (${release.revision})`, ...signoff)
     git(work, 'push', '-q', '-f', where, `${branch}:${branch}`)
+    // The next release's changelog starts here. A tag is a pointer, not a copy: it costs nothing to keep.
+    const tag = `v${release.version}`
+    try {
+      git(root, ...identity, 'tag', '-f', ...(own('user.signingkey') ? ['-s'] : ['-a']), tag, '-m', `boardlab ${release.version}`)
+      git(root, 'push', '-q', where, `+refs/tags/${tag}`)
+    } catch (error) {
+      console.log(`could not tag ${tag} (${String(error.stderr ?? error.message).trim().split('\n')[0]}): the next changelog falls back to release.json`)
+    }
     console.log(`published ${release.version} (${release.revision}) as ${where} ${branch}`)
   } finally { rmSync(work, { recursive: true, force: true }) }
 } else {
   const tag = `v${release.version}`
-  const notes = option('notes', null)
+  // A checkout prepared for the public distribution may have no previous release.json or tag: ask the releases already
+  // there, so the changelog still covers what changed since the last one.
+  try {
+    const previousTag = JSON.parse(execFileSync('gh', ['release', 'list', '--repo', where, '--limit', '1', '--json', 'tagName'], { encoding: 'utf8' }))[0]?.tagName
+    if (previousTag) {
+      const commit = execFileSync('gh', ['api', `repos/${where}/commits/${previousTag}`, '--jq', '.sha'], { encoding: 'utf8' }).trim()
+      writeFileSync(notesFile, changelog(release.version, release.revision, subjectsSince(commit, 'HEAD', root), { since: previousTag.replace(/^v/, '') }))
+    }
+  } catch (error) {
+    console.log(`could not build the changelog from the previous GitHub release (${String(error.stderr ?? error.message).trim().split('\n')[0]}); using the one release.mjs wrote`)
+  }
   execFileSync('gh', ['release', 'create', tag, ...files, '--repo', where, '--title', `boardlab ${release.version}`,
-    ...(notes ? ['--notes-file', notes] : ['--notes', `boardlab ${release.version} (${release.revision})`]), '--target', option('target', 'main')], { stdio: 'inherit' })
+    '--notes-file', notesFile, '--target', option('target', 'main')], { stdio: 'inherit' })
   console.log(`published ${tag} on ${where}`)
+  // Storage is not free: each release carries a tarball, so keep the newest `keep` (3) and delete older ones with their
+  // tags. The just-created release is the newest.
+  const keep = Math.max(1, Number(option('keep', '3')) || 3)
+  const listed = JSON.parse(execFileSync('gh', ['release', 'list', '--repo', where, '--limit', '100', '--json', 'tagName,createdAt'], { encoding: 'utf8' }))
+  const old = listed.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(keep)
+  for (const item of old) execFileSync('gh', ['release', 'delete', item.tagName, '--repo', where, '--yes', '--cleanup-tag'], { stdio: 'inherit' })
+  if (old.length) console.log(`kept the newest ${keep} releases; deleted ${old.map(item => item.tagName).join(', ')}`)
 }
