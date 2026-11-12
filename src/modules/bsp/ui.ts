@@ -373,7 +373,15 @@ export const ui: ModuleUi = {
     const board = context.board ? state.boards.find(item => item.name === context.board) : undefined
     if (board) {
       const bspBoard = !!board.lab && !board.lab.empty && labs.some(lab => lab.id === board.lab!.id)
-      return bspBoard ? [{ id: 'bsp-board', slot: 'board', title: 'bsp 登记', body: [{ kind: 'actions', actions: [open('edit', '改登记…', `${board.name.toUpperCase()} 的 bsp 登记`, () => boardForm(board.name))] }] }] : []
+      const home = bspBoard ? labs.find(lab => lab.id === board.lab!.id) : undefined
+      return bspBoard ? [{
+        id: 'bsp-board', slot: 'board', title: 'bsp 登记',
+        body: [
+          { kind: 'actions', actions: [open('edit', '改登记…', `${board.name.toUpperCase()} 的 bsp 登记`, () => boardForm(board.name))] },
+          // The host's own page: its GPIO header, lines and events, opened on the host itself.
+          ...(home?.url ? [text([{ link: 'GPIO 面板', href: gpioLink(home.url, home.id) }])] : []),
+        ],
+      }] : []
     }
     return [{
       id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机',
