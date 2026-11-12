@@ -35,9 +35,9 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
     setup(lab) {
       const hosts = options.stateDir ? hostsFor(options.stateDir) : null
       const sshKey = hosts?.keyFile
-      for (const id of options.instances ?? ['bsp']) lab.backends.register(id, bspLab({ bin: options.bin, sshKey }))
+      for (const id of options.instances ?? ['bsp']) lab.backends.register(id, bspLab({ bin: options.bin, sshKey, stateDir: options.stateDir }))
       // A bsp lab is one board host: added on the page, set up there by installing bspd on the host over ssh.
-      lab.backends.offer({ kind: 'bsp', title: 'bsp 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 bspd 并接入', create: () => bspLab({ bin: options.bin, sshKey }) })
+      lab.backends.offer({ kind: 'bsp', title: 'bsp 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 bspd 并接入', create: () => bspLab({ bin: options.bin, sshKey, stateDir: options.stateDir }) })
       const access = (body: Record<string, unknown>) => {
         const address = String(body.address ?? '').trim()
         if (!address) throw new BoardError('invalid', '要填主机地址：IP、域名或 ssh 配置里的名字')

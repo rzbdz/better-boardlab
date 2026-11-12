@@ -6,6 +6,8 @@
  */
 import { execFile, spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews } from 'boardlab-core/core/backend.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
@@ -26,7 +28,7 @@ export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, time
 export type BspSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
 /** `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). */
-export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string }
+export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string, stateDir?: string }
 
 /** A DUT spec as bsp probe proposes it (`bsp dut add` takes it back). */
 interface BspSpec {
@@ -103,8 +105,11 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   const registryUrl = (config: LabConfig) => config.url
   const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', bspdUrl(config)]
     : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
+  // The site boardd keeps (SDKs, recipes) is what local bsp commands read: `sdk show`, a boot recipe's break points.
+  const site = options.stateDir ? join(options.stateDir, 'bsp', 'site') : null
   const env = (config: LabConfig): NodeJS.ProcessEnv => ({
-    ...process.env, ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
+    ...process.env, ...(site && existsSync(site) ? { BSP_SITE: site } : {}),
+    ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
     ...(options.sshKey && bspdUrl(config).startsWith('ssh://') ? { BSP_SSH_OPTIONS: `-i ${options.sshKey} -o IdentitiesOnly=yes` } : {}),
   })
   const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal): Promise<T> => {
