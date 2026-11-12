@@ -203,6 +203,22 @@ describe('Modern frontend', () => {
     unmount()
   })
 
+  it('draws the 模块 page like any other page: a title and a panel, not bare', async () => {
+    go('#/p/modules')
+    await waitFor(() => expect(document.querySelector('.page .hero h1')?.textContent).toBe('模块'), wait)
+    expect(document.querySelector('.page .panel')).toBeTruthy()
+    expect(document.querySelector('.page .panel .mv-list')).toBeTruthy()
+    go('#/')
+  })
+
+  it('asks the person holding a board whether to let an agent have it', async () => {
+    const withYield = () => [...document.querySelectorAll('.banner')].find(el => el.textContent?.includes('想用'))
+    await waitFor(() => expect(withYield()).toBeTruthy(), wait)
+    const banner = withYield() as HTMLElement
+    fireEvent.click(await button('让出', banner))
+    await waitFor(() => expect(calls.some(c => c.path === 'api/yields' && (c.body as { action: string }).action === 'yield')).toBe(true), wait)
+  })
+
   it('opens a settings section by its address', async () => {
     go('#/settings/bsp-hosts')
     await waitFor(() => expect(document.querySelector('.settings-nav button.on')?.textContent).toBe('bsp 板卡主机'), wait)

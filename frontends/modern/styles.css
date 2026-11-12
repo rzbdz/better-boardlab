@@ -334,7 +334,10 @@ body.console-full .detail{height:100vh}
 
 /* other pages */
 .panel{border-radius:var(--r);background:var(--tile);padding:16px 18px;margin-bottom:12px}
-.panel>h2{margin:0 0 3px;font-size:15px;display:flex;align-items:center;gap:8px}
+.panel>h2{margin:0 0 3px;font-size:15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:7px}
+/* A panel's title and its small print keep their line; the actions go right, on a line of their own when they must. */
+.panel>h2 .ttl,.panel>h2 .small{white-space:nowrap}
+.panel>h2 .acts{flex:none}
 .panel>h2 .small{font-weight:500}
 .panel .lead{color:var(--sub);margin:0 0 12px;font-size:12.5px}
 .panels{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:12px;align-items:start}

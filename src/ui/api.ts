@@ -118,6 +118,8 @@ export const api = {
   channels: (board: string) => call<BoardChannels>('GET', `api/relay?board=${encodeURIComponent(board)}`),
   setChannel: (board: string, channel: string, action: string, ms: number | null) => call<{ message: string }>('POST', 'api/relay', { board, channel, action, ms: ms ?? undefined }),
   confirm: (board: string) => call<{ message: string }>('POST', 'api/confirm', { board }),
+  /** Answer an agent waiting for a board a person holds: let it have the board, or keep it. */
+  answerYield: (board: string, action: 'yield' | 'deny') => call<{ message: string }>('POST', 'api/yields', { board, action }),
   cancelBoard: (board: string) => call<{ message: string }>('POST', 'api/board/cancel', { board }),
   bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
   /** Where an SDK's recipe can stop early (empty when it has none). */

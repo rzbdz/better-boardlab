@@ -142,6 +142,10 @@ function Shell() {
       </div>
     </div></header>
     {state && attn.length > 0 && page !== 'board' && <div className="banner">{attn.map(b => <Banner key={b.name} board={b} you={state.you} fresh={!seen.current.has(b.name)} />)}</div>}
+    {state && (state.yields ?? []).length > 0 && <div className="banner">{state.yields.map(y => (
+      <div key={y.id} className="b"><Icon name="hand" /><div className="msg"><b>{holder(y.holder).name}</b> 想用 <b>{upper(y.board)}</b>（{y.purpose}）· 拿锁的是你</div>
+        <span className="acts"><button className="pill sm" onClick={() => void api.answerYield(y.board, 'deny').then(() => refresh()).catch(e => ui.fail('回答失败', e))}>继续用</button>
+          <button className="pill sm dark" onClick={() => void api.answerYield(y.board, 'yield').then(() => refresh()).catch(e => ui.fail('回答失败', e))}>让出</button></span></div>))}</div>}
     <main className={connected ? '' : 'stale'}>
       {!state ? <div className="empty-state" style={{ paddingTop: 120 }}>{error ? <><p>连不上 boardd：{error}</p><button className="pill sm dark" onClick={() => void refresh()}>重试</button></> : <span className="spin" />}</div>
         : page === 'board' ? <BoardPage state={state} name={where_.arg} dark={dark} full={full} setFull={setFull} watched={watched} />

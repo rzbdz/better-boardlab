@@ -25,7 +25,8 @@ const board = (name: string, extra: Partial<Board>): Board => ({
 export function mockState(you = 'user:alice'): State {
   return {
     you, now,
-    modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'bsp', title: 'bsp 板卡主机' }],
+    yields: [{ id: 'y1', board: 'bsp-k1-musecard', holder: 'claude:kernel-bisect-mmc', purpose: 'bisect the mmc0 timeout', owner: you, at: now, until: now }],
+    modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'bsp', title: 'bsp 板卡主机' }, { id: 'clients', title: '客户端配置' }, { id: 'system', title: '系统' }],
     boards: [
       board('bsp-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'bsp/host-a/s1', lab: inLab('k1-musecard') }),
       board('bsp-k3-deb1', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s3', lease: lease('bsp-k3-deb1', you, '临时调试'), lab: inLab('k3-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null } }) }),

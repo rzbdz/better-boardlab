@@ -41,7 +41,7 @@ function LabPanel({ lab, state, open }: { lab: LabSettings, state: PageState, op
   const discoverAll = () => ui.layer(close => <Confirm title={`在实验室 ${lab.id} 发现新板子`} ok="开始" danger close={close} onOk={() => fire('发现', api.discoverLab(lab.id))}>在所有主机上找新接的板子：逐个拉还没用过的复位线，看哪个串口有反应、哪个下载口出现。<b>接在这些线上的板子会被复位。</b></Confirm>)
   return <>
     <section className="panel">
-      <h2><Icon name="radar" />实验室 {lab.id}<span className="sub small">{lab.kind}{lab.syncedAt ? ` · ${age(lab.syncedAt)}前同步` : ''}</span>
+      <h2><Icon name="radar" /><span className="ttl">实验室 {lab.id}</span><span className="sub small">{lab.kind}{lab.syncedAt ? ` · ${age(lab.syncedAt)}前同步` : ''}</span>
         <span className="acts"><button className="pill sm danger-o" disabled={running || anyHeld.length > 0} title={anyHeld.length ? `${anyHeld.map(b => upper(b.name)).join('、')} 有锁` : undefined} onClick={discoverAll}><Icon name="radar" />发现新板子</button></span></h2>
       <p className="lead">{anyHeld.length ? `有 ${anyHeld.length} 块板子有锁，整个实验室的发现要等它们释放；单个空槽位和人工配对随时可以。` : '找到的板子马上登记；没能自动登记的列在「待确认」。'}</p>
       {lab.discovery && <div className={`flag${running ? ' run' : ''}`} style={{ margin: 0 }}>{running ? <span className="spin" /> : <Icon name="clock" />}<div><b>{running ? '正在发现' : '上次发现'}</b><span>{lab.discovery.line} · {age(lab.discovery.at)}前</span></div></div>}
@@ -63,7 +63,7 @@ function HostPanel({ lab, host, state, boards, running, open }: { lab: LabSettin
     没有复位线的板子用这个：开始后按页面上的提示，<b>一次只让一块还没登记的板子进下载模式</b>，实验室把串口和下载口配成一对。不会复位别的板子，有人在用板子时也能用。</Confirm>)
   return (
     <section className="panel">
-      <h2><Icon name="server" />{host}<span className="sub small">{boards.filter(b => !b.lab?.empty).length} 块板子{lockedHere.length ? ` · ${lockedHere.length} 块有锁` : ''}</span>
+      <h2><Icon name="server" /><span className="ttl">{host}</span><span className="sub small">{boards.filter(b => !b.lab?.empty).length} 块板子{lockedHere.length ? ` · ${lockedHere.length} 块有锁` : ''}</span>
         <span className="acts">
           <button className="pill sm" disabled={running} onClick={human}><Icon name="hand" />人工配对</button>
           {lab.canRediscover && <button className="pill sm" disabled={running} title="保留在用的板子，只重做变动的" onClick={rediscover}><Icon name="radar" />重新发现</button>}

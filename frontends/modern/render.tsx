@@ -187,11 +187,20 @@ function TerminalWithToasts({ api }: { api: string }) {
   return <TerminalPage base={api} onError={(title, error) => ui.fail(title, error)} />
 }
 
-/** A module's page (a `page` view): its body, filling the page. */
+/**
+ * A module's page (a `page` view). One that draws itself (the terminal's custom element) fills the window; any other is
+ * a page like the others: a title, then its body in a panel.
+ */
 export function ViewPage({ view }: { view: View }) {
   const [selections, setSelections] = useState<Record<string, string[]>>({})
   const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }
-  return <div className="module-page"><Elements body={view.body} ctx={ctx} /></div>
+  if (view.body.some(element => element.kind === 'custom')) return <div className="module-page"><Elements body={view.body} ctx={ctx} /></div>
+  return (
+    <div className="page">
+      <section className="hero"><h1>{view.title ?? view.id}</h1></section>
+      <section className="panel"><Elements body={view.body} ctx={ctx} /></section>
+    </div>
+  )
 }
 
 /** A module's view as a panel. */
