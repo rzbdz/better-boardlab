@@ -77,7 +77,7 @@ release; the \`v${release.version}\` tag names the commit it was built from. Eac
   // A checkout prepared for the public distribution may have no previous release.json or tag: ask the releases already
   // there, so the changelog still covers what changed since the last one.
   try {
-    const previousTag = JSON.parse(execFileSync('gh', ['release', 'list', '--repo', where, '--limit', '1', '--json', 'tagName'], { encoding: 'utf8' }))[0]?.tagName
+    const previousTag = execFileSync('gh', ['api', `repos/${where}/releases/latest`, '--jq', '.tag_name'], { encoding: 'utf8' }).trim()
     if (previousTag) {
       const commit = execFileSync('gh', ['api', `repos/${where}/commits/${previousTag}`, '--jq', '.sha'], { encoding: 'utf8' }).trim()
       writeFileSync(notesFile, changelog(release.version, release.revision, subjectsSince(commit, 'HEAD', root), { since: previousTag.replace(/^v/, '') }))
@@ -91,8 +91,12 @@ release; the \`v${release.version}\` tag names the commit it was built from. Eac
   // Storage is not free: each release carries a tarball, so keep the newest `keep` (3) and delete older ones with their
   // tags. The just-created release is the newest.
   const keep = Math.max(1, Number(option('keep', '3')) || 3)
-  const listed = JSON.parse(execFileSync('gh', ['release', 'list', '--repo', where, '--limit', '100', '--json', 'tagName,createdAt'], { encoding: 'utf8' }))
-  const old = listed.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(keep)
-  for (const item of old) execFileSync('gh', ['release', 'delete', item.tagName, '--repo', where, '--yes', '--cleanup-tag'], { stdio: 'inherit' })
-  if (old.length) console.log(`kept the newest ${keep} releases; deleted ${old.map(item => item.tagName).join(', ')}`)
+  const listed = JSON.parse(execFileSync('gh', ['api', `repos/${where}/releases?per_page=100`], { encoding: 'utf8' }))
+  const old = listed.filter(item => !item.draft).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(keep)
+  for (const item of old) {
+    execFileSync('gh', ['release', 'delete', item.tag_name, '--repo', where, '--yes'], { stdio: 'inherit' })
+    // An older gh has no `release delete --cleanup-tag`: remove the tag it leaves behind.
+    try { execFileSync('gh', ['api', '-X', 'DELETE', `repos/${where}/git/refs/tags/${item.tag_name}`], { stdio: 'ignore' }) } catch {}
+  }
+  if (old.length) console.log(`kept the newest ${keep} releases; deleted ${old.map(item => item.tag_name).join(', ')}`)
 }
