@@ -40,6 +40,7 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 - 实验室的板子都在槽位里（`boardlab list` 里的「槽位 host1/s3」）。所有命令都可以用槽位名代替板名：`boardlab lock host1/s3 --for …`、`boardlab console host1/s3`。在同一个槽位上换着板子反复测试时，用槽位名，不用管板子叫什么。
 - 「空槽位」是还没登记板子的串口：可以拿锁、`boardlab console` 看，用户要求时 `boardlab lab discover bsp --slot <主机>/s4 --yes` 在上面找板子（会复位没登记的线），找到就登记。
 - 用户说槽位里换了板子：拿锁后 `boardlab refresh <槽位>`（`--name <新名字>` 或 `--rename` 按读到的型号改名），不要 remove 再重新发现；锁跟着槽位走。
+- 拿锁时板子正被人用：你会等最多 60 秒，页面会问那个人「让出 / 继续用」。被拒时说明没有拿到，别抢；等他放锁或改用另一块板子。
 - `boardlab reset` 是让板子启动它自己的系统。下载模式短接的板子：`boardlab list` 写着「复位：经 … 从介质启动」时，复位会从板载介质启动；写着「停在下载模式」时，复位后它停在下载模式，要用 `boardlab boot` 从内存启动。
 - 多芯片板用 `<board>.<die>` 指定芯片，例如 `boardlab send evb.die1 ...`。
 - 每条命令都支持 `--json`，解析结果用它。
@@ -70,6 +71,8 @@ boardlab unlock bsp-board-1
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
 - 本机文件（例如自己打的 FIT）照样 `boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`，文件会自动传过去。
+- 只在调 U-Boot 或它加载的内核时：`boardlab boot <board> --sdk <sdk> --break uboot` 停在 U-Boot（recipe 里有 `breaker: uboot` 才行；页面启动对话框也会列出来）。之后在串口里自己操作。
+- 启动或刷机卡住了用 `boardlab cancel <board>`：任务在这一步之后停，板子回到你手里。
 - 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先传给 boardd。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
 
 ## 给 SDK 加启动或刷机方法
