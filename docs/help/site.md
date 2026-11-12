@@ -13,7 +13,7 @@
 
 ## 仓库里有什么
 
-一个站点仓库可以放下整个实验室的配置。同步时只把下面这几样发给主机：
+一个站点仓库可以放下整个实验室的配置。同步时只把下面这些发给主机（`skills/` 除外，它留在 boardd 给 agent 用）：
 
 | 目录 | 内容 |
 |---|---|
@@ -23,6 +23,7 @@
 | `sdk/workspaces/<id>.yaml` | 几个 SDK 共用的一棵源码树 |
 | `socs/<soc>/soc.yaml` | SoC 资料，镜像文件也放在同一个目录（见「SoC 资料」） |
 | `hooks/<kind>/<name>` | 钩子脚本，比如厂商的刷机工具 |
+| `skills/<sdk>.md` | SDK 自己的说明（SKILL.md），给在那个 SDK 的仓库里工作的 agent；同步时不发给主机 |
 | `.blobs/<sha256>/<file>` | 取来的镜像（不进 git，boardd 同步前自己去取） |
 
 别的目录，比如 `hosts/`、`deploy/`、`docs/`、`notes/`、`README.md`，可以照样放在仓库里，boardd 不读也不发。每台主机自己的 `hosts/<id>.yaml` 由主机自己保管，同步不会覆盖它。
@@ -56,6 +57,22 @@ SoC 资料里可以列一些探测用的镜像（例如 K1 的 FSBL 和 U-Boot�
 
 镜像的加法见帮助页「SoC 资料」。
 
+## SDK 自己的说明（skill）
+
+SDK 可以带一份自己的 `SKILL.md`，说明一份源码树在这个 SDK 里怎么用（例如同一份 bsp 源码的不同启动配置：edk2、u-boot、ACPI）。它放在站点的 `skills/<sdk>.md`；bsp 自带的 pack 也可以放 `<pack>/skills/<sdk>.md`，站点里的同 id 覆盖 pack 的。这是 Markdown，不是目录里的 YAML，所以不参与目录校验，同步时也不发给板卡主机。
+
+在 SDK 的仓库里工作时，agent 可以这样取到它：
+
+```sh
+boardlab sdk skill list                      # 有哪些 SDK 带自己的说明
+boardlab sdk skill <sdk>                     # 打印 Markdown
+boardlab sdk skill <sdk> --install           # 写到当前目录的 .claude/skills/<sdk>/SKILL.md
+boardlab sdk skill <sdk> --install --dir DIR # 写到 DIR/.claude/skills/<sdk>/SKILL.md
+boardlab sdk skill <sdk> --install -g        # 写到这台机器上每个装了的 agent 的 skill 目录
+```
+
+站点里的 skill 用 `boardlab site show skill <id>` 看，用 `boardlab site set skill <id> -f <文件|->` 写（以改的人的名义提交），用 `boardlab site remove skill <id>` 删。
+
 ## 命令行
 
 ```sh
@@ -65,6 +82,7 @@ boardlab site sync                    # 同步到所有主机
 boardlab site set server build-a --file build-a.yaml
 boardlab site set sdk vendor-bsp-a --file vendor-bsp-a.yaml
 boardlab site remove sdk vendor-bsp-a
+boardlab site set skill vendor-bsp-a -f vendor-bsp-a.md
 ```
 
-`set` 和 `remove` 的类型是 `sdk`、`server`、`family`、`workspace`。写进去之前会先检查，主机读不进去的改动会被拒绝。
+`set` 和 `remove` 的类型是 `sdk`、`server`、`family`、`workspace`；`skill` 是单独的 Markdown 文件（`skills/<id>.md`）。写进去之前会先检查，主机读不进去的改动会被拒绝。

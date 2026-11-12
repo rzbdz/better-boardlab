@@ -76,11 +76,12 @@ function boardForm(board: string): Element[] {
 
 type Kind = 'instances' | 'servers' | 'workspaces' | 'families'
 interface SiteDoc { kind: Kind, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
+interface SiteSkill { id: string, layer: string, file: string, title: string }
 interface HostSync { revision: string, at: string, ok: boolean, message: string }
 interface ImagesState { at: string, ok: boolean, message: string, fetched: string[], present: string[], failed: Array<{ image: string, error: string }>, missing: string[], optional?: string[] }
 interface SiteStatus {
   source: 'managed' | 'git', url: string, branch: string, ready: boolean, revision: string | null, commit?: { subject: string, at: string } | null, ahead: number
-  docs: SiteDoc[], socs: Array<{ soc: string, layer: string }>, problems: string[], hosts: Record<string, HostSync>, syncing: boolean
+  docs: SiteDoc[], skills?: SiteSkill[], socs: Array<{ soc: string, layer: string }>, problems: string[], hosts: Record<string, HostSync>, syncing: boolean
   images: ImagesState | null
 }
 // The host models bsp has a header map for, as boardd's bsp tree lists them; loaded once.
@@ -251,6 +252,7 @@ function siteContext(s: SiteStatus): string {
     `编译方式：${docs('families').map(doc => doc.id + (fromPack(doc) ? '（bsp 自带）' : '')).join('、') || '无'}`,
     `源码树：${docs('workspaces').map(doc => doc.id).join('、') || '无'}`,
     `SoC 资料：${[...new Set(s.socs.map(item => item.soc))].join('、') || '无'}`,
+    ...(s.skills?.length ? [`SDK skill：${s.skills.map(skill => skill.id).join('、')}`] : []),
     ...(s.problems.length ? [`问题：${s.problems.join('；')}`] : []),
     ...(s.images?.missing.length ? [`缺的镜像：${s.images.missing.join('、')}`] : []),
     '', '编译服务器：', yaml('servers') || '（还没有）', '', 'SDK：', yaml('instances') || '（还没有）',
@@ -287,6 +289,10 @@ function advanced(s: SiteStatus): Element {
       { kind: 'group', title: 'SoC 资料', help: 'soc-profiles', body: [
         text('在站点的 socs/<soc>/ 里改：站点放在 git 仓库里时，在仓库里改、提交，再拉取。'),
         { kind: 'list', empty: '没有 SoC 资料', items: s.socs.map(item => ({ key: `${item.layer}/${item.soc}`, title: item.soc, description: item.layer === 'site' ? `站点的 socs/${item.soc}` : `bsp 自带（${item.layer}）` })) },
+      ] },
+      { kind: 'group', title: 'SDK skill', body: [
+        text('SDK 可以带自己的 SKILL.md（站点的 skills/<id>.md，或 bsp 自带 pack 里的 skills/<id>.md）：agent 在那个 SDK 的仓库里工作时，用 boardlab sdk skill <id> 打印，或 --install 装到 .claude/skills/<id>/SKILL.md。'),
+        { kind: 'list', empty: '还没有 SDK skill', items: (s.skills ?? []).map(skill => ({ key: `${skill.layer}/${skill.id}`, title: skill.id, description: `${skill.file}${skill.title !== skill.id ? ` · ${skill.title}` : ''}`, tag: skill.layer === 'site' ? undefined : `bsp 自带（${skill.layer}）` })) },
       ] },
       { kind: 'group', title: '编辑原文', body: [
         text('站点里的每个文档都可以直接改 YAML，和 boardlab site set 一样：写进去前先检查，主机读不进去的改动不写。'),

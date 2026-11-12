@@ -144,6 +144,7 @@ export class Bench {
         stop: async alias => {
           for (const [link, name] of this.names) if (name === alias) { this.names.delete(link); this.stopped.push(alias) }
         },
+        records: () => [...this.names].map(([link, alias]) => ({ alias, device: link })),
       },
       hardware: {
         usb: () => [...this.usbPresent],

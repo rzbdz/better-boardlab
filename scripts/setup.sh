@@ -133,8 +133,13 @@ offer_modules() {
 }
 
 if [ -n "$SERVICE" ]; then
-  # Swap in the new version once no board is locked (a running boardd answers; a stopped one has nothing to wait for).
-  if systemctl is-active -q boardd.service 2>/dev/null; then
+  # A boardd under a supervisor hands over to the new release without a restart: new connections go to it, the old
+  # worker keeps its consoles, streams and running tasks until they end. Nothing waits for locks then.
+  SUPERVISED=""
+  SUPERVISOR=$(cat "$STATE/supervisor.pid" 2>/dev/null || true)
+  if [ -n "$SUPERVISOR" ] && kill -0 "$SUPERVISOR" 2>/dev/null && systemctl is-active -q boardd.service 2>/dev/null; then SUPERVISED=$SUPERVISOR; fi
+  # One boardd, older than this feature: swap and restart once no board is locked.
+  if [ -z "$SUPERVISED" ] && systemctl is-active -q boardd.service 2>/dev/null; then
     for i in $(seq 1 60); do
       held=$(curl -fsS -m 5 -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null | "$NODE" $FLAGS -e 'let t="";process.stdin.on("data",d=>t+=d).on("end",()=>{try{console.log(JSON.parse(t).boards.filter(x=>x.lease).length)}catch{console.log(0)}})' 2>/dev/null || echo 0)
       [ "$held" = 0 ] && break
@@ -154,15 +159,33 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$NODE $FLAGS $PREFIX/current/dist/cli.js serve --port $PORT --state-dir $STATE --config $STATE/boardd.json$HOSTS$ORIGIN
+ExecStart=$NODE $FLAGS $PREFIX/current/dist/cli.js serve --supervisor --port $PORT --state-dir $STATE --config $STATE/boardd.json$HOSTS$ORIGIN
 Environment=NODE_NO_WARNINGS=1
 Restart=always
 RestartSec=2
+# A restart is the last resort (an update hands over instead): the browser terminals (tmux sessions) and what is
+# running on the boards are not boardd's to end.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload; systemctl enable -q boardd.service; systemctl restart boardd.service
+  systemctl daemon-reload; systemctl enable -q boardd.service
+  if [ -n "$SUPERVISED" ]; then
+    say "handing over to boardlab $VERSION ($REV) without stopping boardd"
+    printf '{"release":"%s","version":"%s","revision":"%s"}\n' "$PREFIX/releases/$VERSION-$REV" "$VERSION" "$REV" > "$STATE/update.json"
+    kill -USR2 "$SUPERVISED" 2>/dev/null || SUPERVISED=""
+    if [ -n "$SUPERVISED" ]; then
+      serving=""
+      for i in $(seq 1 90); do
+        serving=$("$NODE" $FLAGS -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).revision)}catch{}' "$STATE/serving.json" 2>/dev/null || true)
+        [ "$serving" = "$REV" ] && break
+        sleep 1
+      done
+      [ "$serving" = "$REV" ] || { say "the supervisor did not hand over in time; restarting boardd"; rm -f "$STATE/update.json"; SUPERVISED=""; }
+    fi
+  fi
+  [ -z "$SUPERVISED" ] && systemctl restart boardd.service
   for i in $(seq 1 30); do curl -fsS -m 2 -o /dev/null -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 1; done
   ls -1dt "$PREFIX"/releases/* | tail -n +4 | xargs -r rm -rf
   say "boardd $VERSION is up: http://127.0.0.1:$PORT/ (on this machine; open it from elsewhere with --host <address> or through a proxy)"

@@ -3,29 +3,103 @@
  * (`registry`), and any bsp command (`bsp`), each run by the bsp on boardd's machine, so this one needs no bsp; and the
  * site boardd keeps for its board hosts (`site`).
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
 import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
+
+/** Where each agent reads skills from, under the home directory; the agent counts as installed when its own directory exists (as in `boardlab install -g`). */
+const AGENT_SKILLS: Array<{ agent: string, home: string, skills: string }> = [
+  { agent: 'Claude Code', home: '.claude', skills: '.claude/skills' },
+  { agent: 'codex', home: '.codex', skills: '.codex/skills' },
+  { agent: 'opencode', home: '.config/opencode', skills: '.config/opencode/skill' },
+  { agent: 'hermes', home: '.hermes', skills: '.hermes/skills/embedded' },
+]
+
+interface SkillSummary { id: string, layer: string, file: string, title: string }
+interface SkillText { id: string, layer: string, text: string }
+
+/**
+ * `boardlab sdk skill …`: an SDK's own SKILL.md from the site, printed or installed where an agent working in that
+ * SDK's repository will read it. Before any bsp argument, so `skill` is not passed on to bsp.
+ */
+async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out: CommandContext['out']) {
+  const words: string[] = []
+  let install = false, global = false, dir: string | undefined
+  for (let i = 0; i < raw.length; i++) {
+    const arg = raw[i]!
+    if (arg === '--install') install = true
+    else if (arg === '-g' || arg === '--global') { global = true; install = true }
+    else if (arg === '--json') continue
+    else if (arg === '--as') i++
+    else if (arg.startsWith('--as=')) continue
+    else if (arg === '--dir') dir = raw[++i]
+    else if (arg.startsWith('--dir=')) dir = arg.slice('--dir='.length)
+    else if (!arg.startsWith('-')) words.push(arg)
+  }
+  const [what] = words
+  const skills = async () => (await client.call<{ skills: SkillSummary[] }>('GET', '/api/bsp/site/skills')).skills ?? []
+  if (what === 'list') {
+    const found = await skills()
+    return out(found, () => { for (const skill of found) console.log(`${skill.id}${skill.layer === 'site' ? '' : `  （${skill.layer}）`}${skill.title && skill.title !== skill.id ? `  ${skill.title}` : ''}`) })
+  }
+  if (!what || what === 'help' || what === '--help') {
+    console.log(`用法：
+  boardlab sdk skill list                    有哪些 SDK 带自己的 SKILL.md
+  boardlab sdk skill <sdk>                   打印那个 SDK 的 SKILL.md
+  boardlab sdk skill <sdk> --install [--dir <目录>]
+                                             写到 <目录>/.claude/skills/<sdk>/SKILL.md（默认当前目录）
+  boardlab sdk skill <sdk> --install -g      写到这台机器上每个装了的 agent 的 skill 目录（Claude Code、codex、opencode、hermes）
+  全局选项 --json 放在 sdk 前面或后面都可以。`)
+    return
+  }
+  const id = what
+  let found: SkillText
+  try {
+    found = await client.call<SkillText>('GET', `/api/bsp/site/skill?id=${encodeURIComponent(id)}`)
+  } catch (error) {
+    if (error instanceof BoardsApiError && error.status === 404) {
+      const available = (await skills()).map(skill => skill.id)
+      throw new BoardsApiError(404, `没有 SDK 的 skill：${id}${available.length ? `（有：${available.join('、')}）` : '（站点里还没有 skill）'}`, 'not-found')
+    }
+    throw error
+  }
+  if (!install && dir === undefined) return out(found, () => process.stdout.write(found.text.endsWith('\n') ? found.text : `${found.text}\n`))
+  const text = found.text.endsWith('\n') ? found.text : `${found.text}\n`
+  const put = (file: string) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text) }
+  const installed: string[] = []
+  if (global) {
+    const home = process.env.HOME ?? homedir()
+    const agents = AGENT_SKILLS.filter(agent => existsSync(join(home, agent.home)))
+    if (!agents.length) throw new BoardsApiError(400, `这台机器上没找到 agent（${AGENT_SKILLS.map(agent => `~/${agent.home}`).join('、')} 都不存在）；去掉 -g 装到当前目录`, 'invalid')
+    for (const agent of agents) { const file = join(home, agent.skills, id, 'SKILL.md'); put(file); installed.push(file) }
+  } else {
+    const file = join(resolve(dir ?? '.'), '.claude', 'skills', id, 'SKILL.md')
+    put(file); installed.push(file)
+  }
+  out({ installed }, () => { for (const file of installed) console.log(`已安装 skill ${id} -> ${file}`) })
+}
 
 /**
  * `boardlab sdk <bsp sdk arguments>`: SDK work on the build servers, run by boardd's bsp. Local files given to `put` are
  * sent first, and `get -o FILE` comes back into FILE. Global options (--json, --as) go before `sdk`.
  */
-async function sdkCommand(client: BoardsClient, raw: string[], json: boolean) {
-  const args = [...raw]
+async function sdkCommand({ client, argv, json, out }: CommandContext) {
+  const args = [...argv]
+  if (args[0] === 'skill') return sdkSkill(client, args.slice(1), json, out)
   if (!args.length || args[0] === 'help' || args[0] === '--help') {
     console.log(`用法：boardlab sdk <操作> …，和 bsp sdk 一样（由 boardd 那边的 bsp 执行）：
   list | show <sdk> | status <sdk> | plan <sdk> [<组件>] [--boot load|download]
   acquire <sdk> --task <名字> | release <sdk> | build <sdk> <组件> [--clean] [--no-wait] | jobs <sdk> | job <sdk> <id> [--follow]
-  exec <sdk> [--cwd DIR] -- <命令> | get <sdk> <路径> [-o 本机文件] | put <sdk> <路径> <本机文件>`)
+  exec <sdk> [--cwd DIR] -- <命令> | get <sdk> <路径> [-o 本机文件] | put <sdk> <路径> <本机文件>
+  skill list | skill <sdk> [--install [--dir <目录>] [-g]]   SDK 自己的 SKILL.md：打印，或装到 agent 读的地方`);
     return
   }
   if (args[0] === 'put' && args[3] && args[3] !== '-') args[3] = `@${await client.sendFile(resolve(args[3]))}`
-  const out = args.findIndex((arg, index) => index > 0 && ['-o', '--output'].includes(args[index - 1]!))
-  const target = out >= 0 ? resolve(args[out]!) : null
-  if (out >= 0) args[out] = '@download'
+  const at = args.findIndex((arg, index) => index > 0 && ['-o', '--output'].includes(args[index - 1]!))
+  const target = at >= 0 ? resolve(args[at]!) : null
+  if (at >= 0) args[at] = '@download'
   const result = await client.sdk(args, json, write)
   if (target && result.download) await client.fetchFile(result.download, target)
   process.exitCode = result.code
@@ -81,7 +155,7 @@ async function runCatalog(client: BoardsClient, raw: string[], json: boolean) {
 interface SiteDoc { kind: string, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
 interface SiteStatus {
   source: 'managed' | 'git', url: string, branch: string, ready: boolean, revision: string | null
-  commit: { subject: string, at: string } | null, ahead: number, docs: SiteDoc[], socs: Array<{ soc: string, layer: string }>
+  commit: { subject: string, at: string } | null, ahead: number, docs: SiteDoc[], skills?: SkillSummary[], socs: Array<{ soc: string, layer: string }>
   problems: string[], hosts: Record<string, { revision: string, at: string, ok: boolean, message: string }>, syncing: boolean
   images: { ok: boolean, message: string, missing: string[], optional?: string[] } | null
 }
@@ -91,12 +165,16 @@ interface SyncExit { ok: boolean, message: string, revision?: string, results?: 
 const SITE_KINDS: Record<string, string> = { sdk: 'instances', instance: 'instances', server: 'servers', workspace: 'workspaces', family: 'families' }
 const SITE_USAGE = `用法：
   boardlab site show [<种类> <id>]        来源、版本、问题、编译服务器和它们上面的 SDK；给出文档时打印它的 YAML
+  boardlab site show skill <id>           打印站点里一个 SDK 的 skill（SKILL.md 原文）
   boardlab site pull | push               git 来源：拉取、推送
   boardlab site sync [--lab <主机>]        把站点同步到所有 bsp 主机（或一台）
-  boardlab site set <种类> <id> --file <YAML 文件|->
+  boardlab site set <种类> <id> -f <YAML 文件|->
                                           添加或改写一个文档（- 从标准输入读）
+  boardlab site set skill <id> -f <Markdown 文件|->
+                                          写入一个 SDK 的 skill：skills/<id>.md
   boardlab site remove <种类> <id>         删掉一个文档（还有别的在用它时不删）
-  种类：sdk、server、workspace（源码树）、family（编译方式）。`
+  boardlab site remove skill <id>          删掉站点的 skill
+  种类：sdk、server、workspace（源码树）、family（编译方式）；skill 是单独的 Markdown 文件。`
 
 function siteKind(word: string | undefined) {
   const kind = word ? SITE_KINDS[word] : undefined
@@ -121,6 +199,7 @@ function printSite(site: SiteStatus) {
   const elsewhere = sdks.filter(sdk => !servers.some(server => server.id === serverOf(sdk)))
   if (elsewhere.length) { console.log('别处的 SDK'); for (const sdk of elsewhere) console.log(line(sdk)) }
   const hosts = Object.entries(site.hosts)
+  if (site.skills?.length) console.log(`skill  ${site.skills.map(skill => `${skill.id}${skill.layer === 'site' ? '' : `（${skill.layer}）`}`).join('、')}`)
   if (hosts.length) console.log(`主机  ${hosts.map(([lab, host]) => `${lab} ${host.revision || '？'}${host.ok ? '' : '（上次没同步上）'}`).join('，')}`)
   if (site.images && !site.images.ok) console.log(`镜像  ${site.images.message}`)
   if (site.images?.optional?.length) console.log(`可选  ${site.images.optional.join('、')}：没有时发现板子读不到型号`)
@@ -164,8 +243,15 @@ function streamSync(client: BoardsClient, body: unknown, line: (text: string) =>
   })
 }
 
-async function siteCommand({ client, args, flag, json, out }: CommandContext) {
+async function siteCommand({ client, args, argv, flag, json, out }: CommandContext) {
   const [what, word, id] = args
+  // The short form `-f FILE` (the longer `--file FILE` comes through `flag`).
+  const shortFile = () => { const index = argv.indexOf('-f'); return index >= 0 ? argv[index + 1] : undefined }
+  if (what === 'show' && word === 'skill') {
+    if (!id) throw new BoardsApiError(400, `要给 skill 的 id\n${SITE_USAGE}`, 'invalid')
+    const found = await client.call<SkillText>('GET', `/api/bsp/site/skill?id=${encodeURIComponent(id)}`)
+    return out(found, () => process.stdout.write(found.text.endsWith('\n') ? found.text : `${found.text}\n`))
+  }
   if (what === 'show' && word) {
     const kind = siteKind(word)
     const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
@@ -188,16 +274,31 @@ async function siteCommand({ client, args, flag, json, out }: CommandContext) {
     if (!exit.ok) process.exitCode = 1
     return
   }
+  if (what === 'set' && word === 'skill') {
+    const file = flag('file') ?? shortFile()
+    if (!id || !file) throw new BoardsApiError(400, `要给 skill 的 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
+    const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
+    // Writing over the site's own skill of that id is an edit; otherwise it takes over from a pack's.
+    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const original = site.skills?.some(skill => skill.id === id && skill.layer === 'site') ? id : undefined
+    const result = await client.call<{ file: string }>('POST', '/api/bsp/site/skill', { id, text, ...(original ? { original } : {}) })
+    return out(result, () => console.log(`写好了 ${result.file}；boardlab sdk skill ${id} 可以装给 agent`))
+  }
   if (what === 'set') {
     const kind = siteKind(word)
-    const file = flag('file')
-    if (!id || !file) throw new BoardsApiError(400, `要给 id 和 --file\n${SITE_USAGE}`, 'invalid')
+    const file = flag('file') ?? shortFile()
+    if (!id || !file) throw new BoardsApiError(400, `要给 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
     const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
     // Writing over the site's own document of that id is an edit; anything else adds one (or takes over from a pack's).
     const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
     const original = site.docs.some(doc => doc.kind === kind && doc.id === id && doc.layer === 'site') ? id : undefined
     const result = await client.call<{ file: string }>('POST', '/api/bsp/site/doc', { kind, id, text, ...(original ? { original } : {}) })
     return out(result, () => console.log(`写好了 ${result.file}；boardlab site sync 同步到主机`))
+  }
+  if (what === 'remove' && word === 'skill') {
+    if (!id) throw new BoardsApiError(400, `要给 skill 的 id\n${SITE_USAGE}`, 'invalid')
+    const result = await client.call<{ message: string }>('POST', '/api/bsp/site/skill/remove', { id })
+    return out(result, () => console.log(result.message))
   }
   if (what === 'remove') {
     const kind = siteKind(word)
@@ -209,13 +310,13 @@ async function siteCommand({ client, args, flag, json, out }: CommandContext) {
 }
 
 const site: Command = {
-  name: 'site', noBoard: true, usage: ['site show | pull | push | sync | set <种类> <id> --file <YAML> | remove <种类> <id>\tbsp 站点：SDK、编译服务器和 SoC 资料，boardd 保存、同步到每台板卡主机（见 boardlab site help）'],
+  name: 'site', noBoard: true, usage: ['site show | pull | push | sync | set <种类> <id> -f <文件> | remove <种类> <id>\tbsp 站点：SDK、编译服务器和 SoC 资料，boardd 保存、同步到每台板卡主机；skill <id> 是 SDK 自己的 SKILL.md（见 boardlab site help）'],
   run: siteCommand,
 }
 
 const sdk: Command = {
-  name: 'sdk', noBoard: true, usage: ['sdk <操作> …\tSDK：在构建服务器上租源码树、编译、读写文件、跑命令（boardd 那边的 bsp sdk 执行，见 boardlab sdk help）'],
-  run: ({ client, argv, json }) => sdkCommand(client, argv, json),
+  name: 'sdk', noBoard: true, usage: ['sdk <操作> …\tSDK：在构建服务器上租源码树、编译、读写文件、跑命令；skill <sdk> 取 SDK 自己的 SKILL.md（boardd 那边的 bsp sdk 执行，见 boardlab sdk help）'],
+  run: sdkCommand,
 }
 
 const registry: Command = {

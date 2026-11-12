@@ -3,14 +3,14 @@
  * (or F) gives the console the whole screen; Esc brings the side back. With the lock, R resets, D enters download
  * mode, B boots.
  */
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import { clearConsole, reconnectConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
 import { canRediscover, useBoardActions, useSending, type FlashPackage } from '../actions.tsx'
-import { age, clock, copyText, hhmm, holder, Icon, model, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
+import { age, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import { LogPanel } from './logs.tsx'
 
@@ -21,6 +21,27 @@ const saveBoot = (board: string, value: { sdk: string, method: 'load' | 'downloa
 const LAST_PACKAGE = 'boardlab.modern.lastPackage'
 const lastPackage = (board: string): { url: string, flasher: string } | null => { try { return JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}')[board] ?? null } catch { return null } }
 const savePackage = (board: string, value: { url: string, flasher: string }) => { try { localStorage.setItem(LAST_PACKAGE, JSON.stringify({ ...JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}'), [board]: value })) } catch {} }
+
+// Break points come from a slow read of the SDK's recipe and do not change while the page lives: one read per board and
+// SDK, shared by the dialog (opening it again is instant) and prefetched as soon as the board's page shows. A read for
+// another board forgets the previous board's, so a dialog never shows what belonged to the board before it.
+const breaksCache = new Map<string, string[]>()
+const breaksReads = new Map<string, Promise<string[]>>()
+let breaksBoard = ''
+const breakKey = (board: string, sdk: string) => `${board}|${sdk}`
+const cachedBreaks = (board: string, sdk: string) => breaksBoard === board ? breaksCache.get(breakKey(board, sdk)) ?? null : null
+function readBreaks(board: string, sdk: string): Promise<string[]> {
+  if (breaksBoard !== board) { breaksBoard = board; breaksCache.clear(); breaksReads.clear() }
+  const key = breakKey(board, sdk), cached = breaksCache.get(key)
+  if (cached) return Promise.resolve(cached)
+  const reading = breaksReads.get(key)
+  if (reading) return reading
+  const read = api.bootBreaks(board, sdk).then(got => { const list = got?.load ?? []; if (breaksBoard === board) breaksCache.set(key, list); return list })
+  breaksReads.set(key, read)
+  void read.finally(() => { if (breaksReads.get(key) === read) breaksReads.delete(key) }).catch(() => {})
+  return read
+}
+function prefetchBreaks(board: string, sdk: string) { if (sdk) void readBreaks(board, sdk).catch(() => {}) }
 
 export function BoardPage({ state, name, dark, full, setFull, watched }: { state: PageState, name: string, dark: boolean, full: boolean, setFull: (full: boolean) => void, watched: string[] }) {
   const board = state.boards.find(b => b.name === name)
@@ -88,11 +109,22 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   })
   useEffect(() => { if (!menu) return; const off = () => setMenu(false); window.addEventListener('click', off); return () => window.removeEventListener('click', off) }, [menu])
   const watchedOn = watched.includes(board.name), last = lastBoot(board.name)
+  // The dialog opens on this SDK, so read its break points now: by the time the person opens it, they are there.
+  const sdks = board.lab?.sdks ?? []
+  const bootSdk = last && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? ''
+  useEffect(() => { prefetchBreaks(board.name, bootSdk) }, [board.name, bootSdk])
   const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method, brk) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method, brk) }}
     onPackage={pkg => { if (pkg.url) savePackage(board.name, { url: pkg.url, flasher: pkg.flasher ?? '' }); void act.flashPackage(pkg) }} />)
+  const renameDialog = () => ui.layer(close => <RenameDialog board={board} close={close} />)
   const relay = () => ui.layer(close => <RelayDialog board={board} close={close} />, 'wide')
   const extra = viewsFor(state, 'board', { board: board.name })
   const lab = state.labs.find(l => l.id === board.lab?.id)
+  // A busy board, or one someone else holds, cannot be renamed: say why on the disabled item.
+  const canRename = (m.lock === 'free' || m.mine) && !m.flags.busy
+  const renameWhy = canRename ? undefined
+    : m.flags.busy ? `${board.name} 正在${m.flags.busy.label.replace(/中$/, '')}，等它完成`
+    : m.holder ? `${holder(m.holder).name} 拿着锁，名字要由 TA 改；或者等它空闲`
+    : '实验室占用时不能改名，等它空闲'
 
   const tiles: Array<[string, string, string, string, () => void, boolean]> = [
     ['reset', 'power', '复位', 'R', act.reset, true], ['fastboot', 'zap', '下载模式', 'D', act.fastboot, true], ['boot', 'rocket', '启动', 'B', bootDialog, true],
@@ -107,6 +139,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
         <button className="pill sm icon" aria-label="更多" onClick={() => setMenu(!menu)}><Icon name="more" /></button>
         {menu && <div className="pop" onClick={() => setMenu(false)}>
           {board.lab?.canRefresh && <button disabled={!m.mine} title={m.mine ? undefined : '先拿锁'} onClick={act.refresh}><Icon name="rebuild" />重新读取型号</button>}
+          <button disabled={!canRename} title={renameWhy} onClick={renameDialog}><Icon name="doc" />给板子改名…</button>
           <button onClick={() => prefs.watch(board.name, !watchedOn)}><Icon name="bell" />{watchedOn ? '不再关注' : '空闲时通知我'}</button>
           <button onClick={() => void copyText(ui, `boardlab lock ${board.name} && boardlab console ${board.name}`, '复制了命令')}><Icon name="copy" />复制 boardlab 命令</button>
           {board.lease && !m.mine && <button className="danger" onClick={act.steal}><Icon name="warn" />抢锁…</button>}
@@ -182,13 +215,71 @@ function LockBox({ state, board, m, act }: { state: PageState, board: Board, m: 
 function Facts({ board }: { board: Board }) {
   const { host, slot } = slotOf(board), mb = board.lab?.mediaBoot
   const after = !mb ? null : mb.method === 'reset' ? '从介质启动' : mb.available ? `经 ${mb.method} 从介质启动` : `停在下载模式（${mb.why}）`
-  const rows: Array<[string, string | null | undefined]> = [
-    ['主机', host], ['槽位', slot.toUpperCase()], ['SoC', board.soc?.toUpperCase()], ['型号', board.product],
+  const rows: Array<[string, ReactNode]> = [
+    ['主机', host], ['槽位', slot.toUpperCase()], ['SoC', board.soc?.toUpperCase()], ['型号', <ModelEditor board={board} />],
     ['串口', board.chips.map(c => `${c.die}${c.serialPath ? ` ${c.serialPath}` : ''} · ${c.baud}${c.online ? '' : '（不在线）'}`).join('\n') || null],
     ['下载口', board.chips.map(c => c.downloadUsbPath).filter(Boolean).map(p => `usb:${p}`).join('、') || null],
     ['SDK', board.lab?.sdks?.join('、')], ['复位后', after], ['登记名', board.name],
   ]
-  return <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <><dt key={`${k}t`}>{k}</dt><dd key={`${k}d`}>{v}</dd></>)}</dl>
+  return <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+}
+
+/** The model, editable where the facts show it: saved on Enter or 保存, remembered for the datalist, empty clears it. */
+function ModelEditor({ board }: { board: Board }) {
+  const ui = useUI()
+  const [models, setModels] = useState<string[]>([])
+  const [value, setValue] = useState(board.product ?? '')
+  const [busy, setBusy] = useState(false)
+  const list = `models-${board.name}`
+  useEffect(() => { setValue(board.product ?? '') }, [board.product])
+  useEffect(() => { let live = true; void api.models().then(got => { if (live) setModels(got) }).catch(() => {}); return () => { live = false } }, [])
+  const save = async () => {
+    const product = value.trim() || null
+    if (busy || product === (board.product ?? null)) return
+    setBusy(true)
+    try {
+      await api.setModel(board.name, product)
+      ui.toast(product ? `型号：${product}` : `清掉了 ${upper(board.name)} 的型号`, board.name)
+      setModels(await api.models().catch(() => models))
+    } catch (error) { ui.fail('型号没存上', error) } finally { setBusy(false) }
+  }
+  const unchanged = value.trim() === (board.product ?? '')
+  return (
+    <span className="model-edit">
+      <input className="input" list={list} value={value} placeholder="型号，例如 k3_com260" onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void save() } }} />
+      <datalist id={list}>{models.map(m => <option key={m} value={m} />)}</datalist>
+      <button className="pill sm" disabled={busy || unchanged} title="保存型号（会记下来，下次可以选）" onClick={() => void save()}>{busy ? <span className="spin" /> : <Icon name="check" />}保存</button>
+    </span>
+  )
+}
+
+function RenameDialog({ board, close }: { board: Board, close: () => void }) {
+  const ui = useUI()
+  const [to, setTo] = useState(board.name)
+  const [busy, setBusy] = useState(false)
+  const prefix = board.lab ? `${board.lab.id}-` : ''
+  const wanted = to.trim()
+  const submit = async () => {
+    if (!wanted || busy) return
+    setBusy(true)
+    try {
+      const out = await api.renameBoard(board.name, wanted)
+      close()
+      ui.toast('改名好了', out?.message)
+      const after = out?.board || wanted
+      if (after !== board.name) location.hash = `#/board/${encodeURIComponent(after)}`
+      await refreshNow().catch(() => {})
+    } catch (error) { ui.fail('改名失败', error); setBusy(false) }
+  }
+  return <form onSubmit={event => { event.preventDefault(); void submit() }}>
+    <h2>给板子改名</h2>
+    <p className="lead"><b>{upper(board.name)}</b> · 板子的名字、串口名、锁、队列和历史会一起改，别人的页面也会跟着变。</p>
+    <label className="field">新名字<input className="input" autoFocus value={to} onChange={event => setTo(event.target.value)} /></label>
+    {prefix && <span className="sub small" style={{ display: 'block', marginTop: 6 }}>实验室里的板子会自动带上 {prefix} 前缀，填不带前缀的名字也行。</span>}
+    <div className="foot"><button type="button" className="pill" onClick={close}>取消</button>
+      <button className="pill dark" disabled={busy || !wanted || wanted === board.name}>{busy ? <span className="spin" /> : <Icon name="check" />}改名</button></div>
+  </form>
 }
 
 function BootDialog({ board, close, onStart, onPackage }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download', brk?: string) => void, onPackage: (pkg: FlashPackage) => void }) {
@@ -200,12 +291,16 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
   const [file, setFile] = useState<File | null>(null)
   const [flasher, setFlasher] = useState(used?.flasher ?? '')
   // Break points of the SDK's recipe (`breaker:` steps): boot U-Boot alone, say. Fastboot (load) only, for now.
-  const [breaks, setBreaks] = useState<string[]>([])
+  // The state starts from what the page already read (or null, still reading) so opening the dialog again is instant.
+  const [breaks, setBreaks] = useState<string[] | null>(() => sdk ? cachedBreaks(board.name, sdk) : null)
   const [brk, setBrk] = useState('')
   useEffect(() => {
-    setBreaks([]); setBrk('')
-    if (!sdk || method !== 'load') return
-    void api.bootBreaks(board.name, sdk).then(got => setBreaks(got?.load ?? [])).catch(() => {})
+    setBrk('')
+    if (!sdk || method !== 'load') { setBreaks([]); return }
+    setBreaks(cachedBreaks(board.name, sdk))
+    let live = true
+    void readBreaks(board.name, sdk).then(list => { if (live) setBreaks(list) }).catch(() => { if (live) setBreaks([]) })
+    return () => { live = false }
   }, [board.name, sdk, method])
   const pkg = method === 'package', link = url.trim()
   const ready = pkg ? (from === 'url' ? /^https?:\/\/\S+$/i.test(link) : !!file) : !!sdk
@@ -233,10 +328,15 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
         : <label className="field">文件<input className="input" type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /><span className="sub small">{file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB，先传给 boardd` : '从这台电脑选，先传给 boardd'}</span></label>}
       <label className="field">刷机工具（可选）<input className="input" value={flasher} onChange={e => setFlasher(e.target.value)} placeholder="留空由后端按刷机包选" /></label>
     </>}
-    {!pkg && method === 'load' && breaks.length > 0 && <label className="field">停在哪<div className="chips">
-      <button className={`chip${brk === '' ? ' on' : ''}`} onClick={() => setBrk('')}>完整启动</button>
-      {breaks.map(name => <button key={name} className={`chip${brk === name ? ' on' : ''}`} onClick={() => setBrk(name)}>停在 {name}</button>)}
-    </div><span className="sub small">只启动到这一步，之后自己在串口里操作（调 U-Boot 或内核时用）。</span></label>}
+    {!pkg && method === 'load' && (breaks === null || breaks.length > 0) && <label className="field">停在哪
+      {breaks === null ? <span className="sub small">读取中…</span> : <>
+        <div className="chips">
+          <button className={`chip${brk === '' ? ' on' : ''}`} onClick={() => setBrk('')}>完整启动</button>
+          {breaks.map(name => <button key={name} className={`chip${brk === name ? ' on' : ''}`} onClick={() => setBrk(name)}>停在 {name}</button>)}
+        </div>
+        <span className="sub small">只启动到这一步，之后自己在串口里操作（调 U-Boot 或内核时用）。</span>
+      </>}
+    </label>}
     <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!ready} onClick={start}><Icon name={pkg ? 'dl' : 'rocket'} />开始</button></div>
   </>
 }

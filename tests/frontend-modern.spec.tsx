@@ -20,6 +20,7 @@ const button = async (label: string | RegExp, scope: HTMLElement = document.body
   return within(scope).getAllByRole('button').find(visible)! as HTMLButtonElement
 }
 const go = (hash: string) => { location.hash = hash; window.dispatchEvent(new HashChangeEvent('hashchange')) }
+const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
 
 beforeAll(async () => {
   document.body.innerHTML = '<div id="root"></div>'
@@ -303,6 +304,75 @@ describe('Modern frontend', () => {
     fireEvent.click(within(panel.querySelector('h2')!).getByRole('button', { name: 'AI 提示' }))
     await waitFor(() => expect((document.querySelector('[role=dialog] textarea') as HTMLTextAreaElement)?.value).toContain('boardlab site show'), wait)
     expect((document.querySelector('[role=dialog] textarea') as HTMLTextAreaElement).value).toContain('# sdk/servers/build-a.yaml')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    go('#/')
+  })
+
+  it('offers remembered models in the model field, saves one and clears it', async () => {
+    const { api } = await import('../src/ui/api.ts')
+    const base = globalThis.fetch
+    globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost/')
+      if (url.pathname === '/api/models') return json({ models: ['k3_com260', 'k1-x_pico'] })
+      return base(input, init)
+    }) as typeof fetch
+    try {
+      await api.models(true)
+      go('#/board/bsp-k3-deb1')
+      await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+      const field = await waitFor(() => {
+        const input = document.querySelector('.model-edit input') as HTMLInputElement | null
+        expect(input).toBeTruthy()
+        return input!
+      }, wait)
+      expect(field.value).toBe('k3_deb1')
+      const list = document.getElementById(field.getAttribute('list')!)!
+      expect([...list.querySelectorAll('option')].map(option => option.value)).toEqual(['k3_com260', 'k1-x_pico'])
+
+      const editor = field.closest('.model-edit') as HTMLElement
+      fireEvent.change(field, { target: { value: 'k3_com260' } })
+      fireEvent.click(await button('保存', editor))
+      await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board')?.body).toEqual({ name: 'bsp-k3-deb1', product: 'k3_com260' }), wait)
+
+      fireEvent.change(field, { target: { value: '' } })
+      fireEvent.click(await button('保存', editor))
+      await waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === 'api/board').at(-1)?.body).toEqual({ name: 'bsp-k3-deb1', product: null }), wait)
+    } finally { globalThis.fetch = base; go('#/') }
+  })
+
+  it('renames a board from the menu, then reloads the page', async () => {
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    const before = calls.filter(c => c.method === 'GET' && c.path === 'api/state').length
+    fireEvent.click(await screen.findByRole('button', { name: '更多' }, wait))
+    fireEvent.click(await button(/给板子改名/))
+    const dialog = await screen.findByRole('dialog', {}, wait)
+    const input = dialog.querySelector('input') as HTMLInputElement
+    expect(input.value).toBe('bsp-k3-deb1')
+    expect(dialog.textContent).toContain('自动带上 bsp- 前缀')
+    fireEvent.change(input, { target: { value: 'k3-deb1r' } })
+    fireEvent.click(await button('改名', dialog))
+    await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board/rename')?.body).toEqual({ board: 'bsp-k3-deb1', name: 'k3-deb1r' }), wait)
+    await waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === 'api/state').length).toBeGreaterThan(before), wait)
+    await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain('改名好了'), wait)
+    go('#/')
+  })
+
+  it('reopens the boot dialog with the break points it already read', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    const reads = (board: string) => calls.filter(c => c.path.startsWith('api/boot/breaks') && c.path.includes(`board=${board}`)).length
+    const open = async () => { fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
+    go('#/board/bsp-k1-musecard')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K1-MUSECARD'), wait)
+    // The page reads the selected SDK's break points before the dialog opens.
+    await waitFor(() => expect(reads('bsp-k1-musecard')).toBe(1), wait)
+    await open()
+    expect(await button(/停在\s*uboot/, dialog())).toBeTruthy()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('[role=dialog]')).toBeNull(), wait)
+    await open()
+    expect(await button(/停在\s*uboot/, dialog())).toBeTruthy()
+    expect(reads('bsp-k1-musecard')).toBe(1)
     fireEvent.keyDown(window, { key: 'Escape' })
     go('#/')
   })

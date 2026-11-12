@@ -12,6 +12,7 @@ function serialMux(): Mux {
     open: (alias, token) => mux.open(alias, { token }), gate: (alias, gate) => mux.gate(alias, gate),
     online: alias => mux.daemons().some(daemon => daemon.alias === alias && !!daemon.device),
     stopAll: () => stopAll(mux), start: (adapter, alias) => startAlias(mux, adapter, alias), stop: alias => stopAlias(mux, alias),
+    records: () => mux.records().map(record => ({ alias: record.alias, device: record.device })),
   }
 }
 

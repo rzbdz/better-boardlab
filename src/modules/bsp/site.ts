@@ -29,6 +29,8 @@ interface Loaded { kind: Kind, id: string, file: string, rel: string, text: stri
 type Docs = Record<Kind, Map<string, Loaded>>
 
 export interface SiteDoc { kind: Kind, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
+/** An SDK's own instructions, `skills/<id>.md` in the site or a pack. */
+export interface SiteSkill { id: string, layer: string, file: string, title: string }
 export interface HostSync { revision: string, at: string, ok: boolean, message: string }
 /** The last `bsp images sync` on the copy: which images are there, which could not be fetched, which nobody can fetch. */
 export interface ImagesState {
@@ -54,6 +56,8 @@ export interface SiteStatus {
   /** Commits here the source does not have yet (git). */
   ahead: number
   docs: SiteDoc[]
+  /** The SDK skills the site and its packs carry, the site's own over a pack's same id. */
+  skills: SiteSkill[]
   socs: Array<{ soc: string, layer: string }>
   problems: string[]
   hosts: Record<string, HostSync>
@@ -70,6 +74,8 @@ const NOT_IN = /Permission denied|Could not read from remote repository|Host key
 const last = (run: Run) =>(run.stderr || run.stdout).trim().split('\n').filter(Boolean).at(-1) ?? `退出码 ${run.code}`
 const isData = (value: unknown): value is Data => !!value && typeof value === 'object' && !Array.isArray(value)
 const str = (value: unknown) => value === undefined || value === null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)
+/** A Markdown skill's title: its first `# ` heading, or its id. */
+const titleOf = (text: string, id: string) => /^#\s+(.+?)\s*$/m.exec(text)?.[1]?.trim() || id
 
 /** Whether `docs` loads the way bsp's SdkCatalog loads it; what is wrong, by file, when not. */
 export function validate(docs: Docs): string[] {
@@ -427,6 +433,77 @@ export class Site {
     return [...problems, ...validate(docs)]
   }
 
+  /**
+   * The skills the site and its packs carry, lowest layer first (`skills/<id>.md`): the site's own over a pack's same
+   * id, as with documents. A skill's title is its first `# ` heading, or its id.
+   */
+  private loadSkills(): Map<string, { id: string, layer: string, file: string, rel: string, text: string }> {
+    const skills = new Map<string, { id: string, layer: string, file: string, rel: string, text: string }>()
+    for (const layer of this.layers()) {
+      const at = join(layer.root, 'skills')
+      if (!existsSync(at)) continue
+      for (const name of readdirSync(at).filter(name => name.endsWith('.md')).sort()) {
+        const id = name.slice(0, -'.md'.length)
+        if (!ID.test(id)) continue
+        const file = join(at, name)
+        skills.set(id, { id, layer: layer.name, file, rel: layer.name === 'site' ? `skills/${name}` : `packs/${layer.name}/skills/${name}`, text: readFileSync(file, 'utf8') })
+      }
+    }
+    return skills
+  }
+
+  /** The skills there are, with where each comes from and its title. Pack skills come first, the site's over them. */
+  skills(): SiteSkill[] {
+    return [...this.loadSkills().values()].map(skill => ({ id: skill.id, layer: skill.layer, file: skill.rel, title: titleOf(skill.text, skill.id) }))
+  }
+
+  /** One skill's Markdown, from wherever it is. */
+  skill(id: string): { id: string, layer: string, text: string } {
+    const found = this.loadSkills().get(String(id ?? '').trim())
+    if (!found) throw new BoardError('not-found', `站点里没有 SDK 的 skill：${String(id ?? '').trim() || '（没写 id）'}`)
+    return { id: found.id, layer: found.layer, text: found.text }
+  }
+
+  /**
+   * Write an SDK's skill as `skills/<id>.md` (`original`: the id it had, when editing). Refused when empty or badly
+   * named; skills are not part of the catalog bsp loads, so nothing else is checked. Committed like every other edit.
+   */
+  putSkill(holder: string, id: string, text: string, original?: string): Promise<SiteSkill> {
+    return this.serial(async () => {
+      await this.ensure(holder)
+      const name = String(id ?? '').trim(), was = String(original ?? '').trim() || undefined
+      if (!ID.test(name)) throw new BoardError('invalid', `不合法的名字：${name || '（没写）'}（字母、数字、. _ -）`)
+      if (!String(text ?? '').trim()) throw new BoardError('invalid', 'skill 的内容不能为空')
+      const skills = this.loadSkills()
+      const old = was ? skills.get(was) : undefined
+      if (was && (!old || old.layer !== 'site')) throw new BoardError('not-found', `站点里没有 skill ${was}`)
+      const taken = skills.get(name)
+      if (taken?.layer === 'site' && taken.id !== old?.id) throw new BoardError('conflict', `已经有 skill ${name} 了`)
+      const file = old && was === name ? old.file : join(this.dir, 'skills', `${name}.md`)
+      if (file !== old?.file && existsSync(file)) throw new BoardError('conflict', `已经有 skills/${name}.md 了：换个名字`)
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, text.endsWith('\n') ? text : `${text}\n`)
+      if (old && old.file !== file) unlinkSync(old.file)
+      await this.commit(holder, `${was ? 'Edit' : 'Add'} skill ${name}`)
+      return { id: name, layer: 'site', file: relative(this.dir, file), title: titleOf(text, name) }
+    })
+  }
+
+  /** Take the site's own skill out; a pack's with that id, if any, is what there is afterwards. */
+  removeSkill(holder: string, id: string): Promise<string> {
+    return this.serial(async () => {
+      await this.ensure(holder)
+      const name = String(id ?? '').trim()
+      if (!ID.test(name)) throw new BoardError('invalid', `不合法的名字：${name || '（没写）'}（字母、数字、. _ -）`)
+      const found = this.loadSkills().get(name)
+      if (!found || found.layer !== 'site') throw new BoardError('not-found', `站点里没有 skill ${name}`)
+      unlinkSync(found.file)
+      await this.commit(holder, `Remove skill ${name}`)
+      const under = this.loadSkills().get(name)
+      return `删掉了 ${name}${under ? `：用回 ${under.rel} 里的` : ''}`
+    })
+  }
+
   async status(labs: string[] = []): Promise<SiteStatus> {
     if (!this.ready && this.source === 'managed') await this.serial(() => this.ensure('boardd'))
     const { docs, problems } = this.ready ? this.load() : { docs: null, problems: [] }
@@ -440,6 +517,7 @@ export class Site {
     return {
       source: this.source, url: this.url, branch: this.branch, ready: this.ready, revision: await this.revision(), commit: await this.head(), ahead: await this.ahead(),
       docs: docs ? KINDS.flatMap(kind => [...docs[kind].values()].map(doc => ({ kind, id: doc.id, file: doc.rel, layer: doc.layer, text: doc.text, fields: fields(doc) }))) : [],
+      skills: this.skills(),
       socs, problems: this.ready ? [...problems, ...validate(docs!)] : [`站点还没从 ${this.url} 取下来：点拉取`],
       hosts, syncing: this.syncing, images: this.lastImages(),
     }

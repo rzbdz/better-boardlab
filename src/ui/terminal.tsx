@@ -134,7 +134,9 @@ export function TerminalPage({ base = 'api/terminals', onError }: { base?: strin
       </aside>
       <section className="term-main">
         {open ? <>
-          <div className="term-bar"><b>{open.name}</b><span className="term-session">tmux {open.session}</span><span className={`term-status ${status}`}>{STATUS[status]}</span></div>
+          <div className="term-bar"><b>{open.name}</b><span className="term-session">tmux {open.session}</span>{open.alive
+            ? <span className={`term-status ${status}`}>{STATUS[status]}</span>
+            : <span className="term-status closed" title="tmux 会话已经不在了（主机重启或会话被结束）；这里打开会新建一个 shell">会话已丢失</span>}</div>
           <Screen key={open.id} base={base} terminal={open} onStatus={setStatus} />
         </> : <div className="term-none">{list ? '选一个终端，或者新建一个' : '读取中…'}</div>}
       </section>

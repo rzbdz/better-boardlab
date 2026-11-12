@@ -21,6 +21,8 @@ export interface Mux {
   start(adapter: SerialAdapter, alias: string): Promise<string>
   /** Stop and forget the daemon under `alias`; nothing happens if there is none. */
   stop(alias: string): Promise<void>
+  /** Every saved daemon record, running or not: the port each alias holds. */
+  records(): Array<{ alias: string, device: string | null }>
 }
 
 /** USB and serial adapters on this machine, and its fastboot. */
@@ -65,6 +67,25 @@ export function localBackend(slots: Slots, mux: Mux, hardware: Hardware): Backen
         return stageAndContinue(hardware.fastboot, target.usbPath, file.path, timeoutMs)
       },
       present: async (_config, target) => hardware.usb().some(device => device.path === target.usbPath),
+    },
+    rename: {
+      // Each chip's console is a serial-mux daemon named after the board (or `<board>-<die>` with several chips): the
+      // daemon moves to the new name and keeps its port.
+      perChip: true,
+      async rename(_config, target, to) {
+        const old = target.port
+        if (!old) return { alias: to }
+        const alias = old === target.board ? to
+          : old.startsWith(`${target.board}-`) ? `${to}${old.slice(target.board.length)}` : to
+        const record = mux.records().find(item => item.alias === old)
+        const adapter = record?.device ? hardware.serialAdapters().find(item => item.link === record.device || item.device === record.device) : undefined
+        // The adapter is unplugged: the new name is recorded, and the console starts under it on the next scan.
+        if (!adapter) return { alias }
+        await mux.stop(old).catch(() => {})
+        await mux.start(adapter, alias)
+        if (target.gate) await mux.gate(alias, { token: target.gate, note: '' }).catch(() => {})
+        return { alias }
+      },
     },
   }
 }

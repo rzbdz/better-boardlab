@@ -61,7 +61,7 @@ flowchart LR
   U-Boot or the kernel. A running boot or flash can be cancelled (取消, or `boardlab cancel`).
 - A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
-- An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 意见箱 shows what waits, and `resolve <id>` closes it fixed or not taken.
+- An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 反馈 shows what waits, and `resolve <id>` closes it fixed or not taken.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 
@@ -111,8 +111,11 @@ Everything else is done on the page:
   (managed on the page, or a git repository you pull from and push to) and synced to every board host.
 - **Clients.** Settings → 客户端配置: build servers and laptops get the `boardlab` CLI installed over ssh
   and pointed at this boardd (boardd brings Node along when the machine has none).
-- **Updates.** Settings → 版本 → 检查更新 / 升级, or `boardlab update`. boardd checks for a newer release every few hours,
-  installs it once no board is locked, and restarts; locks, queues and settings are kept, and the page reloads itself.
+- **Updates.** Settings → 版本 → 检查更新 / 升级, or `boardlab update`. boardd checks for a newer release every few hours
+  and installs it without stopping: new connections, pages and CLIs go to the new version, while consoles, event
+  streams and the tasks a board is running finish on the old one. Locks, queues and settings are kept, and the page
+  reloads itself. A restart only happens when the new release cannot take over (and leaves the browser terminals and
+  board activity running).
 - **Terminals.** Turn on `{ "terminal": { "enabled": true } }` in `/var/lib/boardlab/boardd.json` for a 终端 tab: shells on
   the boardlab machine in tmux sessions that outlive the page.
 

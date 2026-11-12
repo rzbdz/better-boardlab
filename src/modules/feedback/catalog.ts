@@ -3,6 +3,6 @@ import type { CatalogEntry } from 'boardlab-core/server/catalog.ts'
 import { feedback } from './index.ts'
 
 export const entry: CatalogEntry = {
-  id: 'feedback', about: '意见箱：AI 用 boardlab 时提的请求和意见，存在 boardd 的数据库里，等维护的人处理',
+  id: 'feedback', about: '反馈：AI 用 boardlab 时提的请求和意见，存在 boardd 的数据库里，等维护的人处理',
   create: () => feedback(),
 }

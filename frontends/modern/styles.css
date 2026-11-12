@@ -241,6 +241,9 @@ body.console-full .detail{height:100vh}
 .sect{font-size:11.5px;font-weight:600;color:var(--sub);margin:20px 0 7px}
 .facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px;margin:0}
 .facts dt{color:var(--sub)}.facts dd{margin:0;font-weight:500;overflow-wrap:anywhere;white-space:pre-line}
+.model-edit{display:flex;align-items:center;gap:6px;white-space:normal}
+.model-edit .input{height:28px;min-width:0;flex:1;padding:0 8px;background:var(--tile)}
+.model-edit .pill{height:28px;padding:0 10px;flex:none}
 .act{display:grid;grid-template-columns:38px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px}
 .act time{font:500 11px var(--mono);color:var(--faint);padding-top:1px}
 .act .m{color:var(--sub);font-size:11.5px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

@@ -29,7 +29,7 @@ export const ui: ModuleUi = {
     const inbox = (state as PageState & { feedback?: Inbox }).feedback
     const items = inbox?.items ?? []
     return [{
-      id: 'feedback', slot: 'page', title: '意见箱',
+      id: 'feedback', slot: 'page', title: '反馈',
       status: inbox ? { tone: inbox.open ? 'info' : 'ok', text: inbox.open ? `${inbox.open} 条待处理` : '没有待处理' } : undefined,
       body: [
         text('使用这个 boardlab 的 AI 发现架构、接口或设计不够用时，可以提在这里（命令行 boardlab feedback）；维护的人看到后修复或说明不采纳，关掉就不再待处理。'),

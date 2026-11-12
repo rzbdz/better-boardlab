@@ -35,6 +35,28 @@ describe('inventory', () => {
     await svc.locks.lock('com260', 'user:dana', '调试')
     await expect(svc.consoles.send('com260', { holder: 'user:dana' }, { text: 'x' })).rejects.toThrow(/没有绑定设备/)
   })
+
+  it('moves a board\'s serial-mux daemons to its new name, keeping their ports, and the lock follows', async () => {
+    const bench = new Bench([{ slot: 1, serial: ['/dev/ttyUSB1'], usb: [] }])
+    bench.names.clear(); bench.names.set('/dev/ttyUSB1', 'com260')
+    const svc = makeLab(bench.options(openDatabase(join(dir, 'rename.sqlite'))))
+    svc.boards.add('user:dana', { name: 'com260', slot: 1, chips: [{ serialPath: '/dev/ttyUSB1', alias: 'com260' }] })
+    const held = await svc.locks.lock('com260', 'user:dana', '调试')
+    const out = await svc.backends.rename('user:dana', 'com260', 'pegasus', { holder: 'user:dana', token: held.token })
+    expect(out.board).toBe('pegasus')
+    expect(bench.names.get('/dev/ttyUSB1')).toBe('pegasus')
+    expect(bench.started.at(-1)).toEqual(['/dev/ttyUSB1', 'pegasus'])
+    expect(bench.gates.get('pegasus')?.token).toBe(held.gateToken)
+    const board = svc.boards.get('pegasus')
+    expect(board.chips[0]!.alias).toBe('pegasus')
+    expect(board.lease?.holder).toBe('user:dana')
+    expect(() => svc.boards.get('com260')).toThrow(/没有这块板/)
+    // An unplugged console is just renamed on the record: its daemon starts under the new name on the next scan.
+    bench.names.clear()
+    const again = await svc.backends.rename('user:dana', 'pegasus', 'atlas', { holder: 'user:dana', token: held.token })
+    expect(again.board).toBe('atlas')
+    expect(svc.boards.get('atlas').chips[0]!.alias).toBe('atlas')
+  })
 })
 
 describe('console and firmware', () => {

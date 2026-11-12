@@ -65,4 +65,4 @@ const feedback: Command = {
   },
 }
 
-export const commands: CommandGroup = { id: 'feedback', summary: '给 boardlab 提意见、看和关闭意见', title: '意见箱', commands: [feedback] }
+export const commands: CommandGroup = { id: 'feedback', summary: '给 boardlab 提意见、看和关闭意见', title: '反馈', commands: [feedback] }

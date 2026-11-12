@@ -181,6 +181,33 @@ describe('the bsp site', () => {
     await expect(site.remove('user:bob', 'families', 'make-bsp')).rejects.toThrow(/还在用：vendor-p/)
   })
 
+  it('keeps SDK skills as Markdown, a pack\'s overridden by the site\'s, and writes them as commits', async () => {
+    const tree = join(dir, 'tree')
+    mkdirSync(join(tree, 'packs/base/skills'), { recursive: true })
+    writeFileSync(join(tree, 'packs/base/skills/sdk-p.md'), '# Pack skill\nfrom the pack\n')
+    const site = new Site(join(dir, 'site'), memory(), { tree })
+    // Listing and reading come from the pack until the site has its own.
+    expect(await site.skills()).toEqual([{ id: 'sdk-p', layer: 'base', file: 'packs/base/skills/sdk-p.md', title: 'Pack skill' }])
+    expect(site.skill('sdk-p')).toEqual({ id: 'sdk-p', layer: 'base', text: '# Pack skill\nfrom the pack\n' })
+    await site.putSkill('user:bob', 'sdk-p', '# Site skill\nwritten here\n')
+    expect(await site.skills()).toEqual([{ id: 'sdk-p', layer: 'site', file: 'skills/sdk-p.md', title: 'Site skill' }])
+    expect(site.skill('sdk-p')).toEqual({ id: 'sdk-p', layer: 'site', text: '# Site skill\nwritten here\n' })
+    expect(git(site.dir, 'log', '-1', '--format=%an|%s')).toBe('user:bob|Add skill sdk-p')
+    await site.putSkill('user:bob', 'sdk-p', '# Edited\n', 'sdk-p')
+    expect(git(site.dir, 'log', '-1', '--format=%an|%s')).toBe('user:bob|Edit skill sdk-p')
+    // The status lists it, kept small.
+    expect((await site.status()).skills).toEqual([{ id: 'sdk-p', layer: 'site', file: 'skills/sdk-p.md', title: 'Edited' }])
+    // Empty text, a bad id, and an unknown one are refused.
+    await expect(site.putSkill('user:bob', 'sdk-x', '  \n')).rejects.toThrow(/不能为空/)
+    await expect(site.putSkill('user:bob', 'bad id', '# x\n')).rejects.toThrow(/不合法的名字/)
+    await expect(site.removeSkill('user:bob', 'nope')).rejects.toThrow(/没有 skill nope/)
+    expect(site.skill('sdk-p').layer).toBe('site')
+    // Taken out, the pack's takes over; each change is a commit by whoever made it.
+    expect(await site.removeSkill('user:bob', 'sdk-p')).toBe('删掉了 sdk-p：用回 packs/base/skills/sdk-p.md 里的')
+    expect(site.skill('sdk-p')).toMatchObject({ layer: 'base' })
+    expect(git(site.dir, 'log', '-1', '--format=%an|%s')).toBe('user:bob|Remove skill sdk-p')
+  })
+
   it('takes a whole site repository: what it does not use is left alone, and only socs, sdk and hooks are shipped', async () => {
     // A repository that also holds the hosts' own files, deploy scripts, docs and notes.
     const seed = join(dir, 'catalog'), remote = join(dir, 'catalog.git')
@@ -543,9 +570,10 @@ describe('syncing the site to board hosts', () => {
       const stateDir = join(dir, 'state')
       const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ stateDir, bin: fakeBsp().bin, sdk: { run: async () => 0 } as never })] })
       const call = async (method: 'GET' | 'POST', path: string, body: Record<string, unknown> = {}) => {
-        const found = lab.api.match(method, path)
+        const [name, search = ''] = path.split('?')
+        const found = lab.api.match(method, name!)
         if (!found) throw new Error(`no ${method} ${path}`)
-        return found.endpoint.handle({ query: new URLSearchParams(), params: found.params, body, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null }) as Promise<any>
+        return found.endpoint.handle({ query: new URLSearchParams(search), params: found.params, body, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null }) as Promise<any>
       }
       const events = async (path: string, body: Record<string, unknown> = {}) => {
         const reply = await call('POST', path, body) as { start: (emit: (event: string, data: any) => void, end: () => void, signal: AbortSignal) => Promise<void> }
@@ -564,6 +592,14 @@ describe('syncing the site to board hosts', () => {
       cpSync(join(EXAMPLE, 'sdk'), join(root, 'sdk'), { recursive: true })
       cpSync(join(EXAMPLE, 'socs'), join(root, 'socs'), { recursive: true })
       expect((await call('POST', '/api/bsp/site/server', { id: 'build-c', host: 'build-c.example.test', user: 'dev' })).file).toBe('sdk/servers/build-c.yaml')
+      // SDK skills: written as a commit, listed, read by id, and taken out.
+      expect((await call('POST', '/api/bsp/site/skill', { id: 'bsp-a', text: '# BSP-A\nboot it\n' })).file).toBe('skills/bsp-a.md')
+      expect(await call('GET', '/api/bsp/site/skills')).toMatchObject({ skills: [{ id: 'bsp-a', layer: 'site', file: 'skills/bsp-a.md', title: 'BSP-A' }] })
+      expect(await call('GET', '/api/bsp/site/skill?id=bsp-a')).toEqual({ id: 'bsp-a', layer: 'site', text: '# BSP-A\nboot it\n' })
+      expect((await call('GET', '/api/bsp/site')).skills).toEqual([{ id: 'bsp-a', layer: 'site', file: 'skills/bsp-a.md', title: 'BSP-A' }])
+      await expect(call('GET', '/api/bsp/site/skill?id=nope')).rejects.toThrow(/没有 SDK 的 skill/)
+      expect((await call('POST', '/api/bsp/site/skill/remove', { id: 'bsp-a' })).message).toMatch(/删掉了 bsp-a/)
+      expect((await call('GET', '/api/bsp/site/skills')).skills).toEqual([])
       await expect(call('POST', '/api/bsp/site/sdk', { id: 'x', family: 'make-bsp', server: 'nowhere', path: '/p' })).rejects.toThrow(/没有编译服务器 nowhere/)
       // A broken file put there by hand: shown as a problem, and nothing is shipped until it is fixed.
       writeFileSync(join(root, 'sdk/instances/broken.yaml'), 'id: broken\nfamily: make-bsp\nserver: build-a\npath: /p\n')

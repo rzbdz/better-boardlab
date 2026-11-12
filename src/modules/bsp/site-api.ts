@@ -95,6 +95,18 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
     method: 'POST', path: '/api/bsp/site/remove', about: '从站点删掉一个文档（kind、id）；还有别的在用它时不删',
     handle: async ({ body, caller }) => ({ message: await done(caller.holder, `remove ${text(body.kind)} ${text(body.id)}`, () => site.remove(caller.holder, text(body.kind), text(body.id))) }),
   }, {
+    method: 'GET', path: '/api/bsp/site/skills', about: '站点和它的 pack 里的 SDK skill（skills/<id>.md，站点的同名盖住 pack 的）：id、layer、file、title',
+    handle: () => ({ skills: site.skills() }),
+  }, {
+    method: 'GET', path: '/api/bsp/site/skill', about: '一个 SDK skill 的 Markdown 原文（query 的 id）',
+    handle: ({ query }) => site.skill(text(query.get('id'))),
+  }, {
+    method: 'POST', path: '/api/bsp/site/skill', about: '写入一个 SDK skill（id、text；改名时给 original）：skills/<id>.md，以改的人的名义提交',
+    handle: ({ body, caller }) => done(caller.holder, `skill ${text(body.id)}`, () => site.putSkill(caller.holder, text(body.id), text(body.text), text(body.original) || undefined), out => out.file),
+  }, {
+    method: 'POST', path: '/api/bsp/site/skill/remove', about: '从站点删掉一个 SDK skill（id）；pack 里有同名的就用回 pack 的',
+    handle: async ({ body, caller }) => ({ message: await done(caller.holder, `remove skill ${text(body.id)}`, () => site.removeSkill(caller.holder, text(body.id))) }),
+  }, {
     method: 'POST', path: '/api/bsp/site/sync', about: '先取站点的镜像，再把站点（socs、sdk、hooks、.blobs）同步到每台 bsp 主机（或 lab 指定的一台）并让 bspd 重新读它，输出边做边推送',
     handle: ({ body, caller }) => new EventStream(async (emit, end) => {
       try {

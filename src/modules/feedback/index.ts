@@ -58,7 +58,7 @@ export function feedback(options: FeedbackOptions = {}): Module<{ inbox(): Feedb
   const shown = options.openShown ?? 50
   return {
     id: 'feedback',
-    title: '意见箱',
+    title: '反馈',
     setup(lab) {
       lab.kernel.schema(`
         CREATE TABLE IF NOT EXISTS feedback (

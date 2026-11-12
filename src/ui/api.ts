@@ -113,9 +113,33 @@ export async function sendFile(file: File, onProgress?: SendProgress): Promise<s
   return `sha256:${sha256}`
 }
 
+// The models people have typed in change only when one is saved; one read serves the page until it is refreshed.
+let modelsCache: string[] | null = null, modelsRead: Promise<string[]> | null = null, modelsEpoch = 0
+function readModels(): Promise<string[]> {
+  if (modelsCache) return Promise.resolve(modelsCache)
+  if (modelsRead) return modelsRead
+  const epoch = modelsEpoch
+  modelsRead = call<{ models?: string[] }>('GET', 'api/models').then(out => {
+    const list = out?.models ?? []
+    if (epoch === modelsEpoch) { modelsCache = list; modelsRead = null }
+    return list
+  }).catch(error => { if (epoch === modelsEpoch) modelsRead = null; throw error })
+  return modelsRead
+}
+
 export const api = {
   state: () => call<State>('GET', 'api/state').then(page),
   board: (name: string) => call<BoardDetail>('GET', `api/board?name=${encodeURIComponent(name)}`),
+  /** Models people typed in themselves, most recent first: read once per page, `refresh` to read again. */
+  models: (refresh = false) => { if (refresh) { modelsEpoch++; modelsCache = null; modelsRead = null } return readModels() },
+  /** Rename a board everywhere (backend names, lock, queue, history); returns the name it has afterwards. */
+  renameBoard: (name: string, to: string) => call<{ board: string, message: string }>('POST', 'api/board/rename', { board: name, name: to }),
+  /** Set a board's model, or clear it with null; a set one is remembered for the model list. */
+  setModel: async (name: string, product: string | null) => {
+    const out = await call<{ ok: true }>('POST', 'api/board', { name, product })
+    modelsEpoch++; modelsCache = null; modelsRead = null
+    return out
+  },
   history: () => call<History>('GET', 'api/history'),
   lock: (board: string, purpose: string) => call<LockResult>('POST', 'api/lock', { board, purpose }),
   queue: (board: string, purpose: string) => call<LockResult>('POST', 'api/lock', { board, purpose, queue: 'join' }),

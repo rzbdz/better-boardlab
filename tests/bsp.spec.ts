@@ -254,8 +254,27 @@ describe('bsp lab driver', () => {
   })
 })
 
-describe('bsp lab news', () => {
-  it('follows the registry: port changes become news, and an ended stream says so', async () => {
+describe('bsp lab rename', () => {
+  it('renames the DUT and its console in bspd under the lease, and treats a lost answer as done', async () => {
+    const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'rename' ? ok({ note: 'lease dropped by rename; acquire the new name' }) : ok({}))
+    const out = await bspLab({ run: bsp.run }).rename!.rename(config, on('k3-a', 'lease-token'), 'k3-b')
+    expect(out).toMatchObject({ device: 'k3-b', alias: 'k3-b' })
+    expect(out.message).toMatch(/lease dropped/)
+    expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'rename', 'k3-a', 'k3-b', '--console', '--lease', 'lease-token'])
+    // The rename reached the host but its answer was lost: a retry sees the new name and does not fail.
+    const lost = fakeBsp(args => {
+      if (args[0] === 'dut' && args[1] === 'rename') return fail('timed out')
+      if (args[0] === 'dut' && args[1] === 'list') return ok([{ id: 'k3-b', host: 'h1' }])
+      return ok({})
+    })
+    expect(await bspLab({ run: lost.run }).rename!.rename(config, on('k3-a'), 'k3-b')).toMatchObject({ device: 'k3-b' })
+    // A name that is neither renamed nor there is an error.
+    const neither = fakeBsp(args => args[0] === 'dut' && args[1] === 'list' ? ok([{ id: 'k3-c', host: 'h1' }]) : fail('no DUT k3-a'))
+    await expect(bspLab({ run: neither.run }).rename!.rename(config, on('k3-a'), 'k3-b')).rejects.toThrow(/no DUT k3-a/)
+  })
+})
+
+describe('bsp lab news', () => {  it('follows the registry: port changes become news, and an ended stream says so', async () => {
     const out = new PassThrough()
     let args: string[] = []
     const lab = bspLab({ spawn: given => { args = given; return { stream: Duplex.from({ readable: out, writable: new PassThrough() }), stderr: () => 'registry gone' } } })

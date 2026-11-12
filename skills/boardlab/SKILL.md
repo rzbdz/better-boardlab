@@ -104,9 +104,23 @@ boardlab unlock bsp-board-1
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
 - 本机文件（例如自己打的 FIT）照样 `boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`，文件会自动传过去。
-- 只在调 U-Boot 或它加载的内核时：`boardlab boot <board> --sdk <sdk> --break uboot` 停在 U-Boot（recipe 里有 `breaker: uboot` 才行；页面启动对话框也会列出来）。之后在串口里自己操作。
+- 只在调 U-Boot、edk2 或它们加载的内核时：`boardlab boot <board> --sdk <sdk> --break <名字>` 停在 recipe 的 `breaker:` 那一步（常见 `uboot`、`edk2`；页面启动对话框的「停在哪」列出的就是可用的名字，没有列出来的不要猜）。edk2 的流程停在 UEFI Shell / ACPI 阶段，U-Boot 的停在自己的命令行，之后在串口里自己操作。
 - 启动或刷机卡住了用 `boardlab cancel <board>`：任务在这一步之后停，板子回到你手里。
 - 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先传给 boardd。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
+
+## SDK 自己的说明（skill）
+
+有的 SDK 带一份自己的 `SKILL.md`，写这份源码树在这个 SDK 里怎么用（例如同一份 bsp 源码的不同启动配置：edk2、u-boot、ACPI）。在 SDK 的仓库里工作前先取来看，按它的说明做：
+
+```sh
+boardlab sdk skill list                      # 有哪些 SDK 带自己的说明
+boardlab sdk skill <sdk>                     # 打印 Markdown
+boardlab sdk skill <sdk> --install           # 写到当前目录的 .claude/skills/<sdk>/SKILL.md
+boardlab sdk skill <sdk> --install --dir DIR # 写到 DIR/.claude/skills/<sdk>/SKILL.md
+boardlab sdk skill <sdk> --install -g        # 写到这台机器上每个装了的 agent 的 skill 目录
+```
+
+没有就是没有（会列出有的 id），不要猜内容。
 
 ## 给 SDK 加启动或刷机方法
 
@@ -137,6 +151,7 @@ boardlab registry hosts                             # 每台主机拿到的目�
 用的时候发现 boardlab 的架构、某个接口或设计做不到你要做的事（少了字段、要绕很多步、行为和文档不符），不要只在回答里说一句：
 `boardlab feedback "<哪里不够用、现在只能怎么绕开、希望提供什么>" [--kind bug|api|design|feature|other] [--subject "<标题>"] [--context '<JSON>']`
 boardd 把它存在数据库里，维护 boardlab 的人下次会看到并修复。先 `boardlab feedback list` 看看有没有人提过，不要重复提同一条；这条是给维护者的，用户要的结果仍然要在回答里给。
+不在 `boardlab` 手边（比如从脚本里）也可以直接走 HTTP：`GET /api/feedback?status=open` 看已经有了什么，`POST /api/feedback`（`kind`、`subject`、`body`、`context`）提一条，维护者用 `POST /api/feedback/resolve`（`id`、`status`、`note`）关掉。地址和 CLI 连的是同一个 boardd（`boardlab remote show`），网页上的「反馈」页也能看到待处理的。
 
 ## 规则
 

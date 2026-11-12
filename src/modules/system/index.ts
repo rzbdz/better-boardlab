@@ -1,8 +1,8 @@
 /**
  * The `system` module: this boardlab's version, whether a newer release is out, and installing it. An installed
  * boardlab (scripts/install.sh) remembers where its release came from; boardd asks there for `release.json` at most
- * every few hours (or when asked to), and an update runs the installer, which swaps the program in once no board is
- * locked and restarts boardd. The page reloads itself when it sees a new version.
+ * every few hours (or when asked to), and an update runs the installer, which hands over to the new release without
+ * stopping boardd (see server/supervisor.ts). The page reloads itself when it sees a new version.
  */
 import { execFile, spawn } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -96,7 +96,7 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
           },
         },
         {
-          method: 'POST', path: '/api/system/update', about: '升级到新版：等没人拿锁时换上并重启 boardd（force=true 不等）', handle: async ({ body, caller }) => {
+          method: 'POST', path: '/api/system/update', about: '升级到新版：新版本接手新连接，旧版本把手上的串口和任务跑完（不停机；force=true 不等没人用的板子）', handle: async ({ body, caller }) => {
             if (!prefix || !source) throw new BoardError('invalid', '这个 boardlab 不是用 install.sh 装的（比如从源码跑的）：在源码里 git pull 再 build')
             if (updating) throw new BoardError('conflict', '已经在升级')
             const now = await check(true)
@@ -113,7 +113,7 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
               : spawn(args[0]!, args.slice(1), { stdio: 'ignore', detached: true })
             child.on('error', () => { updating = false })
             child.unref()
-            return { message: `开始升级到 ${now.latest?.version}（${now.latest?.revision}）：没人拿锁时换上并重启 boardd，页面会自己刷新` }
+            return { message: `开始升级到 ${now.latest?.version}（${now.latest?.revision}）：新版接手新连接，正在用的板子跑完为止，页面会自己刷新` }
           },
         },
       ])

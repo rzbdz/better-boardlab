@@ -7,7 +7,7 @@ interface Source { source: string | null, token: string | null }
 
 const update: Command[] = [{
   name: 'update', noBoard: true, usage: [
-    'update [--check] [--force]\t看有没有新版（--check 只看），有就升级：boardd 等没人拿锁时换上新版并重启（--force 不等）',
+    'update [--check] [--force]\t看有没有新版（--check 只看），有就升级：新版本接手新连接，旧版本把手上的串口、任务跑完（不停机；实在接不了才重启）',
     'update --show-source\t新版从哪里来（令牌只显示末尾几位）',
     'update --set-source <source> [--token T]\t换发布源（https 目录、git@host:组/仓库.git#分支、https://host/api/v4/projects/<id>#分支）；先看那里有 release.json 才保存；--token "" 删掉令牌',
     'update --from <source> [--token T] [--force]\t换发布源并升级到那里的版本',

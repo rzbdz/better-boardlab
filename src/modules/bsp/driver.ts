@@ -152,6 +152,10 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     return { found, message }
   }
   const lease = (token: string | null | undefined) => token && token !== SLOT_LEASE ? ['--lease', token] : []
+  /** Break points by catalog target, briefly: `bsp sdk show` is slow and the page asks on every dialog change. */
+  const BREAKS_TTL_MS = 30_000
+  const breaksCache = new Map<string, { at: number, value: { load: string[], download: string[] } }>()
+  const breaksAsking = new Map<string, Promise<{ load: string[], download: string[] }>>()
   /** Progress lines of a reset: what a person is asked to do, and when it is done. */
   const attention = (notice?: (message: string | null) => void) => notice && ((line: string) => {
     const asked = line.match(/ACTION NEEDED: (.*)$/)
@@ -224,6 +228,22 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         }
       },
       remove: async (config, device) => { await bsp(config, ['dut', 'remove', device]) },
+    },
+
+    // The DUT's name in bspd changes too, its console alias and reset/fdl aliases with it. bsp drops the lease on a
+    // rename, so boardd takes it again for the new name afterwards.
+    rename: {
+      async rename(config, { device, lease: token }, to) {
+        try {
+          const result = await bsp<{ note?: string }>(config, ['dut', 'rename', device, to, '--console', ...lease(token)], 180_000)
+          return { device: to, alias: to, message: `${device} → ${to}${result.note ? `（${result.note}）` : ''}` }
+        } catch (error) {
+          // A retry after an answer that did not arrive: the host may already have renamed it.
+          const duts = await bsp<BspDut[]>(config, ['dut', 'list']).catch(() => [] as BspDut[])
+          if (duts.some(dut => dut.id === to)) return { device: to, alias: to, message: `${device} → ${to}（主机上已经改好了）` }
+          throw error
+        }
+      },
     },
 
     relay: {
@@ -363,9 +383,22 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         return (job.lines ?? []).join('\n')
       },
       async breaks(config, sdk) {
-        // The recipe's `breaker:` steps, from the CATALOG (not the host): bsp sdk show lists them.
-        const shown = await bsp<{ breakers?: { load?: string[], download?: string[] } }>(config, ['sdk', 'show', sdk], 60_000)
-        return { load: shown.breakers?.load ?? [], download: shown.breakers?.download ?? [] }
+        // The recipe's `breaker:` steps, from the CATALOG (not the host): bsp sdk show lists them. The page asks as
+        // soon as the boot dialog opens and again on every change, and the catalog changes at most when it syncs:
+        // a short cache keeps the dialog instant, and concurrent asks share one call.
+        const key = `${config.url}\u0000${sdk}`
+        const hit = breaksCache.get(key)
+        if (hit && Date.now() - hit.at < BREAKS_TTL_MS) return hit.value
+        const asking = breaksAsking.get(key)
+        if (asking) return asking
+        const ask = (async () => {
+          const shown = await bsp<{ breakers?: { load?: string[], download?: string[] } }>(config, ['sdk', 'show', sdk], 60_000)
+          const value = { load: shown.breakers?.load ?? [], download: shown.breakers?.download ?? [] }
+          breaksCache.set(key, { at: Date.now(), value })
+          return value
+        })()
+        breaksAsking.set(key, ask)
+        try { return await ask } finally { breaksAsking.delete(key) }
       },
       async flash(config, { device, lease: token }, pkg, progress, signal) {
         // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.
