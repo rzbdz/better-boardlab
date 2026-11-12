@@ -118,7 +118,10 @@ export const api = {
   channels: (board: string) => call<BoardChannels>('GET', `api/relay?board=${encodeURIComponent(board)}`),
   setChannel: (board: string, channel: string, action: string, ms: number | null) => call<{ message: string }>('POST', 'api/relay', { board, channel, action, ms: ms ?? undefined }),
   confirm: (board: string) => call<{ message: string }>('POST', 'api/confirm', { board }),
-  bootSdk: (board: string, sdk: string, method: 'load' | 'download') => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method }),
+  cancelBoard: (board: string) => call<{ message: string }>('POST', 'api/board/cancel', { board }),
+  bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
+  /** Where an SDK's recipe can stop early (empty when it has none). */
+  bootBreaks: (board: string, sdk: string) => call<{ load: string[], download: string[] }>('GET', `api/boot/breaks?board=${encodeURIComponent(board)}&sdk=${encodeURIComponent(sdk)}`),
   sendFile,
   /** Flash a package: a `url` the board's backend downloads itself, or a file sent first (`sendFile`'s `sha256`). */
   flashPackage: (board: string, input: { url?: string, sha256?: string, flasher?: string }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),

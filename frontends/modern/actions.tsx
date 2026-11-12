@@ -85,7 +85,8 @@ export function useBoardActions(board: Board) {
     reset: () => ask('复位', <>复位 <b>{name}</b>，板子会立即重启。{mb && !mb.available && <><br /><span className="warn-t">复位后它会停在下载模式：{mb.why}</span></>}</>, '复位', () => void run('reset', '复位', () => api.reset(board.name))),
     fastboot: () => ask('进下载模式', <>让 <b>{name}</b> 重启进 boot ROM，停在那里等下载文件。</>, '进下载模式', () => void run('fastboot', '进下载模式', () => api.fastboot(board.name))),
     confirm: () => void run('confirm', '确认', () => api.confirm(board.name), `${name} 继续了`),
-    boot: (sdk: string, method: 'load' | 'download') => run('boot', method === 'load' ? '内存启动' : '刷机', () => api.bootSdk(board.name, sdk, method)),
+    boot: (sdk: string, method: 'load' | 'download', brk?: string) => run('boot', method === 'load' ? '内存启动' : '刷机', () => api.bootSdk(board.name, sdk, method, brk)),
+    cancel: () => run('cancel', '取消', () => api.cancelBoard(board.name), `${name} 停下了`),
     flashPackage: (pkg: FlashPackage) => run('boot', '刷机', async () => {
       const file = pkg.file
       try {

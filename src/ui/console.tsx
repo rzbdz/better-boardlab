@@ -33,7 +33,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   const el = document.createElement('div')
   el.style.cssText = 'position:absolute;inset:0;overflow:hidden'
   const term = new Terminal({
-    cursorBlink: true, fontSize: 13, lineHeight: 1.25, scrollback: 50_000, allowProposedApi: true,
+    cursorBlink: true, fontSize: 13, lineHeight: 1.25, scrollback: 200_000, allowProposedApi: true,
     fontFamily: '"SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
     theme: { background: '#0b0d12', foreground: '#d7dde8', cursor: '#7aa2ff', selectionBackground: '#2a3a5c', black: '#1b1f27', brightBlack: '#5c6370' },
   })

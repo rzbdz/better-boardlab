@@ -25,7 +25,7 @@ function Screen({ base, terminal, onStatus }: { base: string, terminal: Terminal
   useEffect(() => {
     const el = host.current!
     const term = new Xterm({
-      cursorBlink: true, fontSize: 13, lineHeight: 1.2, scrollback: 10_000, allowProposedApi: true, macOptionIsMeta: true,
+      cursorBlink: true, fontSize: 13, lineHeight: 1.2, scrollback: 200_000, allowProposedApi: true, macOptionIsMeta: true,
       fontFamily: '"JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace',
       theme: { background: '#0b0c0e', foreground: '#d6d7da', cursor: '#e5e5e7', selectionBackground: '#3e6ae155' },
     })

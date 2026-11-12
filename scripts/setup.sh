@@ -109,7 +109,7 @@ printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOA
 OFFER="system clients"
 # Modules this distribution adds on top (the internal one carries its CA module): listed in modules.offered of the
 # release, absent from the public one.
-if [ -f "$PREFIX/current/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/current/dist/modules.offered")"; fi
+if [ -f "$PREFIX/releases/$VERSION-$REV/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/releases/$VERSION-$REV/dist/modules.offered")"; fi
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
     printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "clients": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"

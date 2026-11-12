@@ -344,12 +344,23 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
     },
 
+    async cancel(config, { device }) {
+      const done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device], 60_000)
+      return `让 ${done.cancelled?.join('、') ?? '它'} 停下`
+    },
+
     builds: {
       async boot(config, { device, lease: token }, sdk, progress) {
         // The board host pulls the SDK's build from its build server and runs the SDK's boot recipe.
         const job = await bsp<{ lines?: string[] }>(config, ['dut', 'boot', device, '--sdk', sdk.sdk, '--method', sdk.method,
-          ...(sdk.variant ? ['--variant', sdk.variant] : []), ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress)
+          ...(sdk.variant ? ['--variant', sdk.variant] : []), ...(sdk.brk ? ['--break', sdk.brk] : []),
+          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress)
         return (job.lines ?? []).join('\n')
+      },
+      async breaks(config, sdk) {
+        // The recipe's `breaker:` steps, from the CATALOG (not the host): bsp sdk show lists them.
+        const shown = await bsp<{ breakers?: { load?: string[], download?: string[] } }>(config, ['sdk', 'show', sdk], 60_000)
+        return { load: shown.breakers?.load ?? [], download: shown.breakers?.download ?? [] }
       },
       async flash(config, { device, lease: token }, pkg, progress, signal) {
         // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.

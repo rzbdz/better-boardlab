@@ -87,7 +87,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   })
   useEffect(() => { if (!menu) return; const off = () => setMenu(false); window.addEventListener('click', off); return () => window.removeEventListener('click', off) }, [menu])
   const watchedOn = watched.includes(board.name), last = lastBoot(board.name)
-  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method) }}
+  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method, brk) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method, brk) }}
     onPackage={pkg => { if (pkg.url) savePackage(board.name, { url: pkg.url, flasher: pkg.flasher ?? '' }); void act.flashPackage(pkg) }} />)
   const relay = () => ui.layer(close => <RelayDialog board={board} close={close} />, 'wide')
   const extra = viewsFor(state, 'board', { board: board.name })
@@ -145,7 +145,8 @@ function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<type
     {sending && <div className="flag run"><span className="spin" /><div><b>{sending.text}</b><div className="bar2"><i style={{ width: `${sending.pct}%` }} /></div></div></div>}
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
-    {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div></div>}
+    {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div>
+      {(m.mine || !m.holder) && <button className="pill sm" disabled={act.busy === 'cancel'} onClick={act.cancel}>{act.busy === 'cancel' ? <span className="spin" /> : <Icon name="x" />}取消</button>}</div>}
     {m.flags.offline && <div className="flag"><Icon name="plug" /><div><b>串口不在线</b><span>板子可能没上电，或者串口线松了。</span></div></div>}
     {m.flags.error && <div className="flag bad"><Icon name="warn" /><div><b>锁和实验室对不上</b><span>{m.flags.error}</span></div></div>}
   </>
@@ -189,7 +190,7 @@ function Facts({ board }: { board: Board }) {
   return <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <><dt key={`${k}t`}>{k}</dt><dd key={`${k}d`}>{v}</dd></>)}</dl>
 }
 
-function BootDialog({ board, close, onStart, onPackage }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download') => void, onPackage: (pkg: FlashPackage) => void }) {
+function BootDialog({ board, close, onStart, onPackage }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download', brk?: string) => void, onPackage: (pkg: FlashPackage) => void }) {
   const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name), canPackage = !!board.lab?.canFlashPackage, used = lastPackage(board.name)
   const [sdk, setSdk] = useState(last?.sdk && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? '')
   const [method, setMethod] = useState<'load' | 'download' | 'package'>(!sdks.length && canPackage ? 'package' : last?.method ?? 'load')
@@ -197,11 +198,19 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
   const [url, setUrl] = useState(used?.url ?? '')
   const [file, setFile] = useState<File | null>(null)
   const [flasher, setFlasher] = useState(used?.flasher ?? '')
+  // Break points of the SDK's recipe (`breaker:` steps): boot U-Boot alone, say. Fastboot (load) only, for now.
+  const [breaks, setBreaks] = useState<string[]>([])
+  const [brk, setBrk] = useState('')
+  useEffect(() => {
+    setBreaks([]); setBrk('')
+    if (!sdk || method !== 'load') return
+    void api.bootBreaks(board.name, sdk).then(got => setBreaks(got?.load ?? [])).catch(() => {})
+  }, [board.name, sdk, method])
   const pkg = method === 'package', link = url.trim()
   const ready = pkg ? (from === 'url' ? /^https?:\/\/\S+$/i.test(link) : !!file) : !!sdk
   const start = () => {
     close()
-    if (!pkg) return onStart(sdk, method as 'load' | 'download')
+    if (!pkg) return onStart(sdk, method as 'load' | 'download', method === 'load' && brk ? brk : undefined)
     onPackage({ ...(from === 'url' ? { url: link } : { file: file! }), flasher: flasher.trim() || undefined })
   }
   return <>
@@ -223,6 +232,10 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
         : <label className="field">文件<input className="input" type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /><span className="sub small">{file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB，先传给 boardd` : '从这台电脑选，先传给 boardd'}</span></label>}
       <label className="field">刷机工具（可选）<input className="input" value={flasher} onChange={e => setFlasher(e.target.value)} placeholder="留空由后端按刷机包选" /></label>
     </>}
+    {!pkg && method === 'load' && breaks.length > 0 && <label className="field">停在哪<div className="chips">
+      <button className={`chip${brk === '' ? ' on' : ''}`} onClick={() => setBrk('')}>完整启动</button>
+      {breaks.map(name => <button key={name} className={`chip${brk === name ? ' on' : ''}`} onClick={() => setBrk(name)}>停在 {name}</button>)}
+    </div><span className="sub small">只启动到这一步，之后自己在串口里操作（调 U-Boot 或内核时用）。</span></label>}
     <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!ready} onClick={start}><Icon name={pkg ? 'dl' : 'rocket'} />开始</button></div>
   </>
 }
