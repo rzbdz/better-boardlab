@@ -41,6 +41,14 @@ function install(lab: LabSettings | null): Element[] {
   ]
 }
 
+/** Where a host's GPIO page is opened: directly at its bspd (`bspd+ssh://user@host:p`), or through boardd for a host
+ * on boardd's own machine, which answers only on loopback. */
+function gpioLink(url: string | null, lab: string): string {
+  const match = /^bspd\+(http|ssh):\/\/(?:[^@/]*@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
+  if (!match || match[1] === 'http') return `api/bsp/hosts/${encodeURIComponent(lab)}/panel/`
+  return `http://${match[2]}:${match[3] ?? '8765'}/`
+}
+
 /** A bsp board's record, changed in bspd while you hold its lock: only the fields filled in change. */
 function boardForm(board: string): Element[] {
   const keep = '不填：不改'
@@ -378,7 +386,7 @@ export const ui: ModuleUi = {
             key: lab.id, title: lab.id,
             description: [[lab.url?.replace(/^bspd\+/, '') ?? '还没装', lab.verifyMessage ? ` · ${lab.verifyMessage}` : '', hostSite(lab.id)].join(''),
               // The host's own page (GPIO header, lines, events), through boardd, which adds the token.
-              ...(lab.enabled && lab.url ? [' · ', { link: 'GPIO 面板', href: `api/bsp/hosts/${encodeURIComponent(lab.id)}/panel/` }] : [])],
+              ...(lab.enabled && lab.url ? [' · ', { link: 'GPIO 面板', href: gpioLink(lab.url, lab.id) }] : [])],
             status: lab.busy ? { tone: 'neutral' as const, text: lab.busy.line ? `${lab.busy.label}：${lab.busy.line.slice(0, 60)}` : `${lab.busy.label}…` }
               : !lab.enabled ? { tone: 'warn' as const, text: '还没装好' } : lab.verifyOk === false ? { tone: 'error' as const, text: '连不上' } : { tone: 'ok' as const, text: '在线' },
             actions: [

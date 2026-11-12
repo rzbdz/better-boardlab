@@ -102,7 +102,7 @@ function Shell() {
       if ((e.target as HTMLElement).closest('input, textarea, select, .xterm, [role=dialog]') || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === '/' && where_.page === 'boards') { e.preventDefault(); document.getElementById('board-search')?.focus() }
       else if (where_.page === 'board' && (e.key === 'f' || e.key === 'F')) setFull(f => !f)
-      else if (where_.page === 'board' && e.key === 'Escape' && full) setFull(false)
+      // Escape never leaves the console: it is vim's key (F and the handle button do the same, and keep working).
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

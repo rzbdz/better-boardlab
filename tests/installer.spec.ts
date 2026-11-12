@@ -85,7 +85,7 @@ describe('install.sh', () => {
 
   it('adds a module a release brings to boardd.json once, keeping the rest of it, and not again once taken out', () => {
     // The service install's step, run on its own (a service install needs root and systemd).
-    const step = /^OFFER=.*\n^offer_modules\(\) \{\n[\s\S]*?^\}\n/m.exec(readFileSync(setup, 'utf8'))![0]
+    const step = /^OFFER=.*\n(?:#[^\n]*\n|\[[^\n]*\n|if [^\n]*\n)*offer_modules\(\) \{\n[\s\S]*?^\}\n/m.exec(readFileSync(setup, 'utf8'))![0]
     const state = join(dir, 'state'), config = join(state, 'boardd.json')
     mkdirSync(state, { recursive: true })
     const offer = (offered: string) => execFileSync('sh', ['-c', `say() { echo "==> $*"; }\n${step}\nOFFERED="${offered}"; offer_modules; echo "OFFERED=$OFFERED"`],

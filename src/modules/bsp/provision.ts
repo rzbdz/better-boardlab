@@ -15,7 +15,8 @@ import { randomBytes } from 'node:crypto'
 import type { Access, Executor, Hosts } from '../hosts/ssh.ts'
 import { shipHostTools } from './host-tools.ts'
 
-export interface HostSetup { id: string, access: Access, port?: number, board?: string }
+/** `ca`: a certificate the host must trust (the network's own CA), installed before anything is downloaded there. */
+export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null }
 export interface Installed { target: string, port: number, token: string, version: string, url: string }
 
 const tar = (cwd: string, out: string) => new Promise<void>((resolve, reject) =>
@@ -246,6 +247,13 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     await exec.run(`mkdir -p ${remote}`)
     await exec.put(bundle, `${remote}/bsp.tgz`)
     await shipHostTools(exec, sudo, hostTools, facts.stdout.split('\n')[0] ?? '', remote, progress)
+    // The network's certificate, if this distribution carries one: put beside the bundle, installed by bspd-install.
+    let ca = ''
+    if (setup.ca && existsSync(setup.ca)) {
+      await exec.put(setup.ca, `${remote}/ca.crt`)
+      ca = `--ca '${remote}/ca.crt'`
+      progress('带上证书：那台机器装好后信任它')
+    }
     const siteBundle = site ? await site(dir) : null
     if (siteBundle) await shipSite(exec, sudo, siteBundle, progress)
     const made = token ?? randomBytes(24).toString('hex')
@@ -255,7 +263,7 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
     let stage: string | null = null
     const run = await exec.run(
-      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 127.0.0.1 --token '${made}' ${setup.board ? `--board '${setup.board}'` : ''}; cd /; rm -rf ${remote}`,
+      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 --token '${made}' ${setup.board ? `--board '${setup.board}'` : ''} ${ca}; cd /; rm -rf ${remote}`,
       {
         timeoutMs: 1_800_000, onLine: line => {
           if (!line.trim()) return

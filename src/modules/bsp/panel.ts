@@ -34,6 +34,14 @@ export function panelTarget(url: string | null): { kind: 'http', host: string, p
     : { kind: 'ssh', target: `${user ? `${user}@` : ''}${host}`, sshPort: null, port: Number(port ?? 8765) }
 }
 
+/** Where a host's own bspd page is opened directly (it listens on the network): `http://<host>:<port>/`. A host on
+ * boardd's own machine answers only on loopback, so it is opened through boardd (`/api/bsp/hosts/<lab>/panel/`). */
+export function panelLink(url: string | null, lab: string): string {
+  const target = panelTarget(url)
+  if (target.kind === 'http') return `/api/bsp/hosts/${encodeURIComponent(lab)}/panel/`
+  return `http://${target.target.replace(/^[^@]*@/, '')}:${target.port}/`
+}
+
 export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null, ssh?: string }): Endpoint[] {
   const tunnels = new Map<string, Tunnel>()
   const close = (id: string) => { const tunnel = tunnels.get(id); tunnel?.child?.kill(); tunnels.delete(id) }

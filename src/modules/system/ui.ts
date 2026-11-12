@@ -3,6 +3,7 @@
  * every few hours by boardd, or now), updating to it, and where new releases come from.
  */
 import { call } from '../../ui/api.ts'
+import type { PageState } from '../../ui/api.ts'
 import { action, notice, text, type ModuleUi, type View } from '../../ui/contract.ts'
 
 interface Version { version: string, revision: string, source: string | null, latest: { version: string, revision: string } | null, checkedAt: string | null, error: string | null, updating: boolean, newer: boolean }
@@ -17,9 +18,17 @@ const sourceBody = (input: Record<string, unknown>) => ({ source: String(input.s
 
 export const ui: ModuleUi = {
   module: 'system',
-  views(): View[] {
+  views(state: PageState): View[] {
     const v = known
-    return [{
+    // A page of its own: every module this boardlab carries, in the order boardd loads them.
+    const modules: View = {
+      id: 'modules', slot: 'page', title: '模块',
+      body: [
+        text(`这个 boardlab 带了 ${state.modules.length} 个模块：设置里出现的那些各管一件事，锁、队列和名字这样的核心在 boardd 里。`),
+        { kind: 'list', items: state.modules.map(item => ({ key: item.id, title: item.title, description: item.id })) },
+      ],
+    }
+    return [modules, {
       id: 'version', slot: 'settings', title: '版本',
       status: v?.newer ? { tone: 'warn', text: `有新版 ${v.latest?.version}` } : v ? { tone: 'ok', text: v.version } : undefined,
       body: [

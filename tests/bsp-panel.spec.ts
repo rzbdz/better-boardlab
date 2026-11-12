@@ -64,6 +64,7 @@ describe('a board host\'s page through boardd', () => {
     expect(() => panelTarget(null)).toThrow(/没有 bspd 地址/)
   })
 
+
   it('passes the page, tool calls and event streams on, with the lab\'s token added and the browser\'s own left out', async () => {
     const bspd = await fakeBspd()
     const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)

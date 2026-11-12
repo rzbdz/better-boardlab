@@ -40,6 +40,8 @@ const files = ['dist', 'skills', 'docs/help', 'LICENSE', 'README.md'].filter(pat
 if (existsSync(join(root, 'firmware'))) files.push('firmware')
 // The tools board hosts get beside bspd (src/modules/bsp/host-tools.ts), when this distribution carries any.
 if (existsSync(join(root, 'host-tools'))) files.push('host-tools')
+// Certificates this distribution carries (the internal one's CA module), if any.
+if (existsSync(join(root, 'ca'))) files.push('ca')
 execFileSync('tar', ['-cf', '-', ...files], { cwd: root, maxBuffer: 1 << 30 }).length
 execFileSync('sh', ['-c', `tar -cf - ${files.join(' ')} | tar -xf - -C '${stage}'`], { cwd: root })
 // The bsp tree board hosts are set up from: the files git tracks there, with serial-mux's.
@@ -50,6 +52,8 @@ if (existsSync(join(bsp, 'deploy/bspd-install.sh'))) {
   writeFileSync(join(stage, 'externals/bsp/REVISION'), execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
 }
 writeFileSync(join(stage, 'VERSION'), `${version}\n`)
+// Modules this distribution has on top of the shared ones (the internal one's CA module), for the installer to load.
+if (existsSync(join(root, 'modules.offered'))) writeFileSync(join(stage, 'dist/modules.offered'), readFileSync(join(root, 'modules.offered')))
 // install.sh is the thin bootstrap (fetch a release, run its setup.sh); setup.sh is this release's own installer. Both
 // ship in the tarball: an installed machine keeps install.sh and every update runs the fetched release's setup.sh.
 const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8').replace('@RELEASE_SOURCE@', source)

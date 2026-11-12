@@ -108,7 +108,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
               const { done, tested } = await lab.kernel.doing([`lab:${id}`], 'install', '安装中', caller.holder, async line => {
                 const say = (text: string) => { emit('out', { text }); line(text) }
                 const shipped = siteFor(say)
-                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board) }, null, say, shipped.bundle)
+                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert') }, null, say, shipped.bundle)
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
