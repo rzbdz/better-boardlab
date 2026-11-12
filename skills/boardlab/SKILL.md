@@ -47,16 +47,36 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 
 ## 等结果，不要 sleep
 
-要等的东西几乎都能阻塞等到，不要用 `sleep` 盲等，也不要反复短轮询来猜：
+要等的东西几乎都能阻塞等到，不要用 `sleep` 盲等：`send --wait`、`console`、`boardlab boot` 的任务都是阻塞的。
+但**一次 wait 不要超过约 30 秒**：等不到就先 tail 一下串口看清卡在哪，再决定继续等、换方法还是停。
 
-- **串口输出**：`boardlab send <board> '<命令>' --wait '<正则>' --timeout 30s` 一直等到匹配，退出码说明等到没有；
-  要看持续输出用 `boardlab console <board>`（长连接、断线自动重连），事后看用 `boardlab log <board>`。
-- **启动/刷机**是后台任务：`boardlab boot …` 会跟着任务直到结束；`--timeout` 给比预期略长的值，等不到就
-  `boardlab cancel <board>`，不要一直挂着。
+- **30 秒以内**：直接 `boardlab send <board> '<命令>' --wait '<正则>' --timeout 30s`，退出码说明等到没有。
+- **会超过 30 秒的**（开机、刷机、大文件传输、等内核起来）：不要一个 `--timeout 1800` 干等。用「等 30 秒 → tail
+  看一眼 → 再等」的循环；每次先看串口最近的输出：
+  - 一次性看：`boardlab log <board> --lines 60`（要筛就 `| grep -E '<正则>'`）；
+  - 跟着看：`boardlab console <board>`（长连接、断线自动重连）；
+  - 看到已经到位（出现提示符/登录行/启动完成标志）就立即继续，不要等满超时；看到 panic、卡死、重复重启就停下来报告，
+    不要继续等。
+- **写脚本时就用这个模式**：每一轮阻塞等一小段（`--wait … --timeout 30`，或轮询 `boardlab log`），等不到就 tail
+  一下并检查失败标志，再进入下一轮；总时长设上限（开机 3–5 分钟、刷机按镜像大小 10–30 分钟），轮次间隔可逐步放宽
+  （30 秒、60 秒、120 秒…）。示例：
+
+  ```sh
+  deadline=$((SECONDS + 300))          # 开机最多等 5 分钟
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    boardlab send "$B" ' ' --wait 'login:|~ # ' --timeout 30s && { echo booted; break; }
+    if boardlab log "$B" --lines 60 | grep -E 'Kernel panic|Please RESET|Synchronous External Abort'; then
+      echo "启动失败，看上面的串口输出"; exit 1
+    fi
+    boardlab log "$B" --lines 8 | tail -8      # tail 一下，看进度
+    [ $SECONDS -ge $deadline ] && { echo "超时：还没起来"; exit 1; }
+  done
+  ```
+
+- **启动/刷机**本身是后台任务：`boardlab boot …` 会跟着任务走，`--timeout` 给比预期略长的值；等太久可以
+  `boardlab cancel <board>`，不要让它一直挂着。
 - **板子在等人**（`lab.attention`）：等用户，不要 sleep 猜；用户说做完了再 `boardlab confirm <board>`。
-- **`--timeout` 按工作内容定**：一般命令 10–30 秒，开机 60–180 秒，刷机可以几分钟到 30 分钟；取用户能接受的
-  值，不要用一个特别大的超时掩盖失败。
-- 确实没有阻塞接口时才轮询：间隔从短到长（0.5 秒、1 秒、2 秒…）并设总超时，拿到结果立即继续。
+- **确实没有阻塞接口时才轮询**：间隔从短到长（0.5 秒、1 秒、2 秒…）并设总超时，拿到结果立即继续。
 
 ## SDK：编译、改代码、启动
 
@@ -111,6 +131,12 @@ boardlab registry hosts                             # 每台主机拿到的目�
 
 - `boardlab slots bsp` 列出 bsp 主机上还没有板子用的串口和下载口；`boardlab bind bsp --host <主机> --console <串口> --usb <下载口>` 把它们登记成一块由人复位的板子（临时调试用，默认名 `tmp-<主机>-<串口>`，用完 `boardlab remove`）。
 - `boardlab lab discover bsp [--human --host <主机>]` 让实验室自己找新板子，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。
+
+## boardlab 本身不够用时
+
+用的时候发现 boardlab 的架构、某个接口或设计做不到你要做的事（少了字段、要绕很多步、行为和文档不符），不要只在回答里说一句：
+`boardlab feedback "<哪里不够用、现在只能怎么绕开、希望提供什么>" [--kind bug|api|design|feature|other] [--subject "<标题>"] [--context '<JSON>']`
+boardd 把它存在数据库里，维护 boardlab 的人下次会看到并修复。先 `boardlab feedback list` 看看有没有人提过，不要重复提同一条；这条是给维护者的，用户要的结果仍然要在回答里给。
 
 ## 规则
 

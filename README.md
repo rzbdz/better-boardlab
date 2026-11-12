@@ -61,6 +61,7 @@ flowchart LR
   U-Boot or the kernel. A running boot or flash can be cancelled (取消, or `boardlab cancel`).
 - A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
+- An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 意见箱 shows what waits, and `resolve <id>` closes it fixed or not taken.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 
@@ -139,9 +140,13 @@ cd better-boardlab
 pnpm install
 pnpm run build
 node dist/cli.js serve             # http://127.0.0.1:38127/
-node scripts/release.mjs --source <where>   # or make a release: release/install.sh, the tarball and release.json
-node scripts/publish.mjs git <repo>         # and publish it (or: publish.mjs github <owner/repo>)
+node scripts/release.mjs --source <where>   # release/install.sh, the tarball, CHANGELOG.md and release.json
+node scripts/publish.mjs git <repo>         # the release branch, its CHANGELOG.md and a v<version> tag
+node scripts/publish.mjs github <owner/repo>  # a GitHub release, with the changelog; the newest 3 are kept
 ```
+
+The changelog is the commits since the previous release. A GitHub release carries it as its notes and deleting older
+releases deletes their tarballs too (like an installed machine, which keeps the newest three under `releases/`).
 
 ## Configuration
 

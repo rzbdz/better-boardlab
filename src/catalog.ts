@@ -8,5 +8,6 @@ import { entry as clients } from './modules/clients/catalog.ts'
 import { entry as boardlab } from './modules/boardlab/catalog.ts'
 import { entry as terminal } from './modules/terminal/catalog.ts'
 import { entry as system } from './modules/system/catalog.ts'
+import { entry as feedback } from './modules/feedback/catalog.ts'
 
-export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, bsp, clients, boardlab, terminal, system]
+export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, bsp, clients, boardlab, terminal, system, feedback]

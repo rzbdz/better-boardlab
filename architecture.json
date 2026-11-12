@@ -172,7 +172,8 @@
       "boardlab": [],
       "terminal": [],
       "hosts": [],
-      "system": []
+      "system": [],
+      "feedback": []
     }
   },
   "maxLines": 800

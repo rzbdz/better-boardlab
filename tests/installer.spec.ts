@@ -91,20 +91,20 @@ describe('install.sh', () => {
     const offer = (offered: string) => execFileSync('sh', ['-c', `say() { echo "==> $*"; }\n${step}\nOFFERED="${offered}"; offer_modules; echo "OFFERED=$OFFERED"`],
       { env: { ...process.env, STATE: state, NODE: process.execPath, FLAGS: '' }, encoding: 'utf8' }).trim()
     // First install: the default config, everything offered.
-    expect(offer('')).toBe('OFFERED=system clients')
-    expect(Object.keys(JSON.parse(readFileSync(config, 'utf8')).modules)).toEqual(['bsp', 'system', 'clients', 'terminal'])
+    expect(offer('')).toBe('OFFERED=system clients feedback')
+    expect(Object.keys(JSON.parse(readFileSync(config, 'utf8')).modules)).toEqual(['bsp', 'system', 'clients', 'terminal', 'feedback'])
     // An update from a release that had none of them, to a config with no modules at all.
     writeFileSync(config, '{ "modules": {}, "port": 1 }\n'); chmodSync(config, 0o600)
-    expect(offer('')).toBe('OFFERED=system clients')
-    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { system: {}, clients: {} }, port: 1 })
+    expect(offer('')).toBe('OFFERED=system clients feedback')
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { system: {}, clients: {}, feedback: {} }, port: 1 })
     expect(statSync(config).mode & 0o777).toBe(0o600)
     // Taken out afterwards: stays out.
     writeFileSync(config, '{ "modules": { "bsp": { "x": 1 } } }\n')
-    expect(offer('system clients')).toBe('OFFERED=system clients')
+    expect(offer('system clients feedback')).toBe('OFFERED=system clients feedback')
     expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { bsp: { x: 1 } } })
     // Offered before one of them existed: only the new one is added.
-    expect(offer('system')).toBe('OFFERED=system clients')
-    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { bsp: { x: 1 }, clients: {} } })
+    expect(offer('system')).toBe('OFFERED=system clients feedback')
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { bsp: { x: 1 }, clients: {}, feedback: {} } })
     // A config it cannot read is left alone, and offered again next time.
     writeFileSync(config, '{ modules: oops')
     expect(offer('')).toMatch(/could not add the system module[\s\S]*OFFERED=$/)
