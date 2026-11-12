@@ -52,10 +52,13 @@ flowchart LR
 
 ## Features
 
-- Board locks with a first-come queue, shared by people and agents.
+- Board locks with a first-come queue, shared by people and agents. An agent asking for a board a person is using
+  waits while the page asks the person: 让出 hands it over, 继续用 keeps it; a refused lock is in the history.
 - Resets, download mode and power through relays, wired once per slot (see [Reset and power control](#reset-and-power-control)).
 - The same commands for every board, wherever it is: `reset`, `fastboot`, `console`, `send`, `log`, and `boot` (load FSBL, U-Boot and a kernel into RAM).
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
+- Boot recipes can carry break points (`breaker: uboot`): the board's page offers 完整启动 or 停在 uboot, for working on
+  U-Boot or the kernel. A running boot or flash can be cancelled (取消, or `boardlab cancel`).
 - A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.

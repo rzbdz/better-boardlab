@@ -31,6 +31,8 @@ if [[ -n $key ]] && grep -qF "$(cat $key.pub)" ${remote}/root/.ssh/authorized_ke
 if [[ -n $SSH_ASKPASS && "$($SSH_ASKPASS)" == opensesame ]]; then ok=1; fi
 if [[ -z $key && -z $SSH_ASKPASS && -n $FAKE_SSH_INHERIT ]]; then ok=1; fi
 [[ -n $ok ]] || { echo "Permission denied (publickey,password)." >&2; exit 255; }
+# The machine stands in for a remote host, where the login is root: say so whatever runs the tests here.
+case "$cmd" in "id -u") echo 0; exit 0 ;; "sudo -n true") exit 0 ;; esac
 cd ${remote}; export HOME=${remote}/root
 cmd=\${cmd//\\/tmp\\//${remote}/tmp/}
 cmd=\${cmd//\\/opt\\//${remote}/opt/}

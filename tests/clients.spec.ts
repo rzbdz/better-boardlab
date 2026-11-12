@@ -40,7 +40,7 @@ if [[ -n $FAKE_DOWN ]]; then echo "ssh: connect to host: Connection timed out" >
 if [[ -n $key ]] && grep -qF "$(cat $key.pub)" ${remote}/home/.ssh/authorized_keys 2>/dev/null; then ok=1; fi
 if [[ -n $SSH_ASKPASS && "$($SSH_ASKPASS)" == opensesame ]]; then ok=1; fi
 [[ -n $ok ]] || { echo "Permission denied (publickey,password)." >&2; exit 255; }
-cd ${remote}; export HOME=${remote}/home PATH=${tools}:$PATH
+cd ${remote}; export HOME=${remote}/home XDG_CONFIG_HOME=${remote}/home/.config PATH=${tools}:$PATH
 [[ -n $FAKE_OLD_NODE ]] && cp ${remote}/old-node ${tools}/node && chmod 755 ${tools}/node
 cmd=\${cmd//\\/tmp\\//${remote}/tmp/}
 bash -c "$cmd"

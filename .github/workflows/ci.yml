@@ -1,10 +1,14 @@
+# The full test suite for a release. It runs only when a version tag is pushed (a release), never on every commit:
+# day-to-day work is tested locally, and a release is tested once, in public.
 name: ci
 on:
   push:
-  pull_request:
+    tags: ['v*']
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,4 +22,4 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm check
       - run: pnpm run build
-      - run: pnpm test
+      - run: pnpm test -- --maxWorkers=2
