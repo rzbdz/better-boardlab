@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, type PageState } from '../../src/ui/api.ts'
+import { api, onFetched, type PageState } from '../../src/ui/api.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, onPrefs, prefs, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
@@ -83,6 +83,8 @@ function Shell() {
     setRefreshKey(k => k + 1)
   }, [])
 
+  // A module's view that fetched its own data (the site, the certificate) draws it as soon as it arrives.
+  useEffect(() => onFetched(() => setRefreshKey(k => k + 1)), [])
   useEffect(() => setRefresher(refresh), [refresh])
   useEffect(() => {
     void refresh()

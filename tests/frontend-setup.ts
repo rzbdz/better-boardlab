@@ -40,6 +40,7 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   calls.push({ method, path: url.pathname.replace(/^\//, '') + url.search, body })
   const path = url.pathname
   if (path === '/api/state') return reply(state)
+  if (path === '/api/boot/breaks') return reply({ load: ['uboot'], download: [] })
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
   if (path === '/api/frontends') return reply({ default: 'antd', current: 'antd', frontends: [{ name: 'antd', title: 'Ant Design' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })

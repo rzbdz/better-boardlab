@@ -122,6 +122,18 @@ describe('Modern frontend', () => {
     expect(await button('下载.log')).toBeTruthy()
   })
 
+  it('offers to stop a fastboot boot at U-Boot when the SDK\'s recipe has that break point', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    fireEvent.click(await button(/停在\s*uboot/, dialog()))
+    fireEvent.click(await button('开始', dialog()))
+    await waitFor(() => expect(calls.find(c => c.path === 'api/boot/sdk')?.body).toMatchObject({ board: 'bsp-k3-deb1', method: 'load', brk: 'uboot' }), wait)
+    go('#/')
+  })
+
   it('flashes a package from a link or an uploaded file, and offers the last link again', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
     const open = async () => { fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
@@ -217,6 +229,15 @@ describe('Modern frontend', () => {
     const banner = withYield() as HTMLElement
     fireEvent.click(await button('让出', banner))
     await waitFor(() => expect(calls.some(c => c.path === 'api/yields' && (c.body as { action: string }).action === 'yield')).toBe(true), wait)
+  })
+
+  it('draws a settings section\'s own data once it arrives (the site, the certificate)', async () => {
+    go('#/settings')
+    await waitFor(() => {
+      const site = [...document.querySelectorAll('.settings-flow .panel')].find(p => p.textContent?.includes('SDK 与站点'))
+      expect(site?.textContent).toContain('abc1234')
+    }, wait)
+    go('#/')
   })
 
   it('opens a settings section by its address', async () => {

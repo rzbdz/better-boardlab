@@ -28,6 +28,12 @@ export const identity = {
   set: (name: string) => name ? localStorage.setItem(USER_KEY, name) : localStorage.removeItem(USER_KEY),
 }
 
+// A view that fetched data of its own (a module's settings, say) must draw it when it arrives: after every call the
+// page is told, and draws again from what the module kept.
+const fetched = new Set<() => void>()
+export function onFetched(listener: () => void): () => void { fetched.add(listener); return () => { fetched.delete(listener) } }
+const tellFetched = () => queueMicrotask(() => { for (const listener of fetched) listener() })
+
 export async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   const user = identity.get()
   const response = await fetch(path, {
@@ -40,7 +46,9 @@ export async function call<T>(method: 'GET' | 'POST', path: string, body?: unkno
     try { message = JSON.parse(text).error ?? text } catch {}
     throw new ApiError(response.status, message)
   }
-  return (response.headers.get('content-type') ?? '').includes('json') ? JSON.parse(text) : text as T
+  const value = (response.headers.get('content-type') ?? '').includes('json') ? JSON.parse(text) as T : text as T
+  tellFetched()
+  return value
 }
 
 /**

@@ -82,6 +82,7 @@ export async function startMock(uiDir: string, port = 0): Promise<{ url: string,
     const path = url.pathname
     if (path.startsWith('/api/')) calls.push(`${req.method} ${path}${url.search}`)
     if (path === '/api/state') return json(res, state)
+    if (path === '/api/boot/breaks') return json(res, { load: ['uboot'], download: [] })
     if (path === '/api/history') return json(res, history)
     if (path === '/api/board') { const b = state.boards.find(item => item.name === url.searchParams.get('name')); return json(res, { board: b, actions: history.actions.filter(a => a.board === b?.name), leases: [] }) }
     if (path === '/api/frontends') {
