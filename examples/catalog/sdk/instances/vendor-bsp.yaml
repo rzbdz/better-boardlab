@@ -19,3 +19,6 @@ boot:
       - {do: stage, artifact: kernel-fit}
       - {do: continue}
       - {do: wait, serial: "# $|login:", fail: "Kernel panic", timeout: 120, nudge: 10}
+  download:                    # flash to storage; not written for this example yet
+    status: todo
+    steps: []
