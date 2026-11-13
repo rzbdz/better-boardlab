@@ -12,7 +12,7 @@ import { api, identity, type PageState } from '../../src/ui/api.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, prefs, show as notifySystem } from '../../src/ui/notify.ts'
 import { who } from '../../src/ui/format.ts'
-import { JobDrawer, registerModuleUis, useJobs } from './render.tsx'
+import { JobDrawer, registerModuleUis, useJobs, ViewCard, viewsFor } from './render.tsx'
 import { themeFor, useMode } from './theme.ts'
 import { ApiPage } from './views/api.tsx'
 import { BoardsPage } from './views/boards.tsx'
@@ -20,15 +20,19 @@ import { canDiscover, DiscoverPage } from './views/discover.tsx'
 import { HistoryPage } from './views/history.tsx'
 import { SettingsPage } from './views/settings.tsx'
 
-type Page = 'boards' | 'discover' | 'history' | 'api' | 'settings'
-const PAGES: Record<Page, string> = { boards: '板子', discover: '发现', history: '历史', api: 'API', settings: '设置' }
+/** A fixed page, or `p/<id>` for a module's own page (the module views boardd loads). */
+type Page = string
+const PAGES: Record<string, string> = { boards: '板子', discover: '发现', history: '历史', api: 'API', settings: '设置' }
 
 function Shell() {
   const { message, notification } = AntApp.useApp()
   const [state, setState] = useState<PageState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(true)
-  const [page, setPage] = useState<Page>(() => (Object.keys(PAGES).find(key => `#${key}` === location.hash) as Page | undefined) ?? 'boards')
+  const [page, setPage] = useState<Page>(() => {
+    const hash = location.hash.replace(/^#/, '')
+    return Object.keys(PAGES).includes(hash) || hash.startsWith('p/') ? hash : 'boards'
+  })
   const [board, setBoard] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [jobsOpen, setJobsOpen] = useState(false)
@@ -84,11 +88,13 @@ function Shell() {
   useEffect(() => { history.replaceState(null, '', `#${page}`) }, [page])
   const running = jobs.filter(job => job.state === 'running').length
   const waiting = state?.boards.filter(item => item.lab?.attention).length ?? 0
+  const modulePages = state ? viewsFor(state, 'page') : []
   const items = [
     { key: 'boards', icon: <AppstoreOutlined />, label: PAGES.boards },
     ...(!state || canDiscover(state) ? [{ key: 'discover', icon: <RadarChartOutlined />, label: <Space>{PAGES.discover}{state?.proposals.length ? <Badge count={state.proposals.length} size="small" /> : null}</Space> }] : []),
     { key: 'history', icon: <HistoryOutlined />, label: PAGES.history },
     { key: 'api', icon: <ApiOutlined />, label: PAGES.api },
+    ...modulePages.map(view => ({ key: `p/${view.id}`, icon: <AppstoreOutlined />, label: view.title ?? view.id })),
     { key: 'settings', icon: <SettingOutlined />, label: PAGES.settings },
   ]
   const onJobStarted = () => setJobsOpen(true)
@@ -101,7 +107,7 @@ function Shell() {
       </Layout.Sider>
       <Layout>
         <header className="bl-page-head">
-          <h1>{PAGES[page]}</h1>
+          <h1>{PAGES[page] ?? modulePages.find(view => `p/${view.id}` === page)?.title ?? 'Boardlab'}</h1>
           <Space size={14}>
             {!connected && <Typography.Text type="warning" style={{ fontSize: 12 }}>与 boardd 的连接中断，重试中…</Typography.Text>}
             {waiting > 0 && <Tooltip title="有板子在等人操作"><Badge count={waiting} size="small"><BellOutlined style={{ fontSize: 16 }} /></Badge></Tooltip>}
@@ -120,6 +126,8 @@ function Shell() {
             : page === 'discover' ? <DiscoverPage state={state} onJobStarted={onJobStarted} />
             : page === 'history' ? <HistoryPage state={state} refreshKey={refreshKey} onJobStarted={onJobStarted} />
             : page === 'api' ? <ApiPage />
+            : page.startsWith('p/') && modulePages.some(view => `p/${view.id}` === page)
+              ? <ViewCard view={modulePages.find(view => `p/${view.id}` === page)!} onJobStarted={onJobStarted} />
             : <SettingsPage state={state} mode={mode} onMode={setMode} onJobStarted={onJobStarted} />}
         </Layout.Content>
       </Layout>

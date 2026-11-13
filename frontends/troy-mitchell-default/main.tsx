@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, identity, type PageState } from '../../src/ui/api.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
-import { registerModuleUis } from './render.tsx'
+import { registerModuleUis, ViewPanel, viewsFor } from './render.tsx'
 import { Dialog, TABS, Tabs, who, type Prompt, type Run, type Tab } from './kit.tsx'
 import { alertPerson, AttentionPanel } from './views/attention.tsx'
 import { ApiTab } from './views/api.tsx'
@@ -35,7 +35,10 @@ const PURPOSES = ['临时调试', 'boardlab 调试', '临时开发任务']
 
 function App() {
   const [state, setState] = useState<PageState | null>(null)
-  const [tab, setTab] = useState<Tab>(() => (TABS.find(([key]) => `#${key}` === location.hash)?.[0]) ?? 'boards')
+  const [tab, setTab] = useState<Tab>(() => {
+    const hash = location.hash.replace(/^#/, '')
+    return TABS.some(([key]) => key === hash) || hash.startsWith('p/') ? hash : 'boards'
+  })
   const [prompt, setPrompt] = useState<Prompt | null>(null)
   const [busy, setBusy] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -102,7 +105,8 @@ function App() {
     <div className="app">
       <header className="top">
         <div className="brand"><span className="logo" aria-hidden="true" /><h1>开发板管理平台</h1></div>
-        <Tabs label="页面" className="nav" value={tab} onChange={setTab} items={TABS.filter(([key]) => key !== 'scan' || !state || canScan({ state })).map(([key, label]) => ({
+        <Tabs label="页面" className="nav" value={tab} onChange={setTab} items={[...TABS, ...(state ? viewsFor(state, 'page').map(view => [`p/${view.id}`, view.title ?? view.id] as [Tab, string]) : [])]
+          .filter(([key]) => key !== 'scan' || !state || canScan({ state })).map(([key, label]) => ({
           key, label: <>{label}{key === 'scan' && state?.proposals.length ? <span className="count">{state.proposals.length}</span> : null}</>,
         }))} />
         <button className="me" onClick={() => setPrompt({ kind: 'identity' })} title="修改我的名字" data-testid="identity">
@@ -117,6 +121,10 @@ function App() {
             : tab === 'scan' ? <ScanTab state={state} onPrompt={setPrompt} onRun={run} />
             : tab === 'settings' ? <SettingsTab state={state} onPrompt={setPrompt} onRun={run} />
             : tab === 'api' ? <ApiTab />
+            : tab.startsWith('p/') ? (() => {
+                const view = state ? viewsFor(state, 'page').find(item => `p/${item.id}` === tab) : undefined
+                return view ? <ViewPanel view={view} onRun={run} onPrompt={setPrompt} /> : <HistoryTab refreshKey={refreshKey} state={state} />
+              })()
             : <HistoryTab refreshKey={refreshKey} state={state} />}
         </div>
       </main>
