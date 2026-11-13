@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
-import { sourcePattern, system } from '../src/modules/system/index.ts'
+import { compareVersions, newerRelease, sourcePattern, system } from '../src/modules/system/index.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -27,6 +27,21 @@ function installed(version: string, revision: string, source: string) {
   writeFileSync(join(prefix, 'release-source'), source); writeFileSync(join(prefix, 'install.sh'), '#!/bin/sh\n')
   return root
 }
+
+describe('versions', () => {
+  it('orders a prerelease before its final release, and a later version above an older one', () => {
+    expect(compareVersions('0.4.0rc1', '0.3.29')).toBeGreaterThan(0)
+    expect(compareVersions('0.4.0rc2', '0.4.0rc1')).toBeGreaterThan(0)
+    expect(compareVersions('0.4.0', '0.4.0rc1')).toBeGreaterThan(0)
+    expect(compareVersions('0.4.0rc1', '0.4.0')).toBeLessThan(0)
+    expect(compareVersions('0.4.0-rc1', '0.4.0rc1')).toBe(0)
+    expect(compareVersions('0.3.10', '0.3.9')).toBeGreaterThan(0)
+    // The source still on the last formal release never looks newer than a newer RC.
+    expect(newerRelease({ version: '0.3.29', revision: 'aaa1111' }, { version: '0.4.0rc1', revision: 'bbb2222' })).toBe(false)
+    // The same version rebuilt is new.
+    expect(newerRelease({ version: '0.4.0rc1', revision: 'bbb2222' }, { version: '0.4.0rc1', revision: 'aaa1111' })).toBe(true)
+  })
+})
 
 describe('the system module', () => {
   it('says when a newer release is out, asking the release source at most once per ttl unless asked to check', async () => {

@@ -18,6 +18,33 @@ import type { Module } from 'boardlab-core/core/module.ts'
  */
 export const sourcePattern = /^(https?:\/\/[\w.:@-]+(\/[\w.~%+-]*)*|git@[\w.-]+:[\w.~\/-]+\.git|ssh:\/\/[\w.@:-]+(\/[\w.~-]+)+\.git)(#[\w.\/-]+)?$/
 
+/** Whether `latest` is newer than `mine`: a later version, or the same one with another revision. */
+export function newerRelease(latest: { version: string, revision: string }, mine: { version: string, revision: string }): boolean {
+  const order = compareVersions(latest.version, mine.version)
+  return order > 0 || (order === 0 && latest.revision !== mine.revision)
+}
+
+/**
+ * `0.4.0rc2` against `0.3.29`: the numbers decide, and a pre-release (`rc1`, `rc2`, `beta`) comes before the final
+ * release of the same version. A version that cannot be read compares as text, so nothing is offered as newer by
+ * accident.
+ */
+export function compareVersions(a: string, b: string): number {
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-.]?([0-9A-Za-z.-]+))?$/.exec(value.trim())
+    return match ? { parts: [Number(match[1]), Number(match[2]), Number(match[3])], pre: match[4] ?? '' } : null
+  }
+  const left = parse(a), right = parse(b)
+  if (!left || !right) return a === b ? 0 : a < b ? -1 : 1
+  for (let i = 0; i < 3; i++) if (left.parts[i] !== right.parts[i]) return left.parts[i]! - right.parts[i]!
+  if (!left.pre !== !right.pre) return left.pre ? -1 : 1
+  if (left.pre === right.pre) return 0
+  const rc = (value: string) => /^rc(\d+)$/i.exec(value)
+  const l = rc(left.pre), r = rc(right.pre)
+  if (l && r) return Number(l[1]) - Number(r[1])
+  return left.pre < right.pre ? -1 : 1
+}
+
 /** A token shown without giving it away. */
 const mask = (token: string) => token.length > 8 ? `••••${token.slice(-4)}` : '••••'
 
@@ -54,7 +81,7 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
       const revision = (root && read(join(root, 'REVISION'))) ?? 'dev'
       let source = prefix ? read(join(prefix, 'release-source')) : null
       let latest: Version['latest'] = null, checkedAt: string | null = null, error: string | null = null, updating = false
-      const state = (): Version => ({ version, revision, source, latest, checkedAt, error, updating, newer: !!latest && latest.revision !== revision })
+      const state = (): Version => ({ version, revision, source, latest, checkedAt, error, updating, newer: !!latest && newerRelease(latest, { version, revision }) })
       // release.json of a source, with the token a private project API takes.
       const fetchRelease = async (from: string, tok: string | null) => JSON.parse(await (/\/api\/v4\/projects\//.test(from)
         ? get(`${from.split('#')[0]}/repository/files/release.json/raw?ref=${encodeURIComponent(from.split('#')[1] ?? 'release')}`, tok ? { 'PRIVATE-TOKEN': tok } : {})
