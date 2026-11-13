@@ -59,7 +59,7 @@ flowchart LR
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
 - Boot recipes can carry break points (`breaker: uboot`): the board's page offers 完整启动 or 停在 uboot, for working on
   U-Boot or the kernel. A running boot or flash can be cancelled (取消, or `boardlab cancel`).
-- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves. The Modern frontend's **API** tab lists every endpoint boardd serves, and the same list is available to programs and crawlers as OpenAPI 3.1 at `GET /api/openapi.json`.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 反馈 shows what waits, and `resolve <id>` closes it fixed or not taken.
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.

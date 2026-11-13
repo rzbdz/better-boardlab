@@ -158,6 +158,10 @@ boardlab registry hosts                             # 每台主机拿到的目�
 - `boardlab lab discover bsp --human --host <主机>` 是两步：先让板子正常启动（RESET，别按 BOOT），再让它进下载模式（按住 BOOT/下载键，按 RESET，松开），串口和同一时刻出现的下载口配成一对。提示会以页面通知的形式出现（`ACTION NEEDED…`）。
 - 发现卡住或用户不想要了：`boardlab lab cancel <实验室>`，不要等（会停在当前这一步，已经登记的留着）。
 
+## 全部接口
+
+要看 boardd 提供的全部接口：网页上的「API」页按模块列出来，机器可读的是 `GET /api/openapi.json`（OpenAPI 3.1，和 `GET /api` 的列表一致）。CLI 没覆盖到的接口，可以先在这里找，再用 `boardlab` 自己的命令或 HTTP 调（地址见 `boardlab remote show`）。
+
 ## boardlab 本身不够用时
 
 用的时候发现 boardlab 的架构、某个接口或设计做不到你要做的事（少了字段、要绕很多步、行为和文档不符），不要只在回答里说一句：
