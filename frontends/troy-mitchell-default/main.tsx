@@ -10,6 +10,7 @@ import type { ModuleUi } from '../../src/ui/contract.ts'
 import { registerModuleUis } from './render.tsx'
 import { Dialog, TABS, Tabs, who, type Prompt, type Run, type Tab } from './kit.tsx'
 import { alertPerson, AttentionPanel } from './views/attention.tsx'
+import { ApiTab } from './views/api.tsx'
 import { BoardsTab } from './views/boards.tsx'
 import { Console } from './views/console.tsx'
 import { HistoryTab } from './views/history.tsx'
@@ -115,6 +116,7 @@ function App() {
             : tab === 'boards' ? <BoardsTab state={state} busy={busy} onPrompt={setPrompt} onRun={run} onConsole={setConsoleBoard} onTab={setTab} />
             : tab === 'scan' ? <ScanTab state={state} onPrompt={setPrompt} onRun={run} />
             : tab === 'settings' ? <SettingsTab state={state} onPrompt={setPrompt} onRun={run} />
+            : tab === 'api' ? <ApiTab />
             : <HistoryTab refreshKey={refreshKey} state={state} />}
         </div>
       </main>

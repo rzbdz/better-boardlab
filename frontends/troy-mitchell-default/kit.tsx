@@ -2,8 +2,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Board, Lease, Proposal, Scan } from 'boardlab-core/shared/types.ts'
 
-export type Tab = 'boards' | 'scan' | 'settings' | 'history'
-export const TABS: Array<[Tab, string]> = [['boards', '板子'], ['scan', '扫描'], ['settings', '设置'], ['history', '历史']]
+export type Tab = 'boards' | 'scan' | 'settings' | 'history' | 'api'
+export const TABS: Array<[Tab, string]> = [['boards', '板子'], ['scan', '扫描'], ['settings', '设置'], ['history', '历史'], ['api', 'API']]
 
 export const pad = (n: number) => String(n).padStart(2, '0')
 /** `10/29 09:40:05`, short enough to stay on one line. */
