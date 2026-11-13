@@ -137,7 +137,7 @@ function One({ element, ctx, onDone }: { element: Element, ctx: Ctx, onDone?: ()
       <div className="mv-list">{element.items.map(item => (
         <div key={item.key}>
           {item.tag && <span className="tag">{item.tag}</span>}
-          <div className="grow" style={{ minWidth: 0 }}><div className="ell" style={{ fontWeight: 500 }}>{rich(item.title)}</div>{item.description && <div className="ell sub small">{rich(item.description)}</div>}</div>
+          <div className="mv-li-text"><div className="mv-li-title">{rich(item.title)}</div>{item.description && <div className="mv-li-desc">{rich(item.description)}</div>}</div>
           {badge(item.status)}{item.actions?.map(op => <OpButton key={op.id} op={op} ctx={ctx} />)}
         </div>
       ))}</div>

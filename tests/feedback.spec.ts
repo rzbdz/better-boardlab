@@ -79,4 +79,13 @@ describe('the feedback inbox', () => {
     const after = new BoardLab({ db: openDatabase(file), modules: [feedback()] })
     expect(await call(after, 'GET', '/api/feedback')).toMatchObject({ open: 1, items: [{ subject: 'Survive an upgrade.', kind: 'feature' }] })
   })
+
+  it('shows a request whole on the page, its line breaks kept', async () => {
+    const { ui } = await import('../src/modules/feedback/ui.ts')
+    const body = 'first line\nsecond line\n\nthird ' + 'x'.repeat(2000)
+    const views = ui.views!({ feedback: { open: 1, items: [{ id: 7, at: '2026-11-13T01:00:00Z', actor: 'claude:x', kind: 'bug', subject: 'paragraphs', body, status: 'open', resolution: null, resolvedAt: null }] } } as never, {})
+    const list = (views[0]!.body as Array<{ kind: string, items?: Array<{ description: string }> }>).find(element => element.kind === 'list')!
+    expect(list.items![0]!.description).toContain('first line\nsecond line\n\nthird')
+    expect(list.items![0]!.description).toContain('x'.repeat(2000))
+  })
 })

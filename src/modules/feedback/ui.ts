@@ -20,7 +20,6 @@ interface Feedback {
 interface Inbox { open: number, items: Feedback[] }
 
 const KIND: Record<string, string> = { bug: '缺陷', api: '接口', design: '设计', feature: '功能', other: '其他' }
-const within = (text: string, limit: number) => text.length > limit ? `${text.slice(0, limit)}…` : text
 const resolve = (id: number, status: 'fixed' | 'declined') => call<{ message: string }>('POST', 'api/feedback/resolve', { id, status })
 
 export const ui: ModuleUi = {
@@ -54,7 +53,7 @@ export const ui: ModuleUi = {
           items: items.map(item => ({
             key: String(item.id),
             title: `#${item.id} ${item.subject}`,
-            description: [`${KIND[item.kind] ?? item.kind} · ${item.actor} · ${new Date(item.at).toLocaleString()}`, within(item.body, 800)].join(' — '),
+            description: `${KIND[item.kind] ?? item.kind} · ${item.actor} · ${new Date(item.at).toLocaleString()}\n${item.body}`,
             actions: [
               action(`fixed-${item.id}`, '已修复', async () => (await resolve(item.id, 'fixed')).message, { intent: 'primary' }),
               action(`declined-${item.id}`, '不采纳', async () => (await resolve(item.id, 'declined')).message),
