@@ -55,6 +55,17 @@ function Shell() {
           else notification.success(open)
         }
       }
+      // An agent asks a person to plug, connect or press something: new asks reach them wherever they are.
+      const asks = (next as unknown as { human?: { items: Array<{ id: number, title: string, body: string }> } }).human
+      const asked = new Set(((last.current as unknown as { human?: { items: Array<{ id: number }> } } | null)?.human?.items ?? []).map(item => item.id))
+      for (const item of asks?.items ?? []) {
+        if (asked.has(item.id)) continue
+        const note = { topic: 'attention' as const, board: `human-${item.id}`, title: `人工请求：${item.title}`, body: item.body || '做完后在「人工请求」页点「我做好了」' }
+        const open = () => setPage('p/human')
+        if (!notifySystem(note, open) && prefs.get().enabled[note.topic]) {
+          notification.warning({ message: note.title, description: note.body, placement: 'bottomRight' as const, onClick: open, duration: 0 })
+        }
+      }
       last.current = next
       setState(next); setConnected(true); setError(null)
     }

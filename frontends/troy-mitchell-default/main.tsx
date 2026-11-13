@@ -47,10 +47,19 @@ function App() {
   const you = useRef('')
   const [consoleBoard, setConsoleBoard] = useState<string | null>(null)
 
+  const last = useRef<PageState | null>(null)
   const refresh = useCallback(async () => {
-    try { const next = await api.state(); you.current = next.you; setState(next); setConnected(true) } catch { setConnected(false) }
+    try {
+      const next = await api.state(); you.current = next.you
+      // An agent asks a person to plug, connect or press something: say it as it arrives.
+      const asks = (next as unknown as { human?: { items: Array<{ id: number, title: string }> } }).human
+      const asked = new Set(((last.current as unknown as { human?: { items: Array<{ id: number }> } } | null)?.human?.items ?? []).map(item => item.id))
+      for (const item of asks?.items ?? []) if (!asked.has(item.id)) show(`人工请求：${item.title}（在「人工请求」页处理）`)
+      last.current = next
+      setState(next); setConnected(true)
+    } catch { setConnected(false) }
     setRefreshKey(key => key + 1)
-  }, [])
+  }, [show])
 
   useEffect(() => {
     void refresh()
