@@ -1,0 +1,2 @@
+# Fetched images (bsp images sync writes them here): never in git.
+.blobs/

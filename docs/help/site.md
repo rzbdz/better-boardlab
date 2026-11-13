@@ -28,6 +28,8 @@
 
 别的目录，比如 `hosts/`、`deploy/`、`docs/`、`notes/`、`README.md`，可以照样放在仓库里，boardd 不读也不发。每台主机自己的 `hosts/<id>.yaml` 由主机自己保管，同步不会覆盖它。
 
+整个仓库可以从 `examples/catalog/` 抄：一个最小的站点，示范怎么在 bsp 自带的公开 SoC 资料上只叠加这个实验室独有的部分（私有镜像 + 用它的启动步骤），而不是复制一份 SoC 资料。
+
 例子：
 
 ```text

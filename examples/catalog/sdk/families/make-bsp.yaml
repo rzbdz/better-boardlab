@@ -1,0 +1,16 @@
+# A BSP tree with a top-level Makefile (`make <target>` at the tree root).
+id: make-bsp
+description: BSP tree with a top-level Makefile; flat output/ directory
+build:
+  runner: make
+  targets: {all: all, uboot: uboot, opensbi: opensbi, kernel: kernel, dtb: dtb}
+  clean: {kernel: clean_kernel, all: clean}
+artifacts:
+  dir: output
+  roles:
+    fsbl: FSBL.bin
+    uboot-sbi: u-boot-opensbi.itb
+    kernel-fit: Image.itb
+dev_projects: [linux]
+env: {path_prepend: []}
+console: {prompt: "# $"}

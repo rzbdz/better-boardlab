@@ -1,0 +1,24 @@
+# An OVERLAY on bsp's public k3 profile (bsp: packs/spacemit/socs/k3/soc.yaml).
+#
+# A site only writes what it adds or changes: everything not mentioned here (fingerprint,
+# download mode, USB ids, identify fields, probe image names) still comes from the pack, and
+# the pack is what ships with boardlab. This file shows the one thing a site commonly adds:
+# a boot-ROM helper kept outside any public repository, and the steps that use it on a board
+# whose download-mode strap never comes off.
+#
+# The same pattern fits any vendor-private detail. Public silicon facts belong in a bsp pack
+# (contribute there); anything only your lab may have belongs here.
+images:
+  handoff:
+    file: media-handoff.bin            # what the helper is called once fetched
+    sha256: 0000000000000000000000000000000000000000000000000000000000000000   # replace: the real hash
+    source: {url: https://example.org/tools/media-handoff.bin}                 # or {git, ref, path}, or {file}
+media_boot:                            # how to boot the media of a board stuck in download mode
+  name: media-handoff
+  steps:
+    - {do: check, serial: 'sys: 0x[0-9a-fA-F]+', why: "this helper only suits the boot ROM it was made for"}
+    # A step that must match a boot-loader variable uses the same form:
+    # - {do: getvar, name: <variable>, match: '^1\.0$', why: "the helper is for one version only"}
+    - {do: stage, image: handoff}
+    - {do: continue}
+    - {do: wait, serial: 'U-Boot SPL 20\d\d|U-Boot 20\d\d', timeout: 60}

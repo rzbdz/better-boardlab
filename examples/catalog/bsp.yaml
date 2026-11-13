@@ -1,0 +1,2 @@
+# boards are built on bsp's public hardware packs; a site only adds what is its own.
+packs: [spacemit]

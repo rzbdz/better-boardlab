@@ -1,0 +1,21 @@
+# One SDK target: a source tree on the build server, and how a board runs what it built.
+id: vendor-bsp
+family: make-bsp
+server: build-a
+path: /home/dev/work/vendor-bsp
+soc: k3
+description: example vendor BSP for k3
+boot:
+  load:                        # RAM boot over fastboot; nothing written to storage
+    status: ready
+    steps:
+      - {do: enter-fdl}
+      - {do: stage, artifact: fsbl}
+      - {do: continue}
+      - {do: wait, serial: "SPL", fastboot: "Fastboot", timeout: 60}
+      - {do: stage, artifact: uboot-sbi}
+      - {do: continue}
+      - {do: wait, serial: "U-Boot 20", fastboot: "Fastboot", timeout: 60}
+      - {do: stage, artifact: kernel-fit}
+      - {do: continue}
+      - {do: wait, serial: "# $|login:", fail: "Kernel panic", timeout: 120, nudge: 10}

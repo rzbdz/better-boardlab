@@ -1,0 +1,9 @@
+# The BSP tree of one SDK on one build server. Copy and replace every value; the format is
+# described in bsp's examples/site and in boardlab's help pages (站点 / 编译服务器 / SDK).
+id: vendor-bsp
+host: 192.0.2.10
+user: dev
+description: example build server
+env:
+  path_prepend: ["~/toolchains/riscv/bin"]
+  vars: {}
