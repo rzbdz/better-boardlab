@@ -62,6 +62,7 @@ flowchart LR
 - A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves. The Modern frontend's **API** tab lists every endpoint boardd serves, and the same list is available to programs and crawlers as OpenAPI 3.1 at `GET /api/openapi.json`.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 反馈 shows what waits, and `resolve <id>` closes it fixed or not taken.
+- A way for agents to ask a person for the work only hands can do: `boardlab ask "plug the USB cable into 2-1.1" --body "the console prints ROM: usb download handler when it is in"` files the request and waits; the page's 人工请求 shows it, where whoever is at the bench clicks 我做好了 or 做不了 (with a note), and the agent continues with the answer. Requests live in boardd's database, so they survive restarts and updates (`GET /api/human/request?id=…&wait=20` is the same wait over HTTP).
 - Browser notifications into the operating system: a board you watch is free, your turn in the queue came, a board needs a person.
 - A central boardd you can reach from any machine, over ssh or through a reverse proxy.
 
