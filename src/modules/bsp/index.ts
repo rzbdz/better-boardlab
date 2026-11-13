@@ -144,7 +144,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           return { ok: true }
         },
       }, {
-        method: 'POST', path: '/api/bsp/board', about: '改一块 bsp 板子的登记（要拿锁）：型号、SoC、下载口、复位线、怎么进下载模式（fdl：strapped 复位就进，button 按 FDL 线，unset 还不知道）、FDL 线',
+        method: 'POST', path: '/api/bsp/board', about: '改一块 bsp 板子的登记（要拿锁）：型号、SoC、下载口、SDK、复位线、怎么进下载模式（fdl：strapped 复位就进，button 按 FDL 线，unset 还不知道）、FDL 线',
         handle: async ({ body, caller }) => {
           const name = lab.boards.resolve(String(body.board ?? ''))
           const route = lab.backends.route(name)
@@ -154,9 +154,13 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           const text = (key: string) => typeof body[key] === 'string' && body[key].trim() ? body[key].trim() as string : undefined
           const fdl = text('fdl')
           if (fdl && !(FDL_STRATEGIES as readonly string[]).includes(fdl)) throw new BoardError('invalid', `fdl 只能是 ${FDL_STRATEGIES.join('、')}`)
+          // `sdks`: an array, or the comma list the CLI passes; empty means every SDK of the SoC's board.
+          const sdks = Array.isArray(body.sdks) ? body.sdks.map(String).filter(Boolean)
+            : typeof body.sdks === 'string' ? String(body.sdks).split(',').map((item: string) => item.trim()).filter(Boolean) : undefined
           const change: BspBoardChange = {
             board: text('model'), soc: text('soc'), description: text('description'), usb: text('usb'), resetPin: text('resetPin'),
             pulseMs: typeof body.pulseMs === 'number' && body.pulseMs > 0 ? body.pulseMs : undefined, fdl: fdl as BspBoardChange['fdl'], fdlPin: text('fdlPin'),
+            ...(sdks ? { sdks } : {}),
           }
           const changed = await lab.kernel.doing([name], 'configure', '修改中', caller.holder, () =>
             (route.backend as BspBackend).change(route.config, route.target.device, route.target.lease, change), { lease: held.id })
