@@ -6,5 +6,6 @@ import { commands as scriptSlots } from './modules/script-slots/cli.ts'
 import { commands as bsp } from './modules/bsp/cli.ts'
 import { commands as system } from './modules/system/cli.ts'
 import { commands as feedback } from './modules/feedback/cli.ts'
+import { commands as human } from './modules/human/cli.ts'
 
-export const COMMAND_GROUPS: CommandGroup[] = [local, homeAssistant, scriptSlots, bsp, system, feedback]
+export const COMMAND_GROUPS: CommandGroup[] = [local, homeAssistant, scriptSlots, bsp, system, feedback, human]

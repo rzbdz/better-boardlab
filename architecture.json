@@ -173,7 +173,8 @@
       "terminal": [],
       "hosts": [],
       "system": [],
-      "feedback": []
+      "feedback": [],
+      "human": []
     }
   },
   "maxLines": 800

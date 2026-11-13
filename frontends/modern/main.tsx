@@ -77,6 +77,16 @@ function Shell() {
           const open = () => go(`#/board/${encodeURIComponent(note.board)}`)
           if (!show(note, open) && prefs.get().enabled[note.topic]) ui.toast(note.title, note.body, { label: '查看', run: open })
         }
+        // An agent asks a person to plug, connect or press something: new asks reach them wherever they are.
+        const asks = (next as unknown as { human?: { open: number, items: Array<{ id: number, title: string, body: string, actor: string }> } }).human
+        const asked = new Set(((last.current as unknown as { human?: { items: Array<{ id: number }> } }).human?.items ?? []).map(item => item.id))
+        for (const item of asks?.items ?? []) {
+          if (asked.has(item.id)) continue
+          const note = { topic: 'attention' as const, board: `human-${item.id}`, title: `人工请求：${item.title}`, body: item.body || '做完后在「人工请求」页点「我做好了」' }
+          setNotes(list => [{ ...note, at: new Date().toISOString(), read: false }, ...list].slice(0, 100))
+          const open = () => go('#/p/human')
+          if (!show(note, open) && prefs.get().enabled[note.topic]) ui.toast(note.title, note.body, { label: '去看', run: open })
+        }
         // A discovery (usually a person resetting boards one by one) asks for a hand: say it wherever the person is.
         const lines = new Map(last.current.labs.map(lab => [lab.id, lab.discovery?.line ?? '']))
         for (const lab of next.labs) {
@@ -155,6 +165,9 @@ function Shell() {
       </div>
     </div></header>
     {state && attn.length > 0 && page !== 'board' && <div className="banner">{attn.map(b => <Banner key={b.name} board={b} you={state.you} fresh={!seen.current.has(b.name)} />)}</div>}
+    {state && ((state as unknown as { human?: { open: number, items: Array<{ title: string }> } }).human?.open ?? 0) > 0 && !(page === 'p' && where_.arg === 'human') && (
+      <div className="banner"><div className="b"><Icon name="hand" /><div className="msg"><b>有人请你帮忙</b> {(state as unknown as { human?: { items: Array<{ title: string }> } }).human?.items[0]?.title} <span className="sub">· 还有 {(state as unknown as { human?: { open: number } }).human!.open} 件</span></div>
+        <span className="acts"><button className="pill sm dark" onClick={() => go('#/p/human')}>去看看</button></span></div></div>)}
     {state && (state.yields ?? []).length > 0 && <div className="banner">{state.yields.map(y => (
       <div key={y.id} className="b"><Icon name="hand" /><div className="msg"><b>{holder(y.holder).name}</b> 想用 <b>{upper(y.board)}</b>（{y.purpose}）· 拿锁的是你</div>
         <span className="acts"><button className="pill sm" onClick={() => void api.answerYield(y.board, 'deny').then(() => refresh()).catch(e => ui.fail('回答失败', e))}>继续用</button>
