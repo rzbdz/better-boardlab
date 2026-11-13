@@ -324,6 +324,30 @@ const registry: Command = {
   run: ({ client, argv, json }) => registryCommand(client, argv, json),
 }
 
+const set: Command = {
+  name: 'set', usage: ['set <bsp 板子> [--soc <SoC>] [--usb <下载口>] [--fdl button|strapped|unset] [--model <型号>] [--sdks <a,b>] [--reset-pin <P33>] [--pulse-ms <毫秒>] [--fdl-pin <P12>] [--description <说明>]\t补齐或修改实验室里一块 bsp 板子的登记（型号、SoC、下载口、怎么进下载模式）；boardd 拿你持有的锁的那份租约去改，你不用、也拿不到 bsp 的 token'],
+  async run({ client, target, flag, out, token }) {
+    const { board } = target()
+    const body: Record<string, unknown> = { board, token: token(board) }
+    for (const [key, name] of [['model', 'model'], ['soc', 'soc'], ['usb', 'usb'], ['fdl', 'fdl'], ['description', 'description'],
+      ['resetPin', 'reset-pin'], ['fdlPin', 'fdl-pin']] as const) {
+      const value = flag(name)
+      if (value !== undefined) body[key] = value
+    }
+    const sdks = flag('sdks')
+    if (sdks !== undefined) body.sdks = sdks
+    const pulse = Number(flag('pulse-ms'))
+    if (flag('pulse-ms') !== undefined) {
+      if (!Number.isInteger(pulse) || pulse <= 0) throw new Error(`--pulse-ms 要是正整数：${flag('pulse-ms')}`)
+      body.pulseMs = pulse
+    }
+    const given = Object.keys(body).filter(key => key !== 'board' && key !== 'token')
+    if (!given.length) throw new Error('要给要改的字段，例如 boardlab set <板子> --soc k3 --usb usb:2-1.1.1 --fdl button')
+    const result = await client.call<{ message: string }>('POST', '/api/bsp/board', body)
+    out(result, () => console.log(`${board}：${result.message}`))
+  },
+}
+
 const bsp: Command = {
   name: 'bsp', noBoard: true, usage: ['bsp <bsp 命令> …\t任何 bsp 命令，在 boardd 那边执行（本机不用装 bsp），例如 boardlab bsp hosts'],
   async run({ client, argv, json }) {
@@ -335,4 +359,4 @@ const bsp: Command = {
   },
 }
 
-export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [sdk, site, registry, bsp] }
+export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [set, sdk, site, registry, bsp] }

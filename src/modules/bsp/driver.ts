@@ -126,14 +126,14 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
   /** A `bsp probe` run (a discovery or a rebuild): boards bsp registered as it went, and the rest as findings. */
   const probed = async (config: LabConfig, args: string[], progress: (line: string) => void,
-    registered: ((device: string) => void) | undefined, host?: string): Promise<{ found: LabFinding[], message: string }> => {
+    registered: ((device: string) => void) | undefined, host?: string, signal?: AbortSignal): Promise<{ found: LabFinding[], message: string }> => {
     const onLine = (line: string) => {
       progress(line)
       const done = line.match(/\bregistered (\S+)(?: in slot \S+)?$/)
       if (done) registered?.(done[1]!)
     }
     type Result = { proposals?: Array<{ spec: BspSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
-    const out = await bsp<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host)
+    const out = await bsp<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host, signal)
     const results = Object.entries(out.results ?? {})
     // What bsp could not register (a name taken, say) is left for a person to apply as a proposal.
     const found = results.flatMap(([at, result]) => (result.proposals ?? []).filter(item => !item.registered).map(({ spec, warnings }) => ({
@@ -156,6 +156,32 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   const BREAKS_TTL_MS = 30_000
   const breaksCache = new Map<string, { at: number, value: { load: string[], download: string[] } }>()
   const breaksAsking = new Map<string, Promise<{ load: string[], download: string[] }>>()
+  /**
+   * A person is asked to press something: bspd says what in the DUT's status (`needs_human`), while the reset (or
+   * entering download mode) waits. The command's own output only reports it in passing, so it is polled here and the
+   * page is told as it comes and goes.
+   */
+  const watchingHuman = (config: LabConfig, device: string, notice?: (message: string | null) => void, signal?: AbortSignal) => {
+    if (!notice) return () => {}
+    let stopped = false, last: string | null = null
+    const tick = async () => {
+      while (!stopped && !signal?.aborted) {
+        const status = await bsp<{ needs_human?: { message?: string } | null }>(config, ['dut', 'status', device], 15_000).catch(() => null)
+        const message = status?.needs_human?.message ?? null
+        if (message !== last) { last = message; notice(message) }
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+    void tick()
+    return () => { stopped = true; notice(null) }
+  }
+
+  /** The command's output and the polled status say the same thing: the page is told only when it changes. */
+  const once = (notice?: (message: string | null) => void) => {
+    let told: string | null = null
+    return (message: string | null) => { if (message !== told) { told = message; notice?.(message) } }
+  }
+
   /** Progress lines of a reset: what a person is asked to do, and when it is done. */
   const attention = (notice?: (message: string | null) => void) => notice && ((line: string) => {
     const asked = line.match(/ACTION NEEDED: (.*)$/)
@@ -249,8 +275,16 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     relay: {
       // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `bsp dut confirm`, until
       // the lock it runs under ends.
-      reset: async (config, { device, lease: token }, notice, signal) => { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice), undefined, signal) },
-      enterDownload: async (config, { device, lease: token }, notice, signal) => { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(notice), undefined, signal) },
+      reset: async (config, { device, lease: token }, notice, signal) => {
+        const tell = once(notice)
+        const watching = watchingHuman(config, device, tell, signal)
+        try { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal) } finally { watching() }
+      },
+      enterDownload: async (config, { device, lease: token }, notice, signal) => {
+        const tell = once(notice)
+        const watching = watchingHuman(config, device, tell, signal)
+        try { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal) } finally { watching() }
+      },
       confirm: async (config, { device }, note) => {
         const result = await bsp<{ confirmed: string, waited_s: number }>(config, ['dut', 'confirm', device, ...(note ? [note] : [])])
         return `已确认「${result.confirmed}」（等了 ${result.waited_s} 秒）`
@@ -326,21 +360,22 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     },
 
     discovery: {
-      async discover(config, discovery, progress, registered) {
+      async discover(config, discovery, progress, registered, signal) {
         // bsp probe pulses free reset lines on the free slots of every selected host (or, with a person resetting the
         // boards, works on one host), watches consoles and USB, and registers each board the moment it is found.
         const slots = discovery.slots ?? []
         const hosts = [...new Set(slots.map(slot => slot.split('/')[0]!))]
         if (hosts.length > 1) throw new Error(`一次只能发现一台主机上的槽位（这里有 ${hosts.join('、')}）`)
         const host = hosts[0] ?? (discovery.human ? discovery.host ?? undefined : undefined)
-        const args = ['probe', '--register', ...(discovery.human ? ['--human'] : []), ...(slots.length ? ['--slots', slots.map(slot => slot.split('/')[1]).join(',')] : [])]
-        return probed(config, args, progress, registered, host)
+        const args = ['probe', '--register', ...(discovery.human ? ['--human'] : []), ...(slots.length ? ['--slots', slots.map(slot => slot.split('/')[1]).join(',')] : []),
+          ...(discovery.prefer?.length ? ['--prefer', discovery.prefer.join(',')] : [])]
+        return probed(config, args, progress, registered, host, signal)
       },
       // bsp starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
       // console plugged in now, and probes them all, registering each board as found. With --keep-used it keeps the
       // boards that are leased or busy and redoes only what moved.
-      async rebuild(config, host, progress, registered, options) {
-        return probed(config, ['probe', '--rebuild', ...(options?.keepInUse ? ['--keep-used'] : []), '--yes'], progress, registered, host)
+      async rebuild(config, host, progress, registered, options, signal) {
+        return probed(config, ['probe', '--rebuild', ...(options?.keepInUse ? ['--keep-used'] : []), '--yes'], progress, registered, host, signal)
       },
       keepsInUse: true,
       async register(config, finding, name) {

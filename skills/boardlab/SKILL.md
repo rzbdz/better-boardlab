@@ -49,6 +49,7 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 - 实验室的板子都在槽位里（`boardlab list` 里的「槽位 host1/s3」）。所有命令都可以用槽位名代替板名：`boardlab lock host1/s3 --for …`、`boardlab console host1/s3`。在同一个槽位上换着板子反复测试时，用槽位名，不用管板子叫什么。
 - 「空槽位」是还没登记板子的串口：可以拿锁、`boardlab console` 看，用户要求时 `boardlab lab discover bsp --slot <主机>/s4 --yes` 在上面找板子（会复位没登记的线），找到就登记。
 - 用户说槽位里换了板子：拿锁后 `boardlab refresh <槽位>`（`--name <新名字>` 或 `--rename` 按读到的型号改名），不要 remove 再重新发现；锁跟着槽位走。
+- 板子识别不出来（`soc` 为空、没有下载口、`lab.sdks` 为空，`boardlab show <board> --json` 能看到）：拿锁后用 `boardlab set <board> --soc <soc> --usb usb:<x-y> --fdl button` 补齐登记（也可以改 `--model`、`--sdks`、`--reset-pin`、`--fdl-pin`）。boardd 用你锁上的那份 bsp 租约去改，直接 `boardlab bsp dut set` 是拿不到租约的，不要绕。
 - 拿锁时板子正被人用：你会等最多 60 秒，页面会问那个人「让出 / 继续用」。被拒时说明没有拿到，别抢；等他放锁或改用另一块板子。
 - `boardlab reset` 是让板子启动它自己的系统。下载模式短接的板子：`boardlab list` 写着「复位：经 … 从介质启动」时，复位会从板载介质启动；写着「停在下载模式」时，复位后它停在下载模式，要用 `boardlab boot` 从内存启动。
 - 多芯片板用 `<board>.<die>` 指定芯片，例如 `boardlab send evb.die1 ...`。
@@ -153,7 +154,9 @@ boardlab registry hosts                             # 每台主机拿到的目�
 ## 新接上的板子
 
 - `boardlab slots bsp` 列出 bsp 主机上还没有板子用的串口和下载口；`boardlab bind bsp --host <主机> --console <串口> --usb <下载口>` 把它们登记成一块由人复位的板子（临时调试用，默认名 `tmp-<主机>-<串口>`，用完 `boardlab remove`）。
-- `boardlab lab discover bsp [--human --host <主机>]` 让实验室自己找新板子，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。
+- `boardlab lab discover bsp [--human --host <主机>] [--prefer '12,13']` 让实验室自己找新板子，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。用户知道这批板子接在哪些排针上时用 `--prefer` 先试那些 GPIO：`12,13`、`12，13`、`12、13`、`GPIO12`、`gpio_13`、`P15` 都能认。
+- `boardlab lab discover bsp --human --host <主机>` 是两步：先让板子正常启动（RESET，别按 BOOT），再让它进下载模式（按住 BOOT/下载键，按 RESET，松开），串口和同一时刻出现的下载口配成一对。提示会以页面通知的形式出现（`ACTION NEEDED…`）。
+- 发现卡住或用户不想要了：`boardlab lab cancel <实验室>`，不要等（会停在当前这一步，已经登记的留着）。
 
 ## boardlab 本身不够用时
 

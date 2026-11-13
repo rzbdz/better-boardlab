@@ -180,7 +180,7 @@ function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<type
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div>
-      {(m.mine || !m.holder) && <button className="pill sm" disabled={act.busy === 'cancel'} onClick={act.cancel}>{act.busy === 'cancel' ? <span className="spin" /> : <Icon name="x" />}取消</button>}</div>}
+      {m.mine && m.flags.busy && (m.flags.busy.kind === 'boot' || m.flags.busy.kind === 'stage') && <button className="pill sm" disabled={act.busy === 'cancel'} onClick={act.cancel}>{act.busy === 'cancel' ? <span className="spin" /> : <Icon name="x" />}取消</button>}</div>}
     {m.flags.offline && <div className="flag"><Icon name="plug" /><div><b>串口不在线</b><span>板子可能没上电，或者串口线松了。</span></div></div>}
     {m.flags.error && <div className="flag bad"><Icon name="warn" /><div><b>锁和实验室对不上</b><span>{m.flags.error}</span></div></div>}
   </>

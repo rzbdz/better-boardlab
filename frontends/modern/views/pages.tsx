@@ -38,15 +38,31 @@ function LabPanel({ lab, state, open }: { lab: LabSettings, state: PageState, op
   const boards = state.boards.filter(b => b.lab?.id === lab.id), running = !!lab.discovery?.running
   const anyHeld = boards.filter(held)
   const fire = (label: string, promise: Promise<{ message?: string }>) => void promise.then(out => ui.toast(`${label}：开始了`, out?.message), e => ui.fail(`${label}失败`, e))
-  const discoverAll = () => ui.layer(close => <Confirm title={`在实验室 ${lab.id} 发现新板子`} ok="开始" danger close={close} onOk={() => fire('发现', api.discoverLab(lab.id))}>在所有主机上找新接的板子：逐个拉还没用过的复位线，看哪个串口有反应、哪个下载口出现。<b>接在这些线上的板子会被复位。</b></Confirm>)
+  const discoverAll = () => ui.layer(close => <DiscoverDialog lab={lab} close={close} onGo={prefer => fire('发现', api.discoverLab(lab.id, { prefer }))} />)
+  const cancel = () => void api.cancelDiscovery(lab.id).then(out => ui.toast('取消发现', out.message), e => ui.fail('取消发现失败', e))
   return <>
     <section className="panel">
       <h2><Icon name="radar" /><span className="ttl">实验室 {lab.id}</span><span className="sub small">{lab.kind}{lab.syncedAt ? ` · ${age(lab.syncedAt)}前同步` : ''}</span>
         <span className="acts"><button className="pill sm danger-o" disabled={running || anyHeld.length > 0} title={anyHeld.length ? `${anyHeld.map(b => upper(b.name)).join('、')} 有锁` : undefined} onClick={discoverAll}><Icon name="radar" />发现新板子</button></span></h2>
       <p className="lead">{anyHeld.length ? `有 ${anyHeld.length} 块板子有锁，整个实验室的发现要等它们释放；单个空槽位和人工配对随时可以。` : '找到的板子马上登记；没能自动登记的列在「待确认」。'}</p>
-      {lab.discovery && <div className={`flag${running ? ' run' : ''}`} style={{ margin: 0 }}>{running ? <span className="spin" /> : <Icon name="clock" />}<div><b>{running ? '正在发现' : '上次发现'}</b><span>{lab.discovery.line} · {age(lab.discovery.at)}前</span></div></div>}
+      {lab.discovery && <div className={`flag${running ? ' run' : ''}`} style={{ margin: 0 }}>{running ? <span className="spin" /> : <Icon name="clock" />}<div><b>{running ? '正在发现' : '上次发现'}</b><span>{lab.discovery.line} · {age(lab.discovery.at)}前</span></div>
+        {running && <button className="pill sm" onClick={cancel}><Icon name="x" />取消发现</button>}</div>}
     </section>
     <div className="panels">{lab.hosts.map(host => <HostPanel key={host} lab={lab} host={host} state={state} boards={boards.filter(b => slotOf(b).host === host)} running={running} open={open} />)}</div>
+  </>
+}
+
+/** Discovery over the whole lab, with the GPIO numbers the person knows this batch is wired to, tried first. */
+function DiscoverDialog({ lab, close, onGo }: { lab: LabSettings, close: () => void, onGo: (prefer: string) => void }) {
+  const [typed, setTyped] = useState('')
+  return <>
+    <h2>在实验室 {lab.id} 发现新板子</h2>
+    <div className="lead">在所有主机上找新接的板子：逐个拉还没用过的复位线，看哪个串口有反应、哪个下载口出现。<b>接在这些线上的板子会被复位。</b></div>
+    <label className="field wide" style={{ marginTop: 12 }}><span>先试这些 GPIO（可选）</span>
+      <input className="input" placeholder="例如 12,13、GPIO12、gpio_13、P15" value={typed} onChange={e => setTyped(e.target.value)} />
+      <span className="sub small">{typed ? '会先试这些，再按主机原来的顺序试别的；认不出编号会提示。' : '知道这批板子接在哪些排针上时填上，先试这些；不填就按主机原来的顺序。'}</span>
+    </label>
+    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill danger" onClick={() => { close(); onGo(typed) }}>开始发现</button></div>
   </>
 }
 

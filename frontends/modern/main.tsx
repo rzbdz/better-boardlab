@@ -76,6 +76,16 @@ function Shell() {
           const open = () => go(`#/board/${encodeURIComponent(note.board)}`)
           if (!show(note, open) && prefs.get().enabled[note.topic]) ui.toast(note.title, note.body, { label: '查看', run: open })
         }
+        // A discovery (usually a person resetting boards one by one) asks for a hand: say it wherever the person is.
+        const lines = new Map(last.current.labs.map(lab => [lab.id, lab.discovery?.line ?? '']))
+        for (const lab of next.labs) {
+          const line = lab.discovery?.line ?? ''
+          if (!lab.discovery?.running || !/^ACTION NEEDED/.test(line) || lines.get(lab.id) === line) continue
+          const note = { topic: 'attention' as const, board: lab.id, title: `${lab.id}：需要你操作`, body: line.replace(/^ACTION NEEDED\s*/, '') }
+          setNotes(list => [{ ...note, at: new Date().toISOString(), read: false }, ...list].slice(0, 100))
+          const open = () => go('#/discover')
+          if (!show(note, open) && prefs.get().enabled[note.topic]) ui.toast(note.title, note.body, { label: '查看', run: open })
+        }
       }
       last.current = next
       setState(next); setConnected(true); setError(null)
