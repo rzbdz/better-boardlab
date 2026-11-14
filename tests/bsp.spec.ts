@@ -10,6 +10,8 @@ import type { BoardTarget, LabConfig } from 'boardlab-core/core/backend.ts'
 const on = (device: string, lease: string | null = null): BoardTarget => ({ board: `bsp-${device}`, device, lease, die: 'die0', usbPath: null, port: null, gate: null })
 const ok = (result: unknown) => ({ code: 0, stdout: JSON.stringify({ ok: true, result }), stderr: '' })
 const fail = (message: string, hint?: string) => ({ code: 1, stdout: JSON.stringify({ ok: false, error: { code: 'forbidden', message, hint } }), stderr: '' })
+/** A host bsp cannot reach: `ok: true` with an empty list, the failure only in the warnings and the exit code. */
+const unreachable = (host: string, why = 'missing or wrong token') => ({ code: 3, stdout: JSON.stringify({ ok: true, result: [], warnings: [`${host} unreachable: ${why}`] }), stderr: '' })
 const config: LabConfig = { url: 'http://registry.test:8765', username: '', password: 'tok', jump: '' }
 
 /** A bsp CLI that answers from a table by its arguments after the global options, and records every call. */
@@ -49,6 +51,15 @@ describe('bsp lab driver', () => {
     expect(local.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
     const none = fakeBsp(() => ok([{ host: 'h3', error: 'no route' }]))
     await expect(bspLab({ run: none.run }).inventory!.verify(config)).rejects.toThrow('没有连上任何 bsp 主机：h3（no route）')
+  })
+
+  it('fails on a host it cannot reach, instead of taking the empty list for no boards', async () => {
+    // A stale token is `ok: true, result: []` with a warning and exit code 3: silently emptying the lab is the bug.
+    const stale = fakeBsp(() => unreachable('h1'))
+    await expect(bspLab({ run: stale.run }).inventory!.devices(config)).rejects.toThrow('h1 unreachable: missing or wrong token')
+    // One host down while another answers: an error too, so boardd never takes a partial listing as the whole lab.
+    const partial: BspRunner = async () => ({ code: 3, stdout: JSON.stringify({ ok: true, result: DUTS, warnings: ['h2 unreachable: timed out'] }), stderr: '' })
+    await expect(bspLab({ run: partial }).inventory!.devices(config)).rejects.toThrow('h2 unreachable: timed out')
   })
 
   it('works a DUT\'s relays and buttons on the relay controller of its own host', async () => {

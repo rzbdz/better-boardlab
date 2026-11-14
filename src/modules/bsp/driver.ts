@@ -115,9 +115,16 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal): Promise<T> => {
     const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr, signal })
     if (signal?.aborted) throw new Error(`bsp ${args.slice(0, 2).join(' ')} 停下了：${(signal.reason as Error | undefined)?.message ?? '锁已经结束'}`)
-    let envelope: { ok: boolean, result?: T, error?: { code?: string, message?: string, hint?: string } } | null = null
+    let envelope: { ok: boolean, result?: T, warnings?: string[], error?: { code?: string, message?: string, hint?: string } } | null = null
     try { envelope = JSON.parse(result.stdout) } catch {}
-    if (envelope?.ok) return envelope.result as T
+    // A host bsp could not reach leaves `ok: true` and the failure only in the warnings (and exit code 3): a stale token
+    // then looks like a lab with no boards, and boardd drops every one of them. Any unreachable host is an error, so
+    // the listing is never taken as complete and the boards already known stay.
+    if (envelope?.ok) {
+      const unreachable = (envelope.warnings ?? []).filter(line => /unreachable/i.test(line))
+      if (unreachable.length) throw new Error(`bsp ${args.slice(0, 2).join(' ')}：${unreachable.join('；')}`)
+      return envelope.result as T
+    }
     const error = envelope?.error
     if (error) throw new Error(`bsp ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`)
     const text = `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-4).join('\n')
