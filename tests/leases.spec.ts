@@ -120,7 +120,7 @@ describe('serial gates', () => {
     expect(bench.gates.get('com260')!.token).toBe(bob.gateToken)
     const carol = svc.locks.steal('com260', 'user:carol', '紧急修复')
     await svc.locks.settle('com260')
-    expect(bench.gates.get('com260')).toEqual({ token: carol.gateToken, note: 'user:carol 正在使用 com260（抢锁）' })
+    expect(bench.gates.get('com260')).toEqual({ token: carol.gateToken, note: 'user:carol 正在使用 com260（抢锁：紧急修复）' })
   })
 
   it('reports a serial-mux without the gate instead of leaving input silently open', async () => {
