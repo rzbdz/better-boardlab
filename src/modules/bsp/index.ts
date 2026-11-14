@@ -154,12 +154,20 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           const text = (key: string) => typeof body[key] === 'string' && body[key].trim() ? body[key].trim() as string : undefined
           const fdl = text('fdl')
           if (fdl && !(FDL_STRATEGIES as readonly string[]).includes(fdl)) throw new BoardError('invalid', `fdl 只能是 ${FDL_STRATEGIES.join('、')}`)
+          if (body.resetActor && body.resetActor !== 'human' && !text('resetPin')) throw new BoardError('invalid', 'GPIO reset 要选择复位线')
+          if (body.fdlActor === 'gpio-relay' && !text('fdlPin')) throw new BoardError('invalid', 'GPIO FDL 要选择 FDL 线')
+          const choices = await (route.backend as BspBackend).boardConfig(route.config, route.target.device)
+          for (const [field, pin] of [['resetPin', text('resetPin')], ['fdlPin', text('fdlPin')]] as const)
+            if (pin && !choices.gpios.some(item => item.value === pin)) throw new BoardError('invalid', `${field} 不是这块板所在主机的 GPIO：${pin}`)
+          const usb = text('usb')
+          if (usb && !choices.ports.some(item => item.value === usb)) throw new BoardError('invalid', `这个下载口不在主机当前检测到的列表里：${usb}`)
           // `sdks`: an array, or the comma list the CLI passes; empty means every SDK of the SoC's board.
           const sdks = Array.isArray(body.sdks) ? body.sdks.map(String).filter(Boolean)
             : typeof body.sdks === 'string' ? String(body.sdks).split(',').map((item: string) => item.trim()).filter(Boolean) : undefined
           const change: BspBoardChange = {
             board: text('model'), soc: text('soc'), description: text('description'), usb: text('usb'), resetPin: text('resetPin'),
             pulseMs: typeof body.pulseMs === 'number' && body.pulseMs > 0 ? body.pulseMs : undefined, fdl: fdl as BspBoardChange['fdl'], fdlPin: text('fdlPin'),
+            resetActor: body.resetActor === 'human' ? 'human' : undefined, fdlActor: body.fdlActor === 'human' ? 'human' : undefined,
             ...(sdks ? { sdks } : {}),
           }
           const changed = await lab.kernel.doing([name], 'configure', '修改中', caller.holder, () =>
@@ -167,6 +175,14 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           lab.kernel.record(caller.holder, name, 'bsp-board', changed.join(','), true)
           await lab.backends.sync(route.id, caller.holder).catch(() => {})
           return { message: `改了 ${changed.join('、')}` }
+        },
+      }, {
+        method: 'GET', path: '/api/bsp/board', about: '这块 bsp 板子的登记和改登记可选项：所在主机实际的 GPIO 和下载口',
+        handle: async ({ query }) => {
+          const name = lab.boards.resolve(String(query.get('board') ?? ''))
+          const route = lab.backends.route(name)
+          if (!('boardConfig' in route.backend)) throw new BoardError('invalid', `${name} 不是 bsp 板子`)
+          return (route.backend as BspBackend).boardConfig(route.config, route.target.device)
         },
       }, {
         method: 'GET', path: '/api/bsp/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',

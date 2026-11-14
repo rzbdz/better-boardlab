@@ -169,7 +169,7 @@ export type Operation =
    */
   | (OperationBase & { kind: 'job', start(input: Values, sink: Sink, signal: AbortSignal): Promise<Outcome> })
   /** Opens more of the page over it (a dialog, a drawer): elements whose operations close it when they succeed. */
-  | (OperationBase & { kind: 'open', title: string, body(): Element[] })
+  | (OperationBase & { kind: 'open', title: string, body(): Element[], load?(): Promise<Element[]> })
 
 /** Live data the page shows as it arrives, until it stops listening. */
 export interface Stream {
@@ -205,7 +205,7 @@ export function action(id: string, label: string, run: (input: Values) => Promis
 }
 
 /** An operation that opens `body` over the page, titled `title`. */
-export function open(id: string, label: string, title: string, body: () => Element[], extra: Omit<OperationBase, 'id' | 'label'> = {}): Operation {
+export function open(id: string, label: string, title: string, body: () => Element[], extra: Omit<OperationBase, 'id' | 'label'> & { load?(): Promise<Element[]> } = {}): Operation {
   return { kind: 'open', id, label, title, body, ...extra }
 }
 

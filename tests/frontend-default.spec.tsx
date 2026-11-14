@@ -26,7 +26,7 @@ describe('TroyMitchellDefault frontend', () => {
     await tab('设置')
     expect(await screen.findByText('Home Assistant', {}, wait)).toBeTruthy()
     expect(await screen.findByText('自定义槽位', {}, wait)).toBeTruthy()
-    expect(await screen.findByText('Ant Design', {}, wait)).toBeTruthy()
+    expect(await screen.findByText('Modern', {}, wait)).toBeTruthy()
   })
 
   it('draws the local module\'s scan and its result', async () => {

@@ -49,26 +49,48 @@ function gpioLink(url: string | null, lab: string): string {
   return `http://${match[2]}:${match[3] ?? '8765'}/`
 }
 
-/** A bsp board's record, changed in bspd while you hold its lock: only the fields filled in change. */
-function boardForm(board: string): Element[] {
-  const keep = '不填：不改'
+interface BoardChoices {
+  control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
+  usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
+}
+/** A bsp board's record, edited as choices from its actual host, never hand-written GPIO/USB identifiers. */
+async function boardForm(board: string): Promise<Element[]> {
+  const current = await call<BoardChoices>('GET', `api/bsp/board?board=${encodeURIComponent(board)}`)
+  const actor = current.control.backend === 'human' ? 'human' : 'gpio-relay'
+  const option = (value: string | undefined, label: string) => value ? [{ value, label }] : []
+  const withCurrent = (options: Array<{ value: string, label: string }>, value: string | undefined) =>
+    options.some(item => item.value === value) || !value ? options : [...options, { value, label: `${value}（当前登记，未在扫描中）` }]
+  const gpios = withCurrent(current.gpios, current.control.reset?.pin)
+  const fdlGpios = withCurrent(gpios, current.control.fdl?.pin)
+  const ports = withCurrent(current.ports, current.usb ?? undefined)
+  const currentFdl = current.control.fdl?.strategy ?? 'unset'
   return [
-    text('改这块板子在 bsp 里的登记（要拿着锁）。只改填了的项。'),
-    {
-      kind: 'form',
-      fields: [
-        { kind: 'choice', id: 'fdl', label: '怎么进下载模式', initial: '', options: [
-          { value: '', label: '不改' }, { value: 'strapped', label: '复位就进（FDL 拨码/短接了）' },
-          { value: 'button', label: '按住 FDL 线再复位（要填 FDL 线）' }, { value: 'unset', label: '还不知道' }] },
-        { kind: 'text', id: 'fdlPin', label: 'FDL 线', placeholder: `GPIO 引脚，例如 P15；${keep}` },
-        { kind: 'text', id: 'resetPin', label: '复位线', placeholder: `GPIO 引脚，例如 P33；${keep}` },
-        { kind: 'text', id: 'usb', label: '下载口', placeholder: `usb:2-1.3（fastboot devices -l 里看）；${keep}` },
-        { kind: 'text', id: 'model', label: '型号', placeholder: `例如 k3_deb1；${keep}` },
-        { kind: 'text', id: 'soc', label: 'SoC', placeholder: `例如 k3；${keep}` },
-      ],
-      submitLabel: '保存',
-      submit: action('save', '保存', async input => (await call<{ message: string }>('POST', 'api/bsp/board', { board, ...input })).message, { intent: 'primary' }),
-    },
+    text('改登记（保存时检查你持有这块板子的锁）。GPIO 和下载口来自主机的实际列表；human 表示由人完成该动作。'),
+    { kind: 'form', fields: [
+      { kind: 'choice', id: 'resetActor', label: 'reset 由谁执行', initial: actor, options: [
+        { value: 'human', label: 'human（请人按 RESET）' }, { value: 'gpio-relay', label: 'GPIO（下面选择复位线）' }] },
+      { kind: 'choice', id: 'resetPin', label: 'reset GPIO', initial: current.control.reset?.pin ?? '', options: [
+        { value: '', label: '不改 / 不使用' }, ...gpios] },
+      { kind: 'choice', id: 'fdlActor', label: 'FDL 由谁执行', initial: currentFdl === 'strapped' ? 'strapped' : actor, options: [
+        { value: 'human', label: 'human（请人按 BOOT + RESET）' }, { value: 'gpio-relay', label: 'GPIO（下面选择 FDL 线）' },
+        { value: 'strapped', label: 'strapped（复位就进下载模式）' }] },
+      { kind: 'choice', id: 'fdlPin', label: 'FDL GPIO', initial: current.control.fdl?.pin ?? '', options: [
+        { value: '', label: '不改 / 不使用' }, ...fdlGpios] },
+      { kind: 'choice', id: 'usb', label: '下载口', initial: current.usb ?? '', options: [
+        { value: '', label: '不改' }, ...ports] },
+    ], submitLabel: '保存',
+      submit: action('save', '保存', async input => {
+        if (input.resetActor === 'gpio-relay' && !input.resetPin) throw new Error('选择 GPIO 执行 reset 时必须选一根 reset GPIO')
+        if (input.fdlActor === 'gpio-relay' && !input.fdlPin) throw new Error('选择 GPIO 执行 FDL 时必须选一根 FDL GPIO')
+        const nextFdl = input.fdlActor === 'strapped' ? 'strapped' : input.fdlActor === actor ? currentFdl : 'button'
+        const changed: Record<string, unknown> = { board, usb: input.usb }
+        if (input.resetPin && input.resetPin !== current.control.reset?.pin) changed.resetPin = input.resetPin
+        if (input.fdlPin && input.fdlPin !== current.control.fdl?.pin) changed.fdlPin = input.fdlPin
+        if (input.resetActor !== actor) changed.resetActor = input.resetActor
+        if (input.fdlActor !== actor) changed.fdlActor = input.fdlActor
+        if (nextFdl !== currentFdl) changed.fdl = nextFdl
+        return (await call<{ message: string }>('POST', 'api/bsp/board', changed)).message
+      }, { intent: 'primary' }) },
   ]
 }
 
@@ -383,7 +405,7 @@ export const ui: ModuleUi = {
       return bspBoard ? [{
         id: 'bsp-board', slot: 'board', title: 'bsp 登记',
         body: [
-          { kind: 'actions', actions: [open('edit', '改登记…', `${board.name.toUpperCase()} 的 bsp 登记`, () => boardForm(board.name))] },
+          { kind: 'actions', actions: [open('edit', '改登记…', `${board.name.toUpperCase()} 的 bsp 登记`, () => [], { load: () => boardForm(board.name) })] },
           // The host's own page: its GPIO header, lines and events, opened on the host itself.
           ...(home?.url ? [text([{ link: 'GPIO 面板', href: gpioLink(home.url, home.id) }])] : []),
         ],

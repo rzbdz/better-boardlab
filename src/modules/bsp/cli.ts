@@ -93,6 +93,7 @@ async function sdkCommand({ client, argv, json, out }: CommandContext) {
   list | show <sdk> | status <sdk> | plan <sdk> [<组件>] [--boot load|download]
   acquire <sdk> --task <名字> | release <sdk> | build <sdk> <组件> [--clean] [--no-wait] | jobs <sdk> | job <sdk> <id> [--follow]
   exec <sdk> [--cwd DIR] -- <命令> | get <sdk> <路径> [-o 本机文件] | put <sdk> <路径> <本机文件>
+                                                       exec 默认在 SDK 第一个开发仓库（如 linux-6.18）；--cwd 是相对 SDK 根的目录，用 --cwd . 在根目录执行
   skill list | skill <sdk> [--install [--dir <目录>] [-g]]   SDK 自己的 SKILL.md：打印，或装到 agent 读的地方`);
     return
   }

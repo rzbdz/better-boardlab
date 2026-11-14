@@ -14,7 +14,7 @@ const now = '2026-11-10T09:30:00.000Z'
 const lease = (board: string, holder: string, purpose: string) => ({ id: `l-${board}`, board, holder, purpose, startedAt: now, status: 'held' as const, endedAt: null, endReason: null })
 const chip = (board: string, online = true) => ({ board, die: 'die0', serialPath: null, baud: 115200, alias: board, downloadUsbPath: '2-1.4', usbId: null, lastSeenAt: now, online, gateError: null })
 const inLab = (device: string, extra: Partial<NonNullable<Board['lab']>> = {}): Board['lab'] => ({
-  id: 'bsp', device, online: false, ip: null, heldBy: null, leaseError: null, attention: null, canConfirm: true, empty: false, slotGone: false,
+  id: 'bsp', device, online: false, ip: null, heldBy: null, leaseError: null, attention: null, attentionRequest: null, canConfirm: true, empty: false, slotGone: false,
   canRefresh: true, mediaBoot: { method: 'reset', available: true, why: null }, sdks: ['k1x-2.0', 'upstream-k1'], progress: null, canFlashPackage: true, ...extra,
 })
 const board = (name: string, extra: Partial<Board>): Board => ({

@@ -43,7 +43,7 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   if (path === '/api/boot/breaks') return reply({ load: ['uboot'], download: [] })
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
-  if (path === '/api/frontends') return reply({ default: 'antd', current: 'antd', frontends: [{ name: 'antd', title: 'Ant Design' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
+  if (path === '/api/frontends') return reply({ default: 'modern', current: 'modern', frontends: [{ name: 'modern', title: 'Modern' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
   if (path === '/api/bsp/site') return reply(site)
   if (path.startsWith('/api/docs/')) return reply({ name: path.slice('/api/docs/'.length), title: '帮助', text: `# 帮助：${path.slice('/api/docs/'.length)}\n\n说明文字，[看这里](https://example.com/a) 和 [别点](javascript:alert(1))。\n\n\`\`\`yaml\nid: x\n\`\`\`` })
   if (path.startsWith('/api/files/')) return reply({ sha256: path.slice('/api/files/'.length), present: false })

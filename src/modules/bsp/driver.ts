@@ -8,9 +8,10 @@ import { execFile, spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews } from 'boardlab-core/core/backend.ts'
+import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews, type Notice } from 'boardlab-core/core/backend.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
+import { askedIn } from 'boardlab-core/core/relay.ts'
 
 /** Holders boardd gives its bsp leases: `boardlab:<holder of the lock>`. */
 export const HOLDER_PREFIX = 'boardlab:'
@@ -33,7 +34,7 @@ export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner,
 /** A DUT spec as bsp probe proposes it (`bsp dut add` takes it back). */
 interface BspSpec {
   id: string, board?: string, soc?: string | null, console?: { alias?: string, device?: string }, fastboot?: { usb?: string },
-  control?: { backend?: string, reset?: { pin?: string } }
+  control?: { backend?: string, reset?: { pin?: string, mode?: string }, fdl?: { strategy?: string, pin?: string } }
 }
 
 /** A slot as `bsp --json slot list` reports it: a serial console on a host, with or without a board. */
@@ -52,12 +53,14 @@ interface BspDut {
   id: string, host: string, slot?: string | null, board?: string | null, soc?: string | null, usb?: string | null, console?: string | null,
   stage?: string, console_up?: boolean, slot_online?: boolean | null, sdks?: string[], lease?: { holder: string, purpose?: string, expires_in_s?: number } | null,
   needs_human?: { action: string, message: string, waiting_s: number } | null,
+  control?: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } },
   media_boot?: { method: string | null, available: boolean, why?: string } | null,
 }
 
 /** How a board's bsp record may be changed from boardlab (`bsp dut set`); fields left out stay as they are. */
 export interface BspBoardChange {
   board?: string, soc?: string, description?: string, usb?: string,
+  resetActor?: 'human', fdlActor?: 'human',
   resetPin?: string, pulseMs?: number, fdl?: 'strapped' | 'button' | 'unset', fdlPin?: string, sdks?: string[],
 }
 export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
@@ -66,6 +69,11 @@ export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
 export interface BspBackend extends Backend {
   /** Change a board's record in bspd, holding its lease (`token`); says which fields changed. */
   change(config: LabConfig, device: string, token: string | null, change: BspBoardChange): Promise<string[]>
+  /** The board's own record and the actual choices on its host for a dropdown editor. */
+  boardConfig(config: LabConfig, device: string): Promise<{
+    control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
+    usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
+  }>
 }
 
 export function bspLab(options: BspOptions = {}): BspBackend {
@@ -168,14 +176,14 @@ export function bspLab(options: BspOptions = {}): BspBackend {
    * entering download mode) waits. The command's own output only reports it in passing, so it is polled here and the
    * page is told as it comes and goes.
    */
-  const watchingHuman = (config: LabConfig, device: string, notice?: (message: string | null) => void, signal?: AbortSignal) => {
+  const watchingHuman = (config: LabConfig, device: string, notice?: Notice, signal?: AbortSignal) => {
     if (!notice) return () => {}
-    let stopped = false, last: string | null = null
+    let stopped = false, last: string | null = null, lastRequest: string | null = null
     const tick = async () => {
       while (!stopped && !signal?.aborted) {
-        const status = await bsp<{ needs_human?: { message?: string } | null }>(config, ['dut', 'status', device], 15_000).catch(() => null)
-        const message = status?.needs_human?.message ?? null
-        if (message !== last) { last = message; notice(message) }
+        const status = await bsp<{ needs_human?: { id?: string, message?: string } | null }>(config, ['dut', 'status', device], 15_000).catch(() => null)
+        const message = status?.needs_human?.message ?? null, request = status?.needs_human?.id ?? null
+        if (message !== last || request !== lastRequest) { last = message; lastRequest = request; notice(message, request) }
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
     }
@@ -184,21 +192,25 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   }
 
   /** The command's output and the polled status say the same thing: the page is told only when it changes. */
-  const once = (notice?: (message: string | null) => void) => {
-    let told: string | null = null
-    return (message: string | null) => { if (message !== told) { told = message; notice?.(message) } }
+  const once = (notice?: Notice) => {
+    let told: string | null = null, toldRequest: string | null = null
+    return (message: string | null, request?: string | null) => {
+      // A new ask with the same words is a new request: the page must get its id, or a click answers the old one.
+      if (message === told && (request ?? null) === toldRequest) return
+      told = message; toldRequest = request ?? null; notice?.(message, request ?? null)
+    }
   }
 
-  /** Progress lines of a reset: what a person is asked to do, and when it is done. */
-  const attention = (notice?: (message: string | null) => void) => notice && ((line: string) => {
-    const asked = line.match(/ACTION NEEDED: (.*)$/)
-    if (asked) notice(asked[1]!)
+  /** Progress lines of a reset: what a person is asked to do (with bsp's request id), and when it is done. */
+  const attention = (notice?: Notice) => notice && ((line: string) => {
+    const asked = askedIn(line)
+    if (asked) notice(asked.message, asked.request)
     else if (/: (confirmed by a person|detected )/.test(line)) notice(null)
   })
 
   /** The host each DUT is on, as last listed; a DUT not listed yet is looked up. */
   const hostOf = new Map<string, string>()
-  const host = async (config: LabConfig, device: string) => {
+  const hostOfBoard = async (config: LabConfig, device: string) => {
     if (!hostOf.has(device)) for (const dut of await bsp<BspDut[]>(config, ['dut', 'list'])) hostOf.set(dut.id, dut.host)
     const found = hostOf.get(device)
     if (!found) throw new Error(`bsp 里没有板子 ${device}`)
@@ -292,8 +304,16 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         const watching = watchingHuman(config, device, tell, signal)
         try { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal) } finally { watching() }
       },
-      confirm: async (config, { device }, note) => {
-        const result = await bsp<{ confirmed: string, waited_s: number }>(config, ['dut', 'confirm', device, ...(note ? [note] : [])])
+      confirm: async (config, { device }, note, request) => {
+        // The request id makes it idempotent: answered already (the board showed it on its own), bsp says so.
+        const result = await bsp<{ confirmed: string, waited_s: number, request?: string, repeat?: boolean, how?: string }>(
+          config, ['dut', 'confirm', device, ...(note ? [note] : []), ...(request ? ['--request', request] : [])])
+        if (result.repeat) {
+          const how = result.how === 'detected' ? '板子自己到位了，已经自动确认'
+            : result.how === 'expired' ? '那次等人已经超时结束'
+            : result.how === 'superseded' ? '后来实验室又问了一次，这次已经作废' : '之前已经确认过了'
+          return `${how}（请求 ${result.request ?? request}，不用再点）`
+        }
         return `已确认「${result.confirmed}」（等了 ${result.waited_s} 秒）`
       },
     },
@@ -304,7 +324,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
      */
     channels: {
       async list(config, { device }) {
-        const pins = await bsp<BspPin[]>(config, ['gpio', 'list'], TIMEOUT_MS, undefined, await host(config, device))
+        const pins = await bsp<BspPin[]>(config, ['gpio', 'list'], TIMEOUT_MS, undefined, await hostOfBoard(config, device))
         return pins.flatMap(pin => (pin.aliases ?? []).filter(alias => alias.startsWith(`${device}/`)).map(alias => ({
           id: alias, label: alias.slice(device.length + 1), kind: pin.channel?.mode ?? 'gpio', state: pin.state ?? null,
           actions: CHANNEL_ACTIONS.filter(action => (pin.actions ?? []).includes(action) || (action === 'pulse' && pin.channel?.mode === 'relay') || (action === 'click' && pin.channel?.mode === 'button')),
@@ -315,7 +335,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         // bsp groups the actions by channel kind: relays switch and pulse, buttons are pressed and clicked.
         const [group, verb] = ({ on: ['relay', 'on'], off: ['relay', 'off'], toggle: ['relay', 'toggle'], pulse: ['relay', 'pulse'], press: ['button', 'press'], release: ['button', 'release'], click: ['button', 'click'] } as const)[action]
         const timed = verb === 'pulse' || verb === 'click'
-        const result = await bsp<{ target?: string, state?: string }>(config, [group, verb, channel, ...(timed && ms ? ['--ms', String(ms)] : [])], TIMEOUT_MS + (ms ?? 0), undefined, await host(config, device))
+        const result = await bsp<{ target?: string, state?: string }>(config, [group, verb, channel, ...(timed && ms ? ['--ms', String(ms)] : [])], TIMEOUT_MS + (ms ?? 0), undefined, await hostOfBoard(config, device))
         return `${channel}：${verb}${timed && ms ? ` ${ms}ms` : ''}${result.state ? `，现在 ${result.state}` : ''}`
       },
     },
@@ -348,6 +368,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     },
 
     download: {
+      backendFiles: true,
       async stage(config, target, file, timeoutMs = 300_000) {
         const result = await bsp<{ output: string, file: string, size: number }>(config,
           ['dut', 'stage', target.device, file.path, ...lease(target.lease), '--timeout', String(Math.ceil(timeoutMs / 1000))], timeoutMs + 120_000)
@@ -359,7 +380,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
       async boot(config, { device, lease: token }, files, timing) {
         // `boardlab boot` starts with the board already in download mode, as boardd's own boot does.
-        const job = await bsp<{ lines?: string[], elapsed_s?: number }>(config, ['dut', 'boot', device, '--files', ...files.map(file => file.path), '--no-reset',
+        const refs = files.map(file => file.source === 'backend' && !/^https?:\/\//.test(file.path) ? `host:${file.path}` : file.path)
+        const job = await bsp<{ lines?: string[], elapsed_s?: number }>(config, ['dut', 'boot', device, '--files', ...refs, '--no-reset',
           '--first-wait', String(timing.firstMs / 1000), '--later-wait', String(timing.laterMs / 1000), '--port-timeout', String(timing.waitMs / 1000),
           ...lease(token), '--timeout', '1800'], BOOT_TIMEOUT_MS)
         return (job.lines ?? []).join('\n')
@@ -495,9 +517,24 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
       give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
     },
+    async boardConfig(config, device) {
+      const host = await hostOfBoard(config, device)
+      const [record, pins, ports] = await Promise.all([
+        bsp<BspDut>(config, ['dut', 'status', device], 60_000),
+        bsp<BspPin[]>(config, ['gpio', 'list'], 60_000, undefined, host).catch(() => [] as BspPin[]),
+        bsp<Record<string, { usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
+      ])
+      return {
+        control: record.control ?? {}, usb: record.usb ?? null,
+        gpios: pins.filter(pin => pin.actions?.length).map(pin => ({ value: pin.target, label: `${pin.target}（${pin.label ?? 'GPIO'}）` })),
+        ports: Object.values(ports).flatMap(plan => (plan.usb ?? []).map(port => ({ value: port.usb, label: `${port.usb}${port.product ? `（${port.product}）` : ''}` }))),
+      }
+    },
+
     async change(config, device, token, change) {
       const flags: Array<[string, string | number | undefined]> = [['--board', change.board], ['--soc', change.soc], ['--description', change.description], ['--usb', change.usb],
-        ['--reset-pin', change.resetPin], ['--pulse-ms', change.pulseMs], ['--fdl', change.fdl], ['--fdl-pin', change.fdlPin], ['--sdks', change.sdks?.join(',')]]
+        ['--reset-pin', change.resetPin], ['--pulse-ms', change.pulseMs], ['--fdl', change.fdl], ['--fdl-pin', change.fdlPin], ['--sdks', change.sdks?.join(',')],
+        ['--reset-actor', change.resetActor], ['--fdl-actor', change.fdlActor]]
       const given = flags.filter(([, value]) => value !== undefined && value !== '').flatMap(([flag, value]) => [flag, String(value)])
       if (!given.length) throw new Error('没有要改的')
       const done = await bsp<{ changed: string[] }>(config, ['dut', 'set', device, ...lease(token), ...given], 120_000)

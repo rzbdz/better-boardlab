@@ -65,7 +65,7 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
       {board.lab?.heldBy && !board.lease && <p className="warn">实验室里正被 {board.lab.heldBy} 直接使用，拿锁要排队</p>}
       {board.lab?.attention && <div className="attention" role="alert">
         <b>需要人操作：</b>{board.lab.attention}
-        {board.lab.canConfirm && <button className="primary" onClick={() => props.onRun('已告诉实验室', () => api.confirm(board.name))}>我已完成</button>}
+        {board.lab.canConfirm && <button className="primary" onClick={() => props.onRun('已告诉实验室', () => api.confirm(board.name, board.lab!.attentionRequest ?? null))}>我已完成</button>}
       </div>}
       {board.lab?.progress && <p className="progress-line" aria-live="polite">启动中：{board.lab.progress}</p>}
       {gone && <p className="warn small">这块板的槽位串口不见了（串口线拔掉或换了口）。最近重新布线过的话，到「扫描」里重建主机 {board.slotRef?.split('/')[0]}。</p>}

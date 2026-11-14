@@ -4,8 +4,9 @@
 
 ## 选方法
 
-- **SDK 的构建**：板子在能取构建产物的实验室里（bsp 主机，`boardlab list` 的卡片上列着能跑的 SDK）时，`boardlab boot <板子> --sdk <SDK>` 内存启动、`boardlab flash <板子> --sdk <SDK>` 刷机。板子所在的主机自己去构建服务器取产物，按 SDK 登记的流程走，不经过你这台机器。SDK 本身怎么编见 `boardlab sdk help`，流程怎么登记见 `boardlab registry help`。
-- **文件内存启动**：手上有这次编出来的文件（FSBL、U-Boot/OpenSBI、内核 FIT），按下面「fastboot 内存启动」一个个加载。不烧录。
+- **SDK 的构建（首选）**：板子在能取构建产物的实验室里（bsp 主机，`boardlab list` 的卡片上列着能跑的 SDK）时，`boardlab boot <板子> --sdk <SDK>` 内存启动、`boardlab flash <板子> --sdk <SDK>` 刷机。SDK 的 load/download 配方是命令和步骤的序列；板子所在的主机按配方自己用 SSH/SCP 从构建服务器取产物，再执行 stage 或刷机 hook，不经过你这台机器，也不上传整份镜像。SDK 本身怎么编见 `boardlab sdk help`，流程怎么登记见 `boardlab registry help`。
+- **URL / 板端已有文件**：`boardlab boot <板子> https://…/Image.itb` 让板端主机下载；`host:/绝对路径` 让它读自己已经有的文件（例如脚本预先 scp 到那里）。板端会计算 sha256；这些引用不经过 boardd。
+- **本机文件上传（兜底）**：文件只在 workstation、又不能由 SDK 配方或 URL 提供时，按下面「fastboot 内存启动」加载；boardd 再把它交给板端。不烧录。
 - **网络启动**：板子上的 U-Boot 从 TFTP 取内核，见最后一节。
 
 ## 启动文件从哪来
@@ -44,12 +45,7 @@ FIT_HOST=<构建主机> skills/boardlab/fit/spacemit/k3/make-its.sh <内核的 O
 
 boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚本。
 
-1. 把这次要用的产物（只改内核时就是 `Image.itb`）拷到本机一个新目录，两边各算一次 sha256 对上：
-   ```sh
-   dir=$(mktemp -d)
-   scp <构建主机>:<产物目录>/Image.itb "$dir"/ && sha256sum "$dir"/*
-   ```
-   boardd 自带的固件不用拷，直接写名字，boardd 自己核对 sha256。boardd 在别的机器上时（`boardlab remote`），`boardlab boot` 会先把本机文件按 sha256 传过去，同一个文件只传一次。
+1. SDK 构建产物不要拷回 workstation 再上传：用上面的 `--sdk`，由板端主机按配方 scp 拉取。只有确实在本机生成、SDK 配方拿不到的自定义文件，才走上传兜底。此时把文件放在本机一个新目录，算 sha256；boardd 自带的固件不用拷，直接写名字，boardd 自己核对 sha256。
 2. 拿锁，让板子进下载模式，确认这颗芯片的下载口在：
    ```sh
    boardlab lock <板子> --for "内存启动 <内核版本>"
@@ -63,7 +59,7 @@ boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚�
    ```
    某一步失败就停下，报告是第几个文件、输出和串口日志，不要无限重试。
 4. 看串口确认真的起来了：`boardlab log <板子> --lines 300`。加载命令成功不算启动成功。
-5. 用完放锁，删掉第 1 步的本机目录（结论和 sha256 已经在报告和操作记录里）。
+5. 用完放锁；本机兜底目录用完删掉（结论和 sha256 已经在报告和操作记录里）。
 
 内存启动不烧录、不 `saveenv`、不改启动脚本或根文件系统；但 boardd 自带的 SDK FSBL 每次都会把 DDR training 写进 SPI NOR（offset 64 KiB，38912 字节，串口里是 `save DDR training info`），起来的系统自己也可能写存储，不要说整个过程一定无持久影响。
 
@@ -71,7 +67,7 @@ boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚�
 
 `boardlab list` 里标着 `[实验室 …]` 的板子按上面同样的步骤内存启动，命令不变。不同的地方：
 
-- 下载口在实验室那边（例如 bsp 主机）。`boardlab boot` 照样给文件路径或固件名，boardd 按 sha256 把文件传过去再加载。
+- 下载口在实验室那边（例如 bsp 主机）。正常 SDK 启动/刷机由板端主机从构建服务器 scp 拉产物，不经过 workstation 或 boardd；URL / `host:/绝对路径` 也由板端自己取。只有本机文件兜底才由 boardd 传输到实验室主机。
 - 板子 EEPROM 里的型号决定 U-Boot 选 FIT 里哪个 configuration；[boards.csv](fit/spacemit/k3/boards.csv) 里没有它，或内核里没有对应的 DTB 时，打出的 FIT 里就没有它，U-Boot 会用默认的第一项，设备树就不对：先问用户用哪个 DTB。
 - 卡片上有「继电器」的实验室板子，还能单独控制它的继电器和按钮（断电重启、按住 BOOT），见 `boardlab relay <板子>`。
 - 这些板子平时跑着自己的系统，别人也会用。用完先 `boardlab reset`，看到它自己系统的登录提示再放锁。

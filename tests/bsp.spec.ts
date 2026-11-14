@@ -101,7 +101,9 @@ describe('bsp lab driver', () => {
     await lab.relay.enterDownload(config, on('k3-a', 'T1'))
     expect(await lab.download.stage(config, on('k3-a', 'T1'), { path: '/tmp/FSBL.bin', sha256: 'x' }, 120_000)).toBe('stage OKAY')
     expect(await lab.download.present(config, on('k3-a', 'T1'))).toBe(true)
-    expect(await lab.download.boot!(config, on('k3-a', 'T1'), [{ path: '/tmp/FSBL.bin', sha256: 'a' }, { path: '/tmp/Image.itb', sha256: 'b' }], { firstMs: 8000, laterMs: 3000, waitMs: 20000 })).toBe('[0.0s] file 1/2\n[9.1s] done')
+    expect(await lab.download.boot!(config, on('k3-a', 'T1'), [{ path: '/tmp/FSBL.bin', sha256: 'a' },
+      { path: '/products/Image.itb', sha256: '', source: 'backend' },
+      { path: 'https://images.test/kernel.itb', sha256: '', source: 'backend' }], { firstMs: 8000, laterMs: 3000, waitMs: 20000 })).toBe('[0.0s] file 1/2\n[9.1s] done')
     await lab.builds!.boot(config, on('k3-a', 'T1'), { sdk: 'sdk-a', method: 'download', variant: null }, () => {})
     await lab.lease!.give(config, 'k3-a', 'T1')
     await lab.inventory!.remove!(config, 'k3-a')
@@ -115,7 +117,8 @@ describe('bsp lab driver', () => {
       'dut reset k3-a --lease T1 --timeout 1800',
       'dut stage k3-a /tmp/FSBL.bin --lease T1 --timeout 120',
       'dut present k3-a',
-      'dut boot k3-a --files /tmp/FSBL.bin /tmp/Image.itb --no-reset --first-wait 8 --later-wait 3 --port-timeout 20 --lease T1 --timeout 1800',
+      // A checked file on boardd is still a local path for bsp to upload; only explicit backend refs bypass that.
+      'dut boot k3-a --files /tmp/FSBL.bin host:/products/Image.itb https://images.test/kernel.itb --no-reset --first-wait 8 --later-wait 3 --port-timeout 20 --lease T1 --timeout 1800',
       'dut boot k3-a --sdk sdk-a --method download --lease T1 --timeout 3600',
       'dut release k3-a --lease T1',
       'dut remove k3-a',
@@ -207,18 +210,24 @@ describe('bsp lab driver', () => {
     const lines: string[] = []
     expect(await lab.inventory!.refresh!(config, on('k3-a', 'T1'), { rename: true }, line => lines.push(line))).toEqual({ device: 'k3-board-32g', message: 'k3-board-32g：读到 k3_com260，改了 board、id' })
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'refresh', 'k3-a', '--lease', 'T1', '--timeout', '1800', '--rename'])
-    // A board a person resets: bsp's progress lines become the notice on its card.
-    const notices: Array<string | null> = []
+    // A board a person resets: bsp's progress lines become the notice on its card, with bsp's request id.
+    const notices: Array<[string | null, string | null]> = []
     const human = bspLab({ run: async (args, { onStderr }) => {
-      if (args.includes('confirm')) return ok({ confirmed: 'reset', waited_s: 4.2 })
+      if (args.includes('confirm')) {
+        // The same request answered again says it already was (the board arrived first, or a second click).
+        if (args.includes('--request') && args[args.indexOf('--request') + 1] === 'ab12cd34ef56') return ok({ confirmed: 'reset', waited_s: 4.2, request: 'ab12cd34ef56', repeat: true, how: 'detected' })
+        return ok({ confirmed: 'reset', waited_s: 4.2, request: 'ab12cd34ef56', repeat: false })
+      }
       onStderr?.('slot-1 @ h1: reset needs a person, job reset-1 (confirm with `bsp dut confirm slot-1`)')
-      onStderr?.('[   0.0s] ACTION NEEDED: press RESET on slot-1 (board-x)')
+      onStderr?.('[   0.0s] ACTION NEEDED: press RESET on slot-1 (board-x) (request ab12cd34ef56)')
       onStderr?.('[   4.2s] reset: confirmed by a person')
       return ok({ status: 'succeeded' })
     } })
-    await human.relay.reset(config, on('slot-1', 'T'), message => notices.push(message))
-    expect(notices).toEqual(['press RESET on slot-1 (board-x)', null])
+    await human.relay.reset(config, on('slot-1', 'T'), (message, request) => notices.push([message, request ?? null]))
+    expect(notices).toEqual([['press RESET on slot-1 (board-x)', 'ab12cd34ef56'], [null, null]])
     expect(await human.relay.confirm!(config, on('slot-1', 'T'), '')).toBe('已确认「reset」（等了 4.2 秒）')
+    // A late click, naming the request: answered, not an error, and the message says why.
+    expect(await human.relay.confirm!(config, on('slot-1', 'T'), '', 'ab12cd34ef56')).toBe('板子自己到位了，已经自动确认（请求 ab12cd34ef56，不用再点）')
     // Its lock ending stops the waiting bsp.
     const waiting = bspLab({ run: (_args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'aborted' }), { once: true })) })
     const stop = new AbortController()

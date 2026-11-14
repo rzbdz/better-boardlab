@@ -54,7 +54,7 @@ export function AttentionPanel({ state, onRun }: { state: PageState, onRun: Run 
             <p>{board.lab!.attention}</p>
           </div>
           <div className="actions">
-            {board.lab!.canConfirm && <button className="primary" onClick={() => onRun(`已告诉实验室：${board.name} 做完了`, () => api.confirm(board.name))}>我已完成</button>}
+            {board.lab!.canConfirm && <button className="primary" onClick={() => onRun(`已告诉实验室：${board.name} 做完了`, () => api.confirm(board.name, board.lab?.attentionRequest ?? null))}>我已完成</button>}
             <button onClick={() => setLater({ ...later, [board.name]: board.lab!.attention! })}>稍后</button>
           </div>
         </div>

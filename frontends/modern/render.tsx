@@ -44,7 +44,7 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   }
   const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? []])) })
   const go = async () => {
-    if (op.kind === 'open') { ui.layer(close => <><h2>{op.title}</h2><div className="mv" style={{ marginTop: 12 }}><Elements body={op.body()} ctx={ctx} onDone={close} /></div></>, 'wide'); return }
+    if (op.kind === 'open') { ui.layer(close => <><h2>{op.title}</h2><div className="mv" style={{ marginTop: 12 }}><OpenBody op={op} ctx={ctx} onDone={close} /></div></>, 'wide'); return }
     setBusy(true)
     try {
       const out = op.kind === 'action' ? await op.run(input())
@@ -56,6 +56,18 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
     ? ui.layer(close => <Confirm title={op.confirm!.title} ok={op.confirm!.action} danger={op.intent === 'danger'} close={close} onOk={() => void go()}>{plain(op.confirm!.body)}</Confirm>)
     : void go()
   return { trigger, busy, lines, fraction, step }
+}
+
+function OpenBody({ op, ctx, onDone }: { op: Extract<Operation, { kind: 'open' }>, ctx: Ctx, onDone: () => void }) {
+  const [body, setBody] = useState<Element[] | null>(op.load ? null : op.body())
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let live = true
+    if (op.load) void op.load().then(next => { if (live) setBody(next) }, reason => { if (live) setError((reason as Error).message) })
+    return () => { live = false }
+  }, [op])
+  if (error) return <p className="error">{error}</p>
+  return body ? <Elements body={body} ctx={ctx} onDone={onDone} /> : <p>正在读取主机选项…</p>
 }
 
 function OpButton({ op, ctx, values = () => ({}), onDone }: { op: Operation, ctx: Ctx, values?: () => Values, onDone?: () => void }) {

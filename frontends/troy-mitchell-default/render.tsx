@@ -53,6 +53,18 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   return { trigger, lines, fraction, running, opened, close: () => setOpened(false) }
 }
 
+function OpenBody({ op, ctx, onDone }: { op: Extract<Operation, { kind: 'open' }>, ctx: Ctx, onDone: () => void }) {
+  const [body, setBody] = useState<Element[] | null>(op.load ? null : op.body())
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let live = true
+    if (op.load) void op.load().then(next => { if (live) setBody(next) }, reason => { if (live) setError((reason as Error).message) })
+    return () => { live = false }
+  }, [op])
+  if (error) return <p className="error">{error}</p>
+  return body ? <Elements body={body} ctx={ctx} onDone={onDone} /> : <p>正在读取主机选项…</p>
+}
+
 function OperationButton({ op, ctx, values = () => ({}), onDone, submit }: { op: Operation, ctx: Ctx, values?: () => Values, onDone?: () => void, submit?: boolean }) {
   const run = useOperation(op, ctx, values, onDone)
   const cls = op.intent === 'primary' ? 'primary' : op.intent === 'danger' ? 'danger' : ''
@@ -68,7 +80,7 @@ function OperationButton({ op, ctx, values = () => ({}), onDone, submit }: { op:
       )}
       {run.opened && op.kind === 'open' && (
         <Dialog title={op.title} onClose={run.close} actions={<button onClick={run.close}>关闭</button>}>
-          <Elements body={op.body()} ctx={ctx} onDone={run.close} />
+          <OpenBody op={op} ctx={ctx} onDone={run.close} />
         </Dialog>
       )}
     </>

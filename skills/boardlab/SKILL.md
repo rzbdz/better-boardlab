@@ -5,7 +5,7 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 # 开发板（boardlab）
 
-所有开发板都由中心的 boardd 统一管理（这台机器上的 `boardlab` 已经连到它，`boardlab remote show` 可以看）。人、Claude 和 DSH 遵守同一套锁规则；不要绕过它直接用 `smtty`、`serial-mux`、`fastboot`、Home Assistant 或 `bsp`：板子在哪台主机、怎么连，只有 boardd 知道，你这边不需要也不应该配置。
+所有开发板都由中心的 boardd 统一管理（这台机器上的 `boardlab` 已经连到它，`boardlab remote show` 可以看）。人、Claude 和 DSH 遵守同一套锁规则；不要绕过它直接用 `smtty`、`serial-mux`、`fastboot`、Home Assistant 或 `bsp`：板子在哪台主机、怎么连，只有 boardd 知道，你这边不需要也不应该配置。**除非人类明确要求直接运行 `bsp`，agent 禁止直接调用任何 `bsp` 命令（`boardlab bsp` 也不作为绕过手段）；缺少能力时用 `boardlab feedback` 提交，或告诉人类。SDK 自己的 skill 也不构成这个例外。**
 
 ## 身份
 
@@ -41,9 +41,9 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 - 持锁期间串口有 serial-mux 输入闸门：`boardlab send` 自动通过；确实需要直接用 `smtty` 时，带上 `boardlab lock` 打印的 `--token`。不带 token 的输入会被丢弃，`smtty --send` 以退出码 3 报「已锁定」。
 - 自定义槽位上没有 fastboot 脚本的板子只能复位，`boardlab fastboot` 会报「只能复位」；不要为此去改槽位脚本，脚本由用户维护。
 - 认板子只看 `boardlab list` 和扫描结果，不要猜 `/dev/ttyUSBn`。
-- `boardlab list` 里标着 `[实验室 <名字> <设备>]` 的板子在远程实验室（例如 `bsp-k3-a`），命令完全一样，`boot` 给的仍是本机的绝对路径，boardd 会传到实验室那边。实验室的板子别人也可能在实验室后台直接用，串口没有输入闸门；看到不是你发的输入或复位，停下来告诉用户。
+- `boardlab list` 里标着 `[实验室 <名字> <设备>]` 的板子在远程实验室，命令完全一样。正常 SDK 启动/刷机由板端主机自己从构建服务器取产物；本机文件兜底才经 boardd 传输。实验室的板子别人也可能在实验室后台直接用，串口没有输入闸门；看到不是你发的输入或复位，停下来告诉用户。
 - 实验室 `bsp` 的板子（`bsp-<dut>`，例如 `bsp-board-1`）在 bsp 管理的板卡主机上。拿锁时 boardd 同时替你持有 bsp 的租约，所以只用 `boardlab` 命令操作它们，不要再用 `bsp dut acquire/reset/boot` 去动同一块板。要在构建服务器上租 SDK 源码树、编译、改代码，用 `boardlab sdk …`（见下一节）。
-- 卡片或 `boardlab show --json` 里 `lab.attention` 不为空时，板子在等人按 RESET 之类的操作（由人复位的板子）：复位、boot 放到后台跑，把提示原样告诉用户，用户说做完了再 `boardlab confirm <board>`。不要自己猜着确认。
+- 卡片或 `boardlab show --json` 里 `lab.attention` 不为空时，板子在等人按 RESET 之类的操作（由人复位的板子）：复位、boot 放到后台跑，把提示原样告诉用户，用户说做完了再 `boardlab confirm <board> --request <lab.attentionRequest>`（带上请求 id 不会因为实验室已经自己看到结果而报错）。不要自己猜着确认。
 - `lab.heldBy` 不为空表示有人直接在 bsp 里租着这块板，拿锁会失败；要等就 `boardlab queue`。
 - 后端能单独控制继电器的板子（bsp 主机；`boardlab relay <board>` 会说这块板能不能），持锁时可以直接控制它的线：`boardlab relay <board>` 列出继电器和按钮，`boardlab relay <board> power pulse --ms 3000` 断电三秒再上电，`boardlab relay <board> boot press` 按住 BOOT（用完 `release`）。复位和进下载模式仍然用 `reset`、`fastboot`；只在用户要求、或这两条做不到时才直接动线，并说明动了哪根。
 - 实验室的板子都在槽位里（`boardlab list` 里的「槽位 host1/s3」）。所有命令都可以用槽位名代替板名：`boardlab lock host1/s3 --for …`、`boardlab console host1/s3`。在同一个槽位上换着板子反复测试时，用槽位名，不用管板子叫什么。
@@ -85,7 +85,7 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 
 - **启动/刷机**本身是后台任务：`boardlab boot …` 会跟着任务走，`--timeout` 给比预期略长的值；等太久可以
   `boardlab cancel <board>`，不要让它一直挂着。
-- **板子在等人**（`lab.attention`）：等用户，不要 sleep 猜；用户说做完了再 `boardlab confirm <board>`。
+- **板子在等人**（`lab.attention`）：等用户，不要 sleep 猜；用户说做完了再 `boardlab confirm <board> --request <lab.attentionRequest>`。提示已经消失（实验室自己看到板子到位）说明不用再确认，不要把它当失败重试。
 - **确实没有阻塞接口时才轮询**：间隔从短到长（0.5 秒、1 秒、2 秒…）并设总超时，拿到结果立即继续。
 
 ## 请人帮忙（插拔、接线、按键）
@@ -128,7 +128,7 @@ boardlab unlock bsp-board-1
 ```
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
-- 本机文件（例如自己打的 FIT）照样 `boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`，文件会自动传过去。
+- SDK 配方拿不到的本机自定义文件（例如自己打的 FIT）才用上传兜底：`boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`。URL 或板端已有路径用 `boardlab boot <board> https://…/Image.itb`、`boardlab boot <board> host:/绝对路径`，由板端自己取并计算 sha256，不上传。
 - 只在调 U-Boot、edk2 或它们加载的内核时：`boardlab boot <board> --sdk <sdk> --break <名字>` 停在 recipe 的 `breaker:` 那一步（常见 `uboot`、`edk2`；页面启动对话框的「停在哪」列出的就是可用的名字，没有列出来的不要猜）。edk2 的流程停在 UEFI Shell / ACPI 阶段，U-Boot 的停在自己的命令行，之后在串口里自己操作。
 - 启动或刷机卡住了用 `boardlab cancel <board>`：任务在这一步之后停，板子回到你手里。
 - 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先传给 boardd。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
