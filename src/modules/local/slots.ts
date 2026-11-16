@@ -3,7 +3,7 @@
  * download mode. Each slot is driven by a slot driver of its kind (a Home Assistant controller, scripts), which modules
  * plug in; a slot whose driver is missing or switched off is not offered.
  */
-import type { Slot } from 'boardlab-core/shared/types.ts'
+import type { Slot } from '../../shared/local.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { BoardLab } from 'boardlab-core/core/lab.ts'
 import { str, type Row } from 'boardlab-core/core/text.ts'

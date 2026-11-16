@@ -3,7 +3,7 @@
  * `board_N_fastboot_mode` buttons). It keeps the slot table in step with the controller and can be switched off, which
  * hides its slots and never presses them.
  */
-import type { HaDiscovery, HaSettings } from 'boardlab-core/shared/types.ts'
+import type { HaDiscovery, HaSettings } from '../../shared/home-assistant.ts'
 import { required } from 'boardlab-core/core/api.ts'
 import { transaction } from 'boardlab-core/core/db.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'

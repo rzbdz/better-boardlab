@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
+import { sdkCommand as sdkStream } from '../../shared/bsp-client.ts'
 import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
 
 /** Where each agent reads skills from, under the home directory; the agent counts as installed when its own directory exists (as in `boardlab install -g`). */
@@ -101,7 +102,7 @@ async function sdkCommand({ client, argv, json, out }: CommandContext) {
   const at = args.findIndex((arg, index) => index > 0 && ['-o', '--output'].includes(args[index - 1]!))
   const target = at >= 0 ? resolve(args[at]!) : null
   if (at >= 0) args[at] = '@download'
-  const result = await client.sdk(args, json, write)
+  const result = await sdkStream(client, args, json, write)
   if (target && result.download) await client.fetchFile(result.download, target)
   process.exitCode = result.code
 }
@@ -147,7 +148,7 @@ async function runCatalog(client: BoardsClient, raw: string[], json: boolean) {
   const out = args.findIndex((arg, index) => index > 0 && ['-o', '--output'].includes(args[index - 1]!))
   const target = out >= 0 ? resolve(args[out]!) : null
   if (out >= 0) args[out] = '@download'
-  const result = await client.sdk(args, json, write, 'catalog')
+  const result = await sdkStream(client, args, json, write, 'catalog')
   if (target && result.download) await client.fetchFile(result.download, target)
   process.exitCode = result.code
 }
@@ -355,7 +356,7 @@ const bsp: Command = {
     // Any bsp command, run by boardd's bsp: the whole lab without installing or configuring bsp here.
     const args = argv.filter(arg => arg !== '--json')
     if (!args.length) return console.log('用法：boardlab bsp <bsp 的命令和参数>，例如 boardlab bsp hosts、boardlab bsp dut status <dut>、boardlab bsp job get <id> -r <主机>\n经 boardd 那边的 bsp 执行；拿板子请用 boardlab lock（直接在 bsp 里租的板子在 boardlab 里显示为实验室占用）。')
-    const result = await client.sdk(args, json, write, 'raw')
+    const result = await sdkStream(client, args, json, write, 'raw')
     process.exitCode = result.code
   },
 }

@@ -2,7 +2,7 @@
  * The `script-slots` module: control slots driven by shell scripts entered on the page, for anything else that can
  * power-cycle a board (a smart plug, a relay board). Without a fastboot script a slot can only reset its board.
  */
-import type { Slot } from 'boardlab-core/shared/types.ts'
+import type { Slot } from '../../shared/local.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import type { ScriptRunner } from '../local/hardware.ts'

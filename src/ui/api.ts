@@ -2,15 +2,17 @@
  * Browser access to boardd's API, for every frontend and for modules' UI parts. The page acts as the local user, so it
  * never handles lease tokens. Paths are relative, so a page also works behind a reverse proxy under `/boardlab/`.
  */
-import type { Action, BoardChannels, BoardDetail, HaSettings, LabPorts, LabSettings, Lease, LockResult, Scan, SendResult, Slot, State } from 'boardlab-core/shared/types.ts'
+import type { Action, BoardChannels, BoardDetail, LabPorts, LabSettings, Lease, LockResult, SendResult, State } from 'boardlab-core/shared/types.ts'
+import type { Scan, Slot } from '../shared/local.ts'
+import type { HaSettings } from '../shared/home-assistant.ts'
 import { sha256File } from './sha256.ts'
 
-/** The state as the page uses it: the parts modules keep are filled in when their module is not loaded. */
+/** The normalized page state, including the module-owned fields boardd adds when their modules are loaded. */
+export type PageState = State & { slots: Slot[], scan: Scan | null, ha: HaSettings | null }
+type RawPageState = State & Partial<Pick<PageState, 'slots' | 'scan' | 'ha'>>
+const page = (state: RawPageState): PageState => ({ ...state, slots: state.slots ?? [], scan: state.scan ?? null, ha: state.ha ?? null } as PageState)
 /** Actions and locks, and whatever modules add (`scans`). */
 export type History = { actions: Action[], leases: Lease[] } & Record<string, unknown>
-
-export type PageState = Omit<State, 'slots' | 'scan' | 'ha'> & { slots: Slot[], scan: Scan | null, ha: HaSettings | null }
-const page = (state: State): PageState => ({ ...state, slots: state.slots ?? [], scan: state.scan ?? null, ha: state.ha ?? null })
 
 /** The frontends this boardd serves, and choosing one for this browser (the page then reloads). */
 export interface FrontendList { default: string | null, current: string | null, frontends: Array<{ name: string, title: string }> }
@@ -128,7 +130,7 @@ function readModels(): Promise<string[]> {
 }
 
 export const api = {
-  state: () => call<State>('GET', 'api/state').then(page),
+  state: () => call<RawPageState>('GET', 'api/state').then(page),
   board: (name: string) => call<BoardDetail>('GET', `api/board?name=${encodeURIComponent(name)}`),
   /** Models people typed in themselves, most recent first: read once per page, `refresh` to read again. */
   models: (refresh = false) => { if (refresh) { modelsEpoch++; modelsCache = null; modelsRead = null } return readModels() },

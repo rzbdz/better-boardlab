@@ -1,5 +1,6 @@
 /** The local module's commands: scanning this machine's slots. */
-import type { Scan } from 'boardlab-core/shared/types.ts'
+import type { Scan } from '../../shared/local.ts'
+import { localClient } from '../../shared/local-client.ts'
 import { confirm, type Command, type CommandGroup } from 'boardlab-core/cli/command.ts'
 
 function printScan(scan: Scan) {
@@ -19,11 +20,12 @@ const scan: Command = {
     if (!flags.has('yes') && !(await confirm(`扫描会逐个按 fastboot、往内存加载诊断镜像并复位${scope.boards ? ` ${scope.boards.join(', ')}` : scope.slots ? `槽位 ${scope.slots.join(', ')}` : '所有槽位'}。继续？`))) {
       throw new Error('扫描需要确认（交互确认或 --yes）')
     }
-    let scan = await client.scan({ ...scope, confirmed: true })
+    const local = localClient(client)
+    let scan = await local.scan({ ...scope, confirmed: true })
     let shown = 0
     while (scan.status === 'running') {
       await new Promise(done => setTimeout(done, 1000))
-      scan = await client.scanStatus(scan.id)
+      scan = await local.scanStatus(scan.id)
       if (!json) for (const step of scan.steps.slice(shown)) console.error(`  ${step.slot === null ? '' : `[${step.slot}] `}${step.summary}`)
       shown = scan.steps.length
     }

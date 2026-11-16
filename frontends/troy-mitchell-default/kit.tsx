@@ -1,6 +1,7 @@
 /** The page's small pieces: formatting, labels, and the components every view uses. */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { Board, Lease, Proposal, Scan } from 'boardlab-core/shared/types.ts'
+import type { Board, Lease, Proposal } from 'boardlab-core/shared/types.ts'
+import type { Scan } from '../../src/shared/local.ts'
 
 /** A fixed tab, or `p/<id>` for a module's own page. */
 export type Tab = string

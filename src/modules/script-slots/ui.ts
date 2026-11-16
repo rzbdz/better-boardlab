@@ -4,7 +4,7 @@
  */
 import { call } from '../../ui/api.ts'
 import { action, open, text, type Element, type ModuleUi, type View } from '../../ui/contract.ts'
-import type { Slot } from 'boardlab-core/shared/types.ts'
+import type { Slot } from '../../shared/local.ts'
 
 const slotApi = {
   save: (input: { slot: number, label: string, resetScript: string, fastbootScript: string }) => call<Slot>('POST', 'api/slots/script', input),

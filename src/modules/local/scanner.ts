@@ -4,8 +4,8 @@
  * serial-mux daemon after its board, which is also how consoles come back after a reboot or a scan.
  */
 import { randomUUID } from 'node:crypto'
-import type { Proposal, ProposalKind, Scan, ScanRow } from 'boardlab-core/shared/types.ts'
-import { socOf } from 'boardlab-core/core/boards.ts'
+import type { Proposal } from 'boardlab-core/shared/types.ts'
+import { socFromProduct, type ProposalKind, type Scan, type ScanRow } from '../../shared/local.ts'
 import { transaction } from 'boardlab-core/core/db.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { BoardLab } from 'boardlab-core/core/lab.ts'
@@ -329,19 +329,19 @@ export class Scanner {
     switch (proposal.kind) {
       case 'new-board': {
         const product = (change.product as string | null) ?? null
-        db.prepare(`INSERT INTO boards(name, slot, product, soc, source, last_seen_at) VALUES(?,?,?,?,'scan',?)`).run(name, proposal.slot, product, product ? socOf(product) : null, seen)
+        db.prepare(`INSERT INTO boards(name, slot, product, soc, source, last_seen_at) VALUES(?,?,?,?,'scan',?)`).run(name, proposal.slot, product, product ? socFromProduct(product) : null, seen)
         writeChips(name, change.chips as ScanRow['chips'])
         break
       }
       case 'replace-board': {
         const product = String(change.product)
         db.prepare(`UPDATE boards SET product=?, soc=?, serial=NULL, base_mac=NULL, source='scan', last_seen_at=?, notes=COALESCE(notes || char(10), '') || ? WHERE name=?`)
-          .run(product, socOf(product), seen, `扫描 ${proposal.scanId.slice(0, 8)} 发现换板`, proposal.board)
+          .run(product, socFromProduct(product), seen, `扫描 ${proposal.scanId.slice(0, 8)} 发现换板`, proposal.board)
         writeChips(proposal.board!, change.chips as ScanRow['chips'])
         break
       }
       case 'product-changed':
-        db.prepare('UPDATE boards SET product=?, soc=?, last_seen_at=? WHERE name=?').run(String(change.product), socOf(String(change.product)), seen, proposal.board)
+        db.prepare('UPDATE boards SET product=?, soc=?, last_seen_at=? WHERE name=?').run(String(change.product), socFromProduct(String(change.product)), seen, proposal.board)
         if (change.name && name !== proposal.board) this.lab.boards.rename(proposal.board!, name)
         break
       case 'serial-moved':

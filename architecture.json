@@ -34,11 +34,24 @@
         "shared"
       ]
     },
+    "distribution-shared": {
+      "path": "src/shared",
+      "may": [
+        "core",
+        "shared"
+      ],
+      "typeOnly": [
+        "core",
+        "shared"
+      ],
+      "$comment": "the distribution's module wire contracts and the CLI adapters that use the core's generic client"
+    },
     "modules": {
       "path": "src/modules",
       "may": [
         "core",
-        "shared"
+        "shared",
+        "distribution-shared"
       ],
       "packages": [
         "yaml"
@@ -63,10 +76,12 @@
       ],
       "may": [
         "shared",
-        "ui-contract"
+        "ui-contract",
+        "distribution-shared"
       ],
       "typeOnly": [
-        "shared"
+        "shared",
+        "distribution-shared"
       ],
       "node": false,
       "packages": [],
@@ -78,7 +93,8 @@
       ],
       "may": [
         "shared",
-        "cli"
+        "cli",
+        "distribution-shared"
       ],
       "$comment": "a module's commands for the boardlab CLI: client code, beside the module but never using its server side"
     },
@@ -99,10 +115,12 @@
     "ui-contract": {
       "path": "src/ui",
       "may": [
-        "shared"
+        "shared",
+        "distribution-shared"
       ],
       "typeOnly": [
-        "shared"
+        "shared",
+        "distribution-shared"
       ],
       "node": false,
       "$comment": "the layer between modules and frontends: the view contract, the browser API client, and what every frontend shares (logs, notifications, the serial console, formatting)",
@@ -117,10 +135,12 @@
       "may": [
         "shared",
         "ui-contract",
-        "page-registry"
+        "page-registry",
+        "distribution-shared"
       ],
       "typeOnly": [
-        "shared"
+        "shared",
+        "distribution-shared"
       ],
       "node": false,
       "packages": [

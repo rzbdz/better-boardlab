@@ -4,7 +4,7 @@
  */
 import { call } from '../../ui/api.ts'
 import { action, notice, plain, text, type ModuleUi, type View } from '../../ui/contract.ts'
-import type { HaSettings } from 'boardlab-core/shared/types.ts'
+import type { HaSettings } from '../../shared/home-assistant.ts'
 
 const haApi = {
   configure: (url: string, token?: string) => call<HaSettings>('POST', 'api/ha', { url, token: token || undefined }),

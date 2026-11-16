@@ -1,7 +1,7 @@
 /** Home Assistant access. The token stays inside this module's caller and never appears in errors. */
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import type { HaDiscovery } from 'boardlab-core/shared/types.ts'
+import type { HaDiscovery } from '../../shared/home-assistant.ts'
 
 export interface HaConfig { url: string, token: string }
 

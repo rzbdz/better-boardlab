@@ -4,7 +4,7 @@
  */
 import { api, call } from '../../ui/api.ts'
 import { action, job, notice, text, type Element, type ModuleUi, type View } from '../../ui/contract.ts'
-import type { Scan, ScanRow } from 'boardlab-core/shared/types.ts'
+import type { Scan, ScanRow } from '../../shared/local.ts'
 
 const scanApi = {
   start: (slots: number[]) => call<Scan>('POST', 'api/scan', { slots, confirmed: true }),

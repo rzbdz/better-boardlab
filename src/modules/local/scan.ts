@@ -1,5 +1,5 @@
 /** One-click scan: map control slots to serial adapters, download ports and K3 product names. */
-import type { ScanRow } from 'boardlab-core/shared/types.ts'
+import type { ScanRow } from '../../shared/local.ts'
 import { diffUsb, type SerialAdapter, type UsbDevice } from './hardware.ts'
 
 export const K3_ROM_USB_ID = '361c:1001'
