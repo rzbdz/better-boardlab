@@ -38,13 +38,15 @@
       "path": "src/shared",
       "may": [
         "core",
-        "shared"
+        "shared",
+        "cli"
       ],
       "typeOnly": [
         "core",
-        "shared"
+        "shared",
+        "cli"
       ],
-      "$comment": "the distribution's module wire contracts and the CLI adapters that use the core's generic client"
+      "$comment": "distribution module wire contracts, CLI presentation and adapters over the core client"
     },
     "modules": {
       "path": "src/modules",
@@ -101,6 +103,7 @@
     "entry": {
       "paths": [
         "src/boardlab.ts",
+        "src/release.ts",
         "src/catalog.ts",
         "src/commands.ts"
       ],
@@ -108,7 +111,8 @@
         "cli",
         "module-cli",
         "module-catalog",
-        "server"
+        "server",
+        "distribution-shared"
       ],
       "$comment": "the CLI entry and the registries scripts/modules.mjs writes"
     },

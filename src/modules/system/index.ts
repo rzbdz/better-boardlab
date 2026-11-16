@@ -51,7 +51,7 @@ const mask = (token: string) => token.length > 8 ? `••••${token.slice(-4
 export interface Version { version: string, revision: string, source: string | null, latest: { version: string, revision: string } | null, checkedAt: string | null, error: string | null, updating: boolean, newer: boolean }
 
 /** `root`: the installed program (…/releases/<v>, `current` links it), found from the CLI's own place. */
-export function system(options: { root: string | null, ttlMs?: number, fetch?: (url: string, headers?: Record<string, string>) => Promise<string> }): Module {
+export function system(options: { root: string | null, release?: { version: string, revision: string }, ttlMs?: number, fetch?: (url: string, headers?: Record<string, string>) => Promise<string> }): Module {
   const ttl = options.ttlMs ?? 6 * 3600_000
   const read = (file: string) => { try { return readFileSync(file, 'utf8').trim() } catch { return null } }
   const root = options.root
@@ -77,8 +77,8 @@ export function system(options: { root: string | null, ttlMs?: number, fetch?: (
     id: 'system',
     title: '系统',
     setup(lab) {
-      const version = (root && read(join(root, 'VERSION'))) ?? 'dev'
-      const revision = (root && read(join(root, 'REVISION'))) ?? 'dev'
+      const version = (root && read(join(root, 'VERSION'))) ?? options.release?.version ?? 'dev'
+      const revision = (root && read(join(root, 'REVISION'))) ?? options.release?.revision ?? 'dev'
       let source = prefix ? read(join(prefix, 'release-source')) : null
       let latest: Version['latest'] = null, checkedAt: string | null = null, error: string | null = null, updating = false
       const state = (): Version => ({ version, revision, source, latest, checkedAt, error, updating, newer: !!latest && newerRelease(latest, { version, revision }) })

@@ -2,8 +2,10 @@
 import { createCli, runIfMain } from 'boardlab-core/cli/main.ts'
 import { CATALOG } from './catalog.ts'
 import { COMMAND_GROUPS } from './commands.ts'
+import { presentation } from './shared/cli-presentation.ts'
+import { distributionIdentity } from './release.ts'
 
-const cli = createCli({ groups: COMMAND_GROUPS, catalog: CATALOG })
+const cli = createCli({ groups: COMMAND_GROUPS, catalog: CATALOG, presentation, identity: distributionIdentity })
 export const main = cli.main
 export const usage = cli.usage
 runIfMain(cli, import.meta.url)

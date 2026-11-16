@@ -2,7 +2,7 @@
  * The fake bench the boardlab tests share: Home Assistant, serial-mux, USB, fastboot and slot scripts, all in memory,
  * behind a lab with this distribution's public modules. No test reaches real hardware.
  */
-import { afterEach, beforeEach } from 'vitest'
+import { afterAll, afterEach, beforeEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,7 @@ import { openDatabase } from 'boardlab-core/core/db.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
 import type { BootTiming } from 'boardlab-core/core/download.ts'
+import { socFromProduct } from '../src/shared/local.ts'
 import type { HaClient } from '../src/modules/home-assistant/client.ts'
 import type { ScriptRunner, SerialAdapter, UsbDevice } from '../src/modules/local/hardware.ts'
 import { local, type Hardware, type LocalApi, type Mux } from '../src/modules/local/index.ts'
@@ -39,6 +40,7 @@ export interface TestOptions {
 export function makeLab(options: TestOptions): BoardLab {
   return new BoardLab({
     db: options.db, now: options.now, sleep: options.sleep, firmwareDir: options.firmwareDir, filesDir: options.filesDir, bootTiming: options.bootTiming,
+    socFromProduct,
     modules: [
       local({ mux: options.mux, hardware: options.hardware, scanTiming: options.scanTiming }),
       haModule({ client: options.ha }),
@@ -101,9 +103,9 @@ export class Bench {
     discover: async () => ({ devices: [], slots: [], unassigned: [] }),
   }
 
-  options(db = openDatabase(join(mkdtempSync(join(tmpdir(), 'boards-')), 'b.sqlite'))): TestOptions {
+  options(db?: ReturnType<typeof openDatabase>): TestOptions {
     return {
-      db, ha: this.ha,
+      db: db ?? openDatabase(join(dir, 'bench.sqlite')), ha: this.ha,
       mux: {
         open: async (alias, token) => {
           const listeners = new Set<(data: Buffer) => void>()
@@ -176,9 +178,15 @@ export class Bench {
 
 /** A fresh scratch directory for each test of the file that calls this; `dir` is it. */
 export let dir: string
+/** Remove test state even when a worker exits before afterEach (for example an installer assertion). */
+process.on('exit', () => {
+  if (dir) rmSync(dir, { recursive: true, force: true })
+})
+
 export function useTempDir() {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boards-')) })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); dir = '' })
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
 }
 
 /** Ship a firmware file the way firmware/ does: the file plus its firmware.json entry. */

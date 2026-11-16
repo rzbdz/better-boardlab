@@ -8,15 +8,8 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
 import { sdkCommand as sdkStream } from '../../shared/bsp-client.ts'
+import { installedAgentSkills, noAgentsMessage } from 'boardlab-core/cli/agents.ts'
 import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
-
-/** Where each agent reads skills from, under the home directory; the agent counts as installed when its own directory exists (as in `boardlab install -g`). */
-const AGENT_SKILLS: Array<{ agent: string, home: string, skills: string }> = [
-  { agent: 'Claude Code', home: '.claude', skills: '.claude/skills' },
-  { agent: 'codex', home: '.codex', skills: '.codex/skills' },
-  { agent: 'opencode', home: '.config/opencode', skills: '.config/opencode/skill' },
-  { agent: 'hermes', home: '.hermes', skills: '.hermes/skills/embedded' },
-]
 
 interface SkillSummary { id: string, layer: string, file: string, title: string }
 interface SkillText { id: string, layer: string, text: string }
@@ -72,9 +65,9 @@ async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out:
   const installed: string[] = []
   if (global) {
     const home = process.env.HOME ?? homedir()
-    const agents = AGENT_SKILLS.filter(agent => existsSync(join(home, agent.home)))
-    if (!agents.length) throw new BoardsApiError(400, `这台机器上没找到 agent（${AGENT_SKILLS.map(agent => `~/${agent.home}`).join('、')} 都不存在）；去掉 -g 装到当前目录`, 'invalid')
-    for (const agent of agents) { const file = join(home, agent.skills, id, 'SKILL.md'); put(file); installed.push(file) }
+    const agents = installedAgentSkills(home)
+    if (!agents.length) throw new BoardsApiError(400, noAgentsMessage('去掉 -g 装到当前目录'), 'invalid')
+    for (const agent of agents) { const file = join(agent.directory, id, 'SKILL.md'); put(file); installed.push(file) }
   } else {
     const file = join(resolve(dir ?? '.'), '.claude', 'skills', id, 'SKILL.md')
     put(file); installed.push(file)

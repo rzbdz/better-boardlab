@@ -10,7 +10,7 @@ import { dir, useTempDir } from './fakes.ts'
 useTempDir()
 
 /** What boardd gives a catalog entry, with nothing shipped beside the tests. */
-const context = (): ModuleContext => ({ stateDir: dir, shipped: () => null, timing: {} })
+const context = (): ModuleContext => ({ stateDir: dir, shipped: () => null, timing: {}, release: { version: 'test', revision: 'test' } })
 const ids = CATALOG.map(entry => entry.id)
 
 describe('boardd configuration', () => {
