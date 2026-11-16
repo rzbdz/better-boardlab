@@ -1,5 +1,5 @@
 {
-  "$comment": "This distribution's web frontends: each is a whole page of its own in frontends/<name>/ (entry page.tsx, index.html, styles.css). boardd serves the default; each browser can switch in the settings page.",
+  "$comment": "This distribution's web frontends: each is a whole page of its own in frontends/<name>/ (entry page.tsx, index.html, styles.css). The boardd settings page selects the frontend served to every browser.",
   "default": "modern",
   "frontends": [
     {

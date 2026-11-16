@@ -49,7 +49,7 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
     try {
       const out = op.kind === 'action' ? await op.run(input())
         : (setLines([]), setFraction(null), setStep(null), await op.start(input(), { line, progress: setFraction }, new AbortController().signal))
-      ui.toast(out.message || `${op.label}：好了`); onDone?.()
+      ui.toast(out.message || `${op.label}：操作成功`); onDone?.()
     } catch (error) { ui.fail(`${op.label}失败`, error) } finally { await refreshNow().catch(() => {}); setBusy(false) }
   }
   const trigger = () => op.confirm

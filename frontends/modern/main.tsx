@@ -166,7 +166,7 @@ function Shell() {
     </div></header>
     {state && attn.length > 0 && page !== 'board' && <div className="banner">{attn.map(b => <Banner key={b.name} board={b} you={state.you} fresh={!seen.current.has(b.name)} />)}</div>}
     {state && ((state as unknown as { human?: { open: number, items: Array<{ title: string }> } }).human?.open ?? 0) > 0 && !(page === 'p' && where_.arg === 'human') && (
-      <div className="banner"><div className="b"><Icon name="hand" /><div className="msg"><b>有人请你帮忙</b> {(state as unknown as { human?: { items: Array<{ title: string }> } }).human?.items[0]?.title} <span className="sub">· 还有 {(state as unknown as { human?: { open: number } }).human!.open} 件</span></div>
+      <div className="banner"><div className="b"><Icon name="hand" /><div className="msg"><b>人工操作请求</b> {(state as unknown as { human?: { items: Array<{ title: string }> } }).human?.items[0]?.title} <span className="sub">· 共 {(state as unknown as { human?: { open: number } }).human!.open} 件待处理</span></div>
         <span className="acts"><button className="pill sm dark" onClick={() => go('#/p/human')}>去看看</button></span></div></div>)}
     {state && (state.yields ?? []).length > 0 && <div className="banner">{state.yields.map(y => (
       <div key={y.id} className="b"><Icon name="hand" /><div className="msg"><b>{holder(y.holder).name}</b> 想用 <b>{upper(y.board)}</b>（{y.purpose}）· 拿锁的是你</div>

@@ -145,7 +145,7 @@ boardlab sdk skill <sdk> --install --dir DIR # 写到 DIR/.claude/skills/<sdk>/S
 boardlab sdk skill <sdk> --install -g        # 写到这台机器上每个装了的 agent 的 skill 目录
 ```
 
-没有就是没有（会列出有的 id），不要猜内容。
+列表中没有的 SDK 说明不存在；只使用列表返回的 id，不要猜测其内容。
 
 ## 给 SDK 加启动或刷机方法
 

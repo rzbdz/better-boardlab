@@ -32,7 +32,7 @@ export const ui: ModuleUi = {
       id: 'human', slot: 'page', title: '人工请求',
       status: inbox ? { tone: inbox.open ? 'warn' : 'ok', text: inbox.open ? `${inbox.open} 件在等人` : '没有等人' } : undefined,
       body: [
-        text('使用 boardlab 的 AI 做不到板子外面的事时（插拔线、接板子、按按钮、按住 BOOT 再按 RESET），会在这里请你帮忙，写上要做的事和做完是什么样。你做完点「我做好了」，AI 那边就会继续；做不了就点「做不了」并写一句原因。'),
+        text('需要现场操作的请求（插拔线、接板子、按按钮、按住 BOOT 再按 RESET）由 boardlab ask 创建，说明操作步骤和可验证的完成条件。完成后点「我做好了」；无法完成时点「做不了」并填写原因。请求结果会返回给发起方，物理操作的结果仍需由发起方验证。'),
         {
           kind: 'list', empty: '现在没有需要人做的事',
           items: items.map(item => ({

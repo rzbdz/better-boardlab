@@ -1,7 +1,7 @@
 /**
- * Help for the page's parts, shared by every frontend: the help pages boardd serves (`api/docs`), the prompt a person
- * copies into an AI assistant to get help setting a part up (its help page, where boardd is, the CLI commands, how it is
- * set up now), and copying text on pages served over plain http, where the clipboard API is not there.
+ * Help for the page's parts, shared by every frontend: the help pages boardd serves (`api/docs`), a prompt containing
+ * setup context and suggested instructions for an AI assistant (its help page, boardd address, CLI commands and current
+ * configuration), and clipboard support on pages where the asynchronous clipboard API is unavailable.
  */
 import { call } from './api.ts'
 import type { View } from './contract.ts'
@@ -21,21 +21,21 @@ export function boarddAddress(): string {
 
 const fence = (text: string) => `\`\`\`\n${text.trim()}\n\`\`\``
 
-/** The prompt for an AI assistant about `view`: what it is, where boardd is, its commands, its help page, how it is now. */
+/** Build a prompt with context and suggested instructions for an AI assistant; following them is not guaranteed. */
 export async function hintPrompt(view: Pick<View, 'title' | 'help' | 'hint'>): Promise<string> {
   const hint = view.hint ?? {}
   const page = view.help ? await help.get(view.help).catch(() => null) : null
-  const context = hint.context ? await Promise.resolve(hint.context()).catch(error => `（读不到：${(error as Error).message}）`) : ''
+  const context = hint.context ? await Promise.resolve(hint.context()).catch(error => `（读取失败：${(error as Error).message}）`) : ''
   const address = boarddAddress()
   return [
-    `我在配置 boardlab（开发板实验室）里的「${view.title ?? view.help ?? '这一部分'}」，请帮我把它配好。`,
+    `以下是配置 boardlab（开发板实验室）「${view.title ?? view.help ?? '这一部分'}」的上下文和建议指令。`,
     '',
-    `boardlab 的服务 boardd 在 ${address || '（这台 boardd 的网页地址）'}，它的网页上就能改这些设置。在装了 boardlab 命令行的机器上，先 \`boardlab remote set ${address || '<boardd 地址>'}\`（或者 ssh://用户@主机），就能用命令行做同样的事${hint.commands?.length ? '：' : '。'}`,
+    `boardlab 的服务 boardd 地址为 ${address || '（这台 boardd 的网页地址）'}，可通过网页修改这些设置。在安装了 boardlab 命令行的机器上，先执行 \`boardlab remote set ${address || '<boardd 地址>'}\`（或者 ssh://用户@主机），即可使用对应的命令行操作${hint.commands?.length ? '：' : '。'}`,
     ...(hint.commands ?? []).map(command => `- \`${command}\``),
-    ...(page ? ['', '这一部分的说明：', '', page.text.trim()] : []),
-    ...(context.trim() ? ['', '现在的配置（不含密码、令牌）：', '', fence(context)] : []),
+    ...(page ? ['', '这一部分的帮助文档：', '', page.text.trim()] : []),
+    ...(context.trim() ? ['', '当前配置（不含密码、令牌）：', '', fence(context)] : []),
     '',
-    `请一次只问我一个问题，弄清楚我的情况；问完以后给出${hint.produce ?? '要写的 YAML 或要跑的命令'}，并说明放在页面上哪里，或者用哪条命令放进去。不清楚的地方问我，不要猜。`,
+    `建议一次只问我一个问题，先了解实际环境，再给出${hint.produce ?? '要写的 YAML 或要执行的命令'}，并说明对应的页面位置或执行命令。信息不明确时应继续询问，不要猜测。这些指令仅是建议；AI 助手不保证遵循，也不保证生成的配置正确。`,
   ].join('\n')
 }
 

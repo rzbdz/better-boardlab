@@ -1,4 +1,4 @@
-/** Formatting shared by the Ant Design frontend's views. */
+/** Formatting shared by frontend views. */
 import type { Board } from 'boardlab-core/shared/types.ts'
 
 const pad = (n: number) => String(n).padStart(2, '0')
