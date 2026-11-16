@@ -26,40 +26,34 @@ pnpm test
 node scripts/release.mjs --source https://github.com/rzbdz/better-boardlab/releases/latest/download
 ```
 
-`release.mjs` defaults to the version in `package.json` and the `release/` output directory. `--version` and `--out`
-override those values; `--since` sets the changelog base explicitly. Unless `--no-build` is explicitly used, the script
-rebuilds the checkout, checks that the resulting CLI starts, and refuses uncommitted changes in release inputs.
+`release.mjs` requires the version in `package.json`. `--out` selects the output directory and `--since` sets the changelog base explicitly. Unless `--no-build` is explicitly used, the script rebuilds the checkout, checks that the resulting CLI starts, and refuses uncommitted changes in release inputs.
 
 The output directory contains:
 
 - `boardlab-<version>.tar.gz`, containing the built CLI and frontends, public help and skills, license, installer, and
   the bsp files needed on board hosts;
 - `install.sh`, the bootstrap installer with the selected release source;
-- `release.json`, recording the distribution version, source revision, tarball filename, and SHA-256 digest;
+- `release.json`, recording the distribution version, full source revision, tarball filename, SHA-256 digest, and the tagged core version and full revision;
 - `CHANGELOG.md`, generated from commit subjects since the previous release or an explicit base.
+
+The tarball also contains `VERSION`, `REVISION`, `CORE_VERSION`, and `CORE_REVISION`. Before archiving, the staged CLI must report the same distribution version and full revision.
 
 The build outputs are release artifacts, not files to commit to the source repository.
 
 ## Publishing and provenance
 
 `scripts/publish.mjs git <repository>` publishes the generated files on a replaceable release branch, including the
-changelog, and creates a `v<version>` tag where tagging succeeds.
+changelog. Stable publication requires an existing signed `v<version>` source tag that identifies the full revision in
+`release.json`; publication never creates, moves, or deletes that tag.
 
 `scripts/publish.mjs github <owner/repo>` creates a GitHub release named `v<version>` with the tarball, `release.json`,
-and `install.sh`; the generated changelog becomes its release notes. GitHub publishing currently marks the release as
-latest and does not set the prerelease flag from the version string. Do not treat an RC version string alone as proof
-that publication was RC-safe.
-
-The intended stable-release contract is that a validated release's version, source revision, artifacts, checksum, and
-provenance remain consistent and its stable tag is not moved. The current publish tooling does not enforce immutable
-tags or prevent republishing, so review the target and generated metadata before every publication. RCs should be built
-and validated on a test installation without being presented as stable releases.
+and `install.sh`; the generated changelog becomes its release notes. Only stable versions can be published. Build and
+validate RCs on a test installation without publishing them as stable releases.
 
 ## Retention
 
-GitHub publishing keeps the newest three non-draft releases by creation time by default and deletes older releases,
-their assets, and their tags. `--keep <number>` changes that count for a publication run. This automatic pruning can
-remove an older tag even though release provenance should otherwise be treated as stable.
+GitHub publishing keeps the newest three non-draft releases by creation time by default and deletes older releases
+and their assets without deleting their source tags. `--keep <number>` changes that count for a publication run.
 
 A git release branch is force-replaced by each publication; its old branch commits are not a retention mechanism.
 Service installation and updates retain the three newest directories under the installation's `releases/` directory,

@@ -89,6 +89,36 @@ fi
 # The release, unpacked by install.sh.
 [ -n "$UNPACKED" ] && [ -f "$UNPACKED/VERSION" ] || die "setup.sh installs a release install.sh has unpacked: run install.sh --from <source>"
 DIR=$UNPACKED; VERSION=$(cat "$DIR/VERSION"); REV=$(cat "$DIR/REVISION")
+# New packages carry explicit distribution metadata. Historical packages without package.json remain installable;
+# the bootstrap preserves a managed source's release.json for this check but does not interpret new fields itself.
+if [ -f "$DIR/package.json" ]; then
+  "$NODE" $FLAGS - "$DIR" <<'NODE' || exit 1
+const fs = require('fs')
+const path = require('path')
+const root = process.argv[2]
+const fail = message => { console.error(`!! ${message}`); process.exit(1) }
+const read = file => { try { return fs.readFileSync(path.join(root, file), 'utf8').trim() } catch { return '' } }
+const version = read('VERSION'), revision = read('REVISION')
+if (!/^0\.\d+\.\d+(?:rc[1-9]\d*)?$/.test(version)) fail('release VERSION is missing or invalid')
+if (!/^[0-9a-f]{40}$/.test(revision)) fail('release REVISION is missing or not a full source revision')
+let manifest
+try { manifest = JSON.parse(read('package.json')) } catch { fail('release package.json is not valid JSON') }
+if (manifest.name !== 'boardlab' || manifest.version !== version) fail('release package.json does not match VERSION')
+const expected = `boardlab-${version}.tar.gz`
+if (path.basename(root) !== `boardlab-${version}` && path.basename(root) !== `${version}-${revision}`) {
+  fail(`release directory does not match VERSION (expected ${expected})`)
+}
+const sourceFile = path.join(root, '.release-source.json')
+if (fs.existsSync(sourceFile)) {
+  let source
+  try { source = JSON.parse(fs.readFileSync(sourceFile, 'utf8')) } catch { fail('managed release.json is not valid JSON') }
+  if (source.version !== version || source.revision !== revision || source.file !== expected) {
+    fail('managed release.json does not match the unpacked release identity')
+  }
+}
+NODE
+  rm -f "$DIR/.release-source.json"
+fi
 NOW=$(readlink -f "$PREFIX/current" 2>/dev/null || true)
 if [ -n "$NOW" ] && [ "$(cat "$NOW/REVISION" 2>/dev/null)" = "$REV" ] && [ -z "$FORCE" ]; then say "boardlab $VERSION ($REV) is already installed"; exit 0; fi
 say "installing boardlab $VERSION ($REV) in $PREFIX"

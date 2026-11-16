@@ -22,4 +22,5 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm check
       - run: pnpm run build
+      - run: pnpm exec vitest run tests/release-identity.spec.ts tests/core-version.spec.ts --maxWorkers=1
       - run: pnpm test -- --maxWorkers=2

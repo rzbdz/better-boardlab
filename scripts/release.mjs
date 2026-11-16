@@ -7,8 +7,8 @@
  *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>] [--since <ref>]
  *
  * Writes <out>/boardlab-<version>.tar.gz, <out>/install.sh, <out>/CHANGELOG.md (what changed since the previous release,
- * which publish.mjs puts on the release) and <out>/release.json ({version, revision, file, sha256}), which install.sh and
- * `boardlab update` read; scripts/publish.mjs puts it where they fetch it from.
+ * which publish.mjs puts on the release) and <out>/release.json ({version, revision, file, sha256, core}), which
+ * install.sh and `boardlab update` read; scripts/publish.mjs puts it where they fetch it from.
  */
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -16,17 +16,27 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { changelog, previousRelease, subjectsSince } from './changelog.mjs'
+import { checkCoreVersion } from './check-core-version.mjs'
+import { releaseMetadata, releaseVersion, verifyStagedRelease } from './release-metadata.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const option = name => { const at = args.indexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined }
 const out = resolve(option('out') ?? join(root, 'release'))
-const version = option('version') ?? JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+const version = releaseVersion(packageVersion, option('version'))
 // Where this release will be published: install.sh fetches from there when not told otherwise, and boardd looks there
 // for newer releases (a release URL directory, or `git@host:group/repo.git#release`).
 const source = option('source') ?? ''
 const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim()
-const revision = git('rev-parse', '--short', 'HEAD')
+const revision = git('rev-parse', 'HEAD')
+if (!version.includes('rc')) {
+  const tag = `v${version}`
+  const tagged = git('rev-parse', `${tag}^{commit}`)
+  if (tagged !== revision) throw new Error(`${tag} must identify HEAD ${revision} for a stable release`)
+  execFileSync('git', ['verify-tag', tag], { cwd: root, stdio: 'inherit' })
+}
+const core = checkCoreVersion({ root })
 // Always from a fresh build of this very tree: a release must never carry an older dist/.
 if (!args.includes('--no-build')) { rmSync(join(root, 'dist'), { recursive: true, force: true }); execFileSync('pnpm', ['run', 'build'], { cwd: root, stdio: 'inherit' }) }
 if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/frontends.json'))) throw new Error('the build made no dist/')
@@ -44,14 +54,13 @@ if (existsSync(join(root, 'firmware'))) files.push('firmware')
 if (existsSync(join(root, 'host-tools'))) files.push('host-tools')
 // Certificates this distribution carries (the internal one's CA module), if any.
 if (existsSync(join(root, 'ca'))) files.push('ca')
-execFileSync('tar', ['-cf', '-', ...files], { cwd: root, maxBuffer: 1 << 30 }).length
 execFileSync('sh', ['-c', `tar -cf - ${files.join(' ')} | tar -xf - -C '${stage}'`], { cwd: root })
 // The bsp tree board hosts are set up from: the files git tracks there, with serial-mux's.
 const bsp = join(root, 'externals/bsp')
 if (existsSync(join(bsp, 'deploy/bspd-install.sh'))) {
   mkdirSync(join(stage, 'externals/bsp'), { recursive: true })
   execFileSync('sh', ['-c', `git ls-files -z --recurse-submodules | tar --null -cf - -T - | tar -xf - -C '${join(stage, 'externals/bsp')}'`], { cwd: bsp })
-  writeFileSync(join(stage, 'externals/bsp/REVISION'), execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
+  writeFileSync(join(stage, 'externals/bsp/REVISION'), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
 }
 writeFileSync(join(stage, 'VERSION'), `${version}\n`)
 // Modules this distribution has on top of the shared ones (the internal one's CA module), for the installer to load.
@@ -62,7 +71,10 @@ const installer = readFileSync(join(root, 'scripts/install.sh'), 'utf8').replace
 writeFileSync(join(stage, 'install.sh'), installer, { mode: 0o755 })
 writeFileSync(join(stage, 'setup.sh'), readFileSync(join(root, 'scripts/setup.sh'), 'utf8'), { mode: 0o755 })
 writeFileSync(join(stage, 'REVISION'), `${revision}\n`)
+writeFileSync(join(stage, 'CORE_VERSION'), `${core.version}\n`)
+writeFileSync(join(stage, 'CORE_REVISION'), `${core.revision}\n`)
 writeFileSync(join(stage, 'package.json'), JSON.stringify({ name: 'boardlab', version, type: 'module', private: true }, null, 2))
+verifyStagedRelease({ stage, version, revision, core })
 const file = `boardlab-${version}.tar.gz`
 execFileSync('tar', ['-czf', join(out, file), '-C', out, `boardlab-${version}`])
 rmSync(stage, { recursive: true, force: true })
@@ -73,6 +85,6 @@ const sha256 = createHash('sha256').update(readFileSync(join(out, file))).digest
 const previous = previousRelease(root, out)
 const since = option('since') ?? previous?.revision ?? ''
 writeFileSync(join(out, 'CHANGELOG.md'), changelog(version, revision, subjectsSince(since, 'HEAD', root), { since: previous?.version ?? option('since') }))
-writeFileSync(join(out, 'release.json'), JSON.stringify({ version, revision, file, sha256 }, null, 2) + '\n')
+writeFileSync(join(out, 'release.json'), JSON.stringify(releaseMetadata({ version, revision, file, sha256, core }), null, 2) + '\n')
 writeFileSync(join(out, 'install.sh'), installer, { mode: 0o755 })
 console.log(`release ${version} (${revision}): ${join(out, file)} sha256 ${sha256.slice(0, 16)}…`)

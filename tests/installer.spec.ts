@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { dir, useTempDir } from './fakes.ts'
@@ -18,29 +18,30 @@ const installer = join(import.meta.dirname, '../scripts/install.sh')
 const setup = join(import.meta.dirname, '../scripts/setup.sh')
 
 /** A release tarball holding a CLI that prints its version, with both the bootstrap install.sh and its setup.sh. */
-function release(version: string, revision = 'abc1234') {
+function release(version: string, revision = 'a'.repeat(40), metadata: { manifest?: boolean, legacyRevision?: boolean } = {}) {
   const stage = join(dir, 'stage', `boardlab-${version}`)
   mkdirSync(join(stage, 'dist'), { recursive: true })
   writeFileSync(join(stage, 'dist/cli.js'), `console.log('cli ${version}', process.argv.slice(2).join(' '))\n`)
-  writeFileSync(join(stage, 'VERSION'), `${version}\n`); writeFileSync(join(stage, 'REVISION'), `${revision}\n`)
+  writeFileSync(join(stage, 'VERSION'), `${version}\n`); writeFileSync(join(stage, 'REVISION'), `${metadata.legacyRevision ? revision : revision.padEnd(40, '0').slice(0, 40)}\n`)
+  if (metadata.manifest !== false) writeFileSync(join(stage, 'package.json'), JSON.stringify({ name: 'boardlab', version, private: true }))
   writeFileSync(join(stage, 'install.sh'), readFileSync(installer))
   writeFileSync(join(stage, 'setup.sh'), readFileSync(setup))
   const file = join(dir, `boardlab-${version}.tar.gz`)
   return new Promise<{ file: string, json: string }>((resolve, reject) => execFile('tar', ['-czf', file, '-C', join(dir, 'stage'), `boardlab-${version}`], error => {
     if (error) return reject(error)
     const sha256 = createHash('sha256').update(readFileSync(file)).digest('hex')
-    resolve({ file, json: JSON.stringify({ version, revision, file: `boardlab-${version}.tar.gz`, sha256 }) })
+    resolve({ file, json: JSON.stringify({ version, revision: metadata.legacyRevision ? revision : revision.padEnd(40, '0').slice(0, 40), file: `boardlab-${version}.tar.gz`, sha256 }) })
   }))
 }
 
 /** A release directory source: release.json and the tarball it names, in their own directory. */
-async function releaseDir(version: string, revision = 'abc1234') {
-  const { file, json } = await release(version, revision)
-  const srcDir = join(dir, `src-${version}`)
-  mkdirSync(srcDir, { recursive: true })
-  writeFileSync(join(srcDir, 'release.json'), json)
-  writeFileSync(join(srcDir, `boardlab-${version}.tar.gz`), readFileSync(file))
-  return srcDir
+async function releaseDir(version: string, revision = 'a'.repeat(40), metadata: { manifest?: boolean, legacyRevision?: boolean } = {}) {
+  const { file, json } = await release(version, revision, metadata)
+  const source = join(dir, `src-${version}`)
+  mkdirSync(source, { recursive: true })
+  writeFileSync(join(source, 'release.json'), json)
+  writeFileSync(join(source, `boardlab-${version}.tar.gz`), readFileSync(file))
+  return source
 }
 
 /** A project API serving a project's files from its release branch, to the right token only. */
@@ -174,5 +175,52 @@ describe('install.sh', () => {
       expect(done.out).toContain('sha256 does not match')
       expect(existsSync(join(dir, 'home/.local/bin/boardlab'))).toBe(false)
     } finally { api.close() }
+  })
+
+  it('keeps historical release packages without new identity metadata installable', async () => {
+    const done = await run(['--from', await releaseDir('0.9.4', 'abc1234', { manifest: false, legacyRevision: true })])
+    expect(done.code).toBe(0)
+    expect(done.out).toContain('boardlab 0.9.4 CLI is in')
+  })
+
+  it('refuses inconsistent identity in a new managed release', async () => {
+    const cases = [
+      ['VERSION', '0.9.6\n', /package\.json does not match VERSION|release\.json does not match/],
+      ['REVISION', 'short\n', /REVISION is missing or not a full source revision/],
+      ['package.json', '{ invalid', /package\.json is not valid JSON/],
+    ] as const
+    for (const [index, [file, content, message]] of cases.entries()) {
+      const src = await releaseDir(`0.9.${index + 10}`)
+      const version = `0.9.${index + 10}`
+      const stage = join(dir, `stage/boardlab-${version}`)
+      writeFileSync(join(stage, file), content)
+      execFileSync('tar', ['-czf', join(src, `boardlab-${version}.tar.gz`), '-C', join(dir, 'stage'), `boardlab-${version}`])
+      const metadata = JSON.parse(readFileSync(join(src, 'release.json'), 'utf8'))
+      metadata.sha256 = createHash('sha256').update(readFileSync(join(src, `boardlab-${version}.tar.gz`))).digest('hex')
+      writeFileSync(join(src, 'release.json'), JSON.stringify(metadata))
+      const done = await run(['--from', src])
+      expect(done.code).not.toBe(0)
+      expect(done.out).toMatch(message)
+    }
+    const src = await releaseDir('0.9.20')
+    const metadata = JSON.parse(readFileSync(join(src, 'release.json'), 'utf8'))
+    metadata.revision = 'f'.repeat(40)
+    writeFileSync(join(src, 'release.json'), JSON.stringify(metadata))
+    const done = await run(['--from', src])
+    expect(done.code).not.toBe(0)
+    expect(done.out).toContain('managed release.json does not match')
+  })
+
+  it('refuses ambiguous package directories in a tarball', async () => {
+    const src = await releaseDir('0.9.6')
+    const stage = join(dir, 'stage')
+    cpSync(join(stage, 'boardlab-0.9.6'), join(stage, 'boardlab-copy'), { recursive: true })
+    execFileSync('tar', ['-czf', join(src, 'boardlab-0.9.6.tar.gz'), '-C', stage, 'boardlab-0.9.6', 'boardlab-copy'])
+    const metadata = JSON.parse(readFileSync(join(src, 'release.json'), 'utf8'))
+    metadata.sha256 = createHash('sha256').update(readFileSync(join(src, 'boardlab-0.9.6.tar.gz'))).digest('hex')
+    writeFileSync(join(src, 'release.json'), JSON.stringify(metadata))
+    const done = await run(['--from', src])
+    expect(done.code).not.toBe(0)
+    expect(done.out).toContain('expected exactly one boardlab-<version> directory, found 2')
   })
 })

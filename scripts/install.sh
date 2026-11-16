@@ -94,8 +94,13 @@ else
   [ "$(sha256sum "$TMP/boardlab.tar.gz" | cut -d' ' -f1)" = "$SUM" ] || die "the tarball's sha256 does not match release.json"
 fi
 mkdir "$TMP/x"; tar -xzf "$TMP/boardlab.tar.gz" -C "$TMP/x" || die "could not unpack the release from $SRC"
-DIR=$(ls -d "$TMP"/x/boardlab-* 2>/dev/null | head -n 1)
-[ -n "$DIR" ] && [ -f "$DIR/VERSION" ] || die "not a boardlab release: $SRC"
+COUNT=$(find "$TMP/x" -mindepth 1 -maxdepth 1 -type d -name 'boardlab-*' | wc -l)
+[ "$COUNT" -eq 1 ] || die "not a boardlab release: expected exactly one boardlab-<version> directory, found $COUNT"
+DIR=$(find "$TMP/x" -mindepth 1 -maxdepth 1 -type d -name 'boardlab-*')
+[ -f "$DIR/VERSION" ] || die "not a boardlab release: $SRC"
+# The release's setup.sh validates this managed-source metadata with the unpacked identity. A historical setup.sh
+# simply ignores it; direct tarball installation has no release.json to validate.
+if [ "$KIND" != tarball ]; then cp "$TMP/release.json" "$DIR/.release-source.json" || die "could not preserve release metadata"; fi
 
 # The release's own installer. A release from before setup.sh existed has it all in its install.sh, which fetches
 # the release again itself.
