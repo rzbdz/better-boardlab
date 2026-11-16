@@ -14,7 +14,7 @@ const page = (state: RawPageState): PageState => ({ ...state, slots: state.slots
 /** Actions and locks, and whatever modules add (`scans`). */
 export type History = { actions: Action[], leases: Lease[] } & Record<string, unknown>
 
-/** The frontends this boardd serves, and choosing one for this browser (the page then reloads). */
+/** The frontends this boardd offers, and selecting the one it serves to every browser (the page then reloads). */
 export interface FrontendList { default: string | null, current: string | null, frontends: Array<{ name: string, title: string }> }
 export const frontends = {
   list: () => call<FrontendList>('GET', 'api/frontends'),

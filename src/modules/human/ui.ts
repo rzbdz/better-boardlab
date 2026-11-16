@@ -29,7 +29,7 @@ export const ui: ModuleUi = {
     const inbox = (state as PageState & { human?: Inbox }).human
     const items = inbox?.items ?? []
     return [{
-      id: 'human', slot: 'page', title: '人工请求',
+      id: 'human', slot: 'page', title: '人工请求', help: 'human',
       status: inbox ? { tone: inbox.open ? 'warn' : 'ok', text: inbox.open ? `${inbox.open} 件在等人` : '没有等人' } : undefined,
       body: [
         text('需要现场操作的请求（插拔线、接板子、按按钮、按住 BOOT 再按 RESET）由 boardlab ask 创建，说明操作步骤和可验证的完成条件。完成后点「我做好了」；无法完成时点「做不了」并填写原因。请求结果会返回给发起方，物理操作的结果仍需由发起方验证。'),

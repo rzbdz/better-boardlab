@@ -429,7 +429,7 @@ export const ui: ModuleUi = {
       }] : []
     }
     return [{
-      id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机',
+      id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机', help: 'board-hosts',
       status: labs.length ? { tone: labs.every(lab => lab.enabled && lab.verifyOk !== false) ? 'ok' : 'warn', text: `${labs.length} 台` } : undefined,
       body: [
         text('接着板子的机器。每台装上 bspd，就是一个实验室：它的复位线、串口和下载口由 boardd 管，锁和排队在这里。'),

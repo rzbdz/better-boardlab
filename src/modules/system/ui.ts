@@ -29,7 +29,7 @@ export const ui: ModuleUi = {
       ],
     }
     return [modules, {
-      id: 'version', slot: 'settings', title: '版本',
+      id: 'version', slot: 'settings', title: '版本', help: 'release-source',
       status: v?.newer ? { tone: 'warn', text: `有新版 ${v.latest?.version}` } : v ? { tone: 'ok', text: v.version } : undefined,
       body: [
         text(v ? `boardlab ${v.version}（${v.revision}）${v.latest ? ` · 最新 ${v.latest.version}（${v.latest.revision}）` : ''}${v.checkedAt ? ` · ${new Date(v.checkedAt).toLocaleString()} 查过` : ''}` : '读取中…'),
@@ -37,7 +37,7 @@ export const ui: ModuleUi = {
         ...(v && !v.source ? [notice('这个 boardlab 不是用 install.sh 装的（比如从源码跑的），没有新版可查：在源码里 git pull 再 build。', 'neutral')] : []),
         {
           kind: 'actions', actions: [
-            action('check', '检查更新', async () => { const now = await load(true); return now.newer ? `有新版：${now.latest?.version}（${now.latest?.revision}）` : `已经是最新：${now.version}` }, { blocked: v && !v.source ? '没有发布源' : undefined }),
+            action('check', '检查更新', async () => { const now = await load(true); return now.error ? `查新版失败：${now.error}` : now.newer ? `有新版：${now.latest?.version}（${now.latest?.revision}）` : `已经是最新：${now.version}` }, { blocked: v && !v.source ? '没有发布源' : undefined }),
             action('update', '升级', async () => (await call<{ message: string }>('POST', 'api/system/update', {})).message, {
               intent: 'primary', blocked: !v?.newer ? '已经是最新' : v.updating ? '正在升级' : undefined,
               confirm: { title: '升级 boardlab', body: '下载新版，等没人拿锁时交给新版 supervisor 接手：已有的任务和串口流跑完，无法接手时才重启 boardd。设置、锁和排队都保留，页面会自己刷新。', action: '升级' },
