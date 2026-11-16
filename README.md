@@ -20,35 +20,35 @@ better-boardlab is a distribution of [boardlab-core](https://github.com/rzbdz/bo
 
 ## Architecture
 
-Four separate parts: each box is one kind of machine (or a board), and they connect only through the interfaces on the arrows.
+Four separate responsibilities. The boardlab control plane and the bsp host/catalog registry are different services: the registry does not own boards or locks.
 
 ```mermaid
 flowchart LR
-  dev["Dev & Compile Machine<br/>boardlab CLI · agent"]
-  subgraph registry["Boardlab Registry"]
+  dev["Dev / build machine<br/>boardlab CLI · agent"]
+  proxy["Optional reverse proxy<br/>HTTPS / HTTP"]
+  subgraph central["One boardlab control plane"]
     direction TB
     ui["Frontend<br/>web page, replaceable"]
-    api["API server<br/>boardd: locks · queue · inventory · /api"]
+    api["boardd<br/>locks · queues · boards · jobs · /api"]
     ui --> api
   end
-  subgraph ctrld["CtrlD backends"]
-    direction TB
-    local["Local Backend<br/>slots · serial-mux · fastboot"]
-    bsp["BSP Remote Backend<br/>bsp board hosts"]
-    other["… Backend<br/>other labs"]
-  end
-  dut["DUT<br/>development boards"]
-  dev -- "ssh tunnel / HTTP" --> api
-  api --> ctrld
-  ctrld -- "reset · download port · serial" --> dut
+  host["bsp board host<br/>bspd · GPIO · serial · download port"]
+  registry["bsp registry<br/>host rendezvous · SDK catalog"]
+  dut["DUT<br/>development board"]
+  dev -- "SSH -W, or HTTP(S)" --> api
+  proxy -- "same boardd" --> api
+  api -- "bsp CLI / host HTTP API" --> host
+  host -- "announce / catalog" --> registry
+  host -- "reset · serial · download" --> dut
 ```
 
-| Part | What it is |
+| Part | Responsibility |
 | --- | --- |
-| Dev & Compile Machine | Only the `boardlab` CLI and the skill, pointed at the registry. It needs no knowledge of the hosts. |
-| Boardlab Registry | boardd: every request from people and agents arrives here (locks, queue, inventory, API). The web page is one frontend on the API. |
-| CtrlD backends | The machines wired to the boards: this machine's own boards (Local), remote bsp board hosts, and others. Each is a boardd module. |
-| DUT | The development boards, each with a reset line, a download port and a serial console, sitting in a slot. |
+| Dev / build machine | The `boardlab` CLI and skill only. `boardlab remote set ssh://<user>@<boardlab host>` works when only SSH is allowed: the CLI uses `ssh -W` to reach the same boardd, not a shell on a board host. Where HTTP(S) is available, point it at the reverse proxy instead. No second boardd or registry is needed on the client. |
+| boardd | The only boardlab control plane: locks, queues, boards, requests, history and API. The web page is a replaceable frontend. boardd runs the bsp CLI; for a directly connected board host it can use the host's HTTP API rather than a registry or an SSH tunnel. |
+| bsp board host | The machine physically wired to boards. Its bspd watches ports and performs GPIO, serial, download and artifact work. An SDK artifact normally comes from the build server over SSH/SCP, HTTP(S), or an explicit `host:/absolute/path`; workstation upload is a fallback. |
+| bsp registry | Optional host rendezvous and SDK/catalog distribution. It is not another boardd: it owns no boardlab locks, queues or web sessions. |
+| DUT | A board in a slot, with its own reset/download wiring and serial console. |
 
 ## Features
 
@@ -59,7 +59,8 @@ flowchart LR
 - Slots: name a board by where it sits (`host1/s3`), and swap boards without registering them again.
 - Boot recipes can carry break points (`breaker: uboot`): the board's page offers 完整启动 or 停在 uboot, for working on
   U-Boot or the kernel. A running boot or flash can be cancelled (取消, or `boardlab cancel`).
-- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Three frontends ship: Modern (the default), Ant Design and TroyMitchellDefault. Settings picks the one this boardd serves. The Modern frontend's **API** tab lists every endpoint boardd serves, and the same list is available to programs and crawlers as OpenAPI 3.1 at `GET /api/openapi.json`.
+- A web page with boards, consoles, history and settings, and an HTTP API for other programs. Two frontends ship: Modern (the default) and TroyMitchellDefault. Settings picks the one this boardd serves. The Modern frontend's **API** tab lists every endpoint boardd serves, and the same list is available to programs and crawlers as OpenAPI 3.1 at `GET /api/openapi.json`.
+- Registration reads are passive. GPIO choices and USB download-port choices come from the host's existing inventory and port watcher, with short-lived sharing; opening a form never runs discovery or resets a board. Saving validates the current choices. Existing form data stays visible while choices refresh in the background.
 - Serial logs over any time range: search by text or regex, download in the browser, or copy a `wget` command.
 - An inbox for the agents using boardlab: when an API or a design cannot do what their work needs, `boardlab feedback` files it in boardd's database; the page's 反馈 shows what waits, and `resolve <id>` closes it fixed or not taken.
 - A way for agents to ask a person for the work only hands can do: `boardlab ask "plug the USB cable into 2-1.1" --body "the console prints ROM: usb download handler when it is in"` files the request and waits; the page's 人工请求 shows it, where whoever is at the bench clicks 我做好了 or 做不了 (with a note), and the agent continues with the answer. Requests live in boardd's database, so they survive restarts and updates (`GET /api/human/request?id=…&wait=20` is the same wait over HTTP).
@@ -75,6 +76,8 @@ Every slot names how its board is reset and put into download mode, and boardlab
 - **Your own scripts**, for any relay, PDU or USB-controlled hub you can drive from a command.
 
 A board on a bench with no reset line wired yet, for a quick debugging session, still works: boardlab asks a person to press RESET, shows where the board is, and carries on once they confirm.
+
+The person performing an action and the board's download-mode topology are independent settings. **Reset** can be a person or a GPIO; **FDL** can be `human`, `strapped` (reset already enters download mode), or a GPIO/button. Choosing a person adds a request, automatic detection, an idempotent confirmation and its timeout; it does not change the topology. A board already in download mode can be accepted from its existing port and retained ROM evidence, without requiring a fresh reset banner. The registration editor offers these as choices from the actual host, not free-form GPIO or USB identifiers.
 
 ## Install
 
@@ -160,7 +163,7 @@ boardd loads every module by default. To load only some of them, write `boardd.j
 { "modules": { "bsp": { "instances": ["bsp"] } } }
 ```
 
-Remote bsp labs need the bsp CLI (`externals/bsp`) and a bsp site that lists your hosts; see the bsp documentation.
+Remote bsp labs need the bsp CLI (`externals/bsp`). A directly reachable host uses `bspd+http://<host>:8765`; `bspd+ssh://<user>@<host>:8765` reaches a loopback-only bspd through SSH. An optional bsp registry can provide host rendezvous and the SDK/catalog site. See [Board hosts](docs/help/board-hosts.md) and [Clients](docs/help/clients.md).
 
 ## Documentation
 

@@ -17,9 +17,11 @@
 
 boardd 会 ssh 过去，把自己运行的版本装在那个用户的 `~/.local` 下（那边的 Node 低于 24、架构又相同时，带上 boardd 自己的 Node），设成经 ssh 隧道连回这台 boardd，最后在那边跑一次 `boardlab status` 检查。这需要 boardd 是用 install.sh 装的（从源码跑的 boardd 没有发布包可装）。
 
-## 隧道
+## 两种传输，同一个 boardd
 
-客户端以隧道用户（boardd 以 root 运行时默认是 `boardlab`，没有就新建一个不能登录的）ssh 到 boardd 的机器。它的密钥只能转发到 boardd 的端口，不能登录 shell。boardd 的机器要允许这个用户 ssh 登录和 TCP 转发（`AllowTcpForwarding`）。「连接设置」里可以改 boardd 地址、隧道用户和 ssh 端口；改了以后要逐台「更新」。
+**SSH-only 是受支持的部署方式，不是第二套控制面。** 客户端以隧道用户（boardd 以 root 运行时默认是 `boardlab`，没有就新建一个不能登录的）ssh 到 boardd 的机器。它的密钥只能转发到 boardd 的端口，不能登录 shell。boardd 的机器要允许这个用户 ssh 登录和 TCP 转发（`AllowTcpForwarding`）。「连接设置」里可以改 boardd 地址、隧道用户和 ssh 端口；改了以后要逐台「更新」。
+
+客户端和网页仍使用同一台 boardd 的板子、锁、队列、SDK 和人工请求；客户端不运行 boardd，也不运行另一个 registry。能直接访问 HTTP(S) 反向代理时，可以直接用 HTTP remote；不需要为了远程访问而增加隧道代理软件或本地 registry。两种 remote 可随时按网络情况切换。
 
 列表里每台机器显示装的版本、连不连得上（每半小时检查一次，也可以点「检查」）。「更新」用这台 boardd 的版本重装；「删除」让那台机器不再连过来，收回隧道授权，也可以顺便卸掉命令行。
 
