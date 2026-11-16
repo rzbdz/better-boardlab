@@ -8,14 +8,16 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
-import { api } from './api.ts'
+import { consoleErrorText, createConsoleSession, type ConsoleSession } from './console-session.ts'
 
-export type ConsoleStatus = 'connecting' | 'live' | 'closed' | 'retry'
+import type { ConsoleStatus } from './console-session.ts'
+export type { ConsoleStatus } from './console-session.ts'
 
 interface Live {
   el: HTMLDivElement
   status: ConsoleStatus
   onStatus: (status: ConsoleStatus) => void
+  onError: (text: string) => void
   fit(): void
   focus(): void
   /** Connect again now, if not live. */
@@ -43,8 +45,9 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   const fit = new FitAddon()
   term.loadAddon(fit)
   let opened = false, frame = 0
+  let session!: ConsoleSession
   const live: Live = {
-    el, status: 'connecting', onStatus: () => {},
+    el, status: 'connecting', onStatus: () => {}, onError: text => console.error(`Console input: ${text}`),
     // At most once a frame, and only when the cell grid changes: resizing to the same rows and columns is what made
     // a maximised window shake (fit → reflow → resize event → fit …).
     fit() {
@@ -57,47 +60,17 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
       })
     },
     focus() { term.focus() },
-    reconnect() { if (live.status !== 'live' && !disposed) { window.clearTimeout(retry); connect() } },
+    reconnect() { session.reconnect() },
     clear() { term.clear(); term.focus() },
-    dispose() { disposed = true; window.clearTimeout(retry); source?.close(); term.dispose(); el.remove(); lives.delete(key) },
+    dispose() { session.dispose(); term.dispose(); el.remove(); lives.delete(key) },
   }
-  const set = (status: ConsoleStatus) => { live.status = status; live.onStatus(status) }
-  const url = `api/console?raw=1&board=${encodeURIComponent(board)}${die ? `&die=${encodeURIComponent(die)}` : ''}`
-  let source: EventSource | null = null, shown = false, disposed = false, retry: number | undefined, attempts = 0
-  // Dropped: close this stream (the browser's own retry would keep a dead one) and open a new one after a pause.
-  const dropped = (why: 'closed' | 'retry') => {
-    source?.close(); source = null
-    if (disposed) return
-    set(why)
-    window.clearTimeout(retry)
-    retry = window.setTimeout(connect, Math.min(1000 * 2 ** attempts++, 10_000))
-  }
-  function connect() {
-    source?.close()
-    set(shown ? 'retry' : 'connecting')
-    const stream = source = new EventSource(url)
-    stream.addEventListener('history', event => {
-      if (stream !== source) return
-      const lines = JSON.parse((event as MessageEvent).data) as string[]
-      if (!shown) { term.write(lines.join('\r\n') + '\r\n'); shown = true } else term.write('\r\n\x1b[2m[串口重新连接]\x1b[0m\r\n')
-      attempts = 0
-      set('live')
-    })
-    stream.addEventListener('output', event => { if (stream === source) term.write(JSON.parse((event as MessageEvent).data) as string) })
-    stream.addEventListener('closed', event => {
-      if (stream !== source) return
-      term.write(`\r\n\x1b[2m[串口断开${(event as MessageEvent).data ? `：${JSON.parse((event as MessageEvent).data)}` : ''}，重连中…]\x1b[0m\r\n`)
-      dropped('closed')
-    })
-    stream.onerror = () => { if (stream === source) dropped('retry') }
-  }
-  connect()
-  let pending = '', timer: number | undefined, chain = Promise.resolve()
-  term.onData(data => {
-    pending += data
-    window.clearTimeout(timer)
-    timer = window.setTimeout(() => { const out = pending; pending = ''; chain = chain.then(() => api.input(board, die, out)).then(() => {}, () => {}) }, 8)
+  session = createConsoleSession({
+    board, die,
+    onOutput: data => term.write(data),
+    onStatus: status => { live.status = status; live.onStatus(status) },
+    onError: error => live.onError(consoleErrorText(error)),
   })
+  term.onData(session.input)
   lives.set(key, live)
   while (lives.size > MAX) [...lives.values()][0]!.dispose()
   return live
