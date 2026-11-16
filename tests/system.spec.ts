@@ -2,15 +2,18 @@
  * The system module: an installed boardlab knows its version and where its releases come from, asks there at most
  * every few hours (or when asked), and says when a newer one is out; one run from source has nothing to check.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
 import { compareVersions, newerRelease, sourcePattern, system } from '../src/modules/system/index.ts'
+import { commands } from '../src/modules/system/cli.ts'
+import type { CommandContext } from 'boardlab-core/cli/command.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
+afterEach(() => { vi.restoreAllMocks(); process.exitCode = undefined })
 
 /** An endpoint called in the process, as the HTTP gateway would (the query in the path). */
 async function call(lab: BoardLab, method: 'GET' | 'POST', path: string, body: Record<string, unknown> = {}) {
@@ -27,6 +30,42 @@ function installed(version: string, revision: string, source: string) {
   writeFileSync(join(prefix, 'release-source'), source); writeFileSync(join(prefix, 'install.sh'), '#!/bin/sh\n')
   return root
 }
+
+describe('the update command', () => {
+  async function check(version: { version: string, revision: string, source: string, latest: { version: string, revision: string } | null, checkedAt: string, error: string | null, newer: boolean }, json = false) {
+    const values: unknown[] = []
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    await commands.commands.find(command => command.name === 'update')!.run({
+      flags: new Map([['check', true]]), flag: () => undefined, json,
+      out: (value: unknown, text: () => void) => json ? values.push(value) : text(),
+      client: { call: async (method: string, path: string) => {
+        expect(method).toBe('GET')
+        expect(path).toBe('/api/system/version?check=1')
+        return version
+      } },
+    } as unknown as CommandContext)
+    return { values, text: vi.mocked(console.log).mock.calls.map(call => call.join(' ')).join('\n') }
+  }
+
+  it('reports a failed release lookup with a useful status, never as already latest', async () => {
+    const failed = { version: '0.2.0', revision: 'aaa1111', source: 'https://example.test/boardlab/', latest: null, checkedAt: '2026-11-11T00:00:00Z', error: 'connection failed', newer: false }
+    const result = await check(failed)
+    expect(result.text).toContain('查新版失败：connection failed')
+    expect(result.text).toContain('无法确定是否有新版')
+    expect(result.text).not.toContain('已经是最新')
+    expect(process.exitCode).toBe(1)
+    expect((await check(failed, true)).values).toEqual([failed])
+    expect(process.exitCode).toBe(1)
+  })
+
+  it('keeps the successful up-to-date and newer-release check output', async () => {
+    const current = { version: '0.2.0', revision: 'aaa1111', source: 'https://example.test/boardlab/', latest: { version: '0.2.0', revision: 'aaa1111' }, checkedAt: '2026-11-11T00:00:00Z', error: null, newer: false }
+    expect((await check(current)).text).toContain('已经是最新')
+    expect(process.exitCode).toBeUndefined()
+    expect((await check({ ...current, latest: { version: '0.3.0', revision: 'bbb2222' }, newer: true })).text).toContain('有新版，boardlab update 升级')
+    expect(process.exitCode).toBeUndefined()
+  })
+})
 
 describe('versions', () => {
   it('orders a prerelease before its final release, and a later version above an older one', () => {

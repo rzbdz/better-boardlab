@@ -159,7 +159,7 @@ const fromPack = (doc: SiteDoc) => doc.layer !== 'site'
 const saved = (doc: SiteDoc | null, id: unknown) => (out: { file?: string }) => `${doc ? '保存了' : '添加了'} ${out.file ?? String(id)}`
 
 /** A new SDK's boot methods: both not written yet, with the usual steps to start from, commented out. */
-const BOOT_EXAMPLE = `load:                        # 内存启动：用 fastboot 加载，不写存储
+const BOOT_EXAMPLE = `load:                        # 内存启动：加载命令不主动刷写存储、saveenv 或改启动脚本；FSBL 的 DDR training 可能写 SPI NOR，启动后的系统也可能写存储
   status: todo                 # 写好步骤后改成 ready
   notes: 启动步骤还没写
   steps: []

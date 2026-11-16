@@ -205,7 +205,7 @@ function PromptDialog({ prompt, onClose, onRun, onIdentity }: { prompt: Exclude<
           <p className="muted">板子所在的主机自己去构建服务器取这个 SDK 编好的产物，按 SDK 的启动流程进下载模式、加载或烧录；进度显示在卡片上。由人复位的板子会在卡片上提示你按 RESET。</p>
           <label>SDK<select value={sdk} onChange={event => setSdk(event.target.value)}>{prompt.board.lab?.sdks.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
           <label>方式<select value={method} onChange={event => setMethod(event.target.value as 'load' | 'download')}>
-            <option value="load">内存启动（fastboot 加载，不写板子）</option>
+            <option value="load">内存启动（加载命令不主动刷写或改配置；FSBL DDR training 和启动后的系统仍可能写存储）</option>
             <option value="download">刷机（烧录到板上存储）</option>
           </select></label>
         </>}

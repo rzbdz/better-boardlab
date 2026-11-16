@@ -40,7 +40,7 @@ export const ui: ModuleUi = {
             action('check', '检查更新', async () => { const now = await load(true); return now.newer ? `有新版：${now.latest?.version}（${now.latest?.revision}）` : `已经是最新：${now.version}` }, { blocked: v && !v.source ? '没有发布源' : undefined }),
             action('update', '升级', async () => (await call<{ message: string }>('POST', 'api/system/update', {})).message, {
               intent: 'primary', blocked: !v?.newer ? '已经是最新' : v.updating ? '正在升级' : undefined,
-              confirm: { title: '升级 boardlab', body: '下载新版，等没人拿锁时换上并重启 boardd（锁、排队和设置都保留）。页面会自己刷新。', action: '升级' },
+              confirm: { title: '升级 boardlab', body: '下载新版，等没人拿锁时交给新版 supervisor 接手：已有的任务和串口流跑完，无法接手时才重启 boardd。设置、锁和排队都保留，页面会自己刷新。', action: '升级' },
             }),
           ],
         },

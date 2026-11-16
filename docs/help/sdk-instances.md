@@ -14,7 +14,7 @@ path: /home/dev/work/bsp-a     # 源码在服务器上的目录
 soc: soc-a                     # 这个 SoC 的板子能跑它
 description: soc-a 的厂商 BSP
 boot:
-  load:                        # 内存启动：用 fastboot 加载，什么都不写进存储
+  load:                        # 内存启动：加载命令不主动刷写存储、saveenv 或改启动脚本；FSBL 的 DDR training 可能写 SPI NOR，启动后的系统也可能写存储
     status: ready              # ready 或 todo
     steps:
       - {do: enter-fdl}                       # 复位进下载模式
