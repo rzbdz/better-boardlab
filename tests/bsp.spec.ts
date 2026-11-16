@@ -171,6 +171,7 @@ describe('bsp lab driver', () => {
     expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 1, portCalls: 1 })
     await lab.boardConfig(config, board, true)
     expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 2, portCalls: 2 })
+    expect(bsp.calls.filter(call => call.args.includes('status'))).toHaveLength(1)
   })
 
   it('flashes a package from a link or an uploaded file as a bsp job, passing on its progress', async () => {

@@ -211,21 +211,29 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   /** The host each DUT is on, as last listed; a DUT not listed yet is looked up. */
   const hostOf = new Map<string, string>()
   const hostsAsking = new Map<string, Promise<void>>()
-  const hostOfBoard = async (config: LabConfig, device: string) => {
-    if (!hostOf.has(device)) {
+  const boardOf = new Map<string, BspDut>()
+  /** A registration dialog needs the DUT's saved record, not another fastboot/console/control status read. */
+  const recordOfBoard = async (config: LabConfig, device: string): Promise<BspDut> => {
+    if (!boardOf.has(device)) {
       const key = `${config.url}\u0000${config.username}`
       let asking = hostsAsking.get(key)
       if (!asking) {
-        asking = bsp<BspDut[]>(config, ['dut', 'list']).then(duts => { for (const dut of duts) hostOf.set(dut.id, dut.host) })
+        asking = bsp<BspDut[]>(config, ['dut', 'list']).then(duts => {
+          for (const dut of duts) {
+            hostOf.set(dut.id, dut.host)
+            boardOf.set(dut.id, { ...dut, control: { ...dut.control, reset: { ...dut.control?.reset }, fdl: { ...dut.control?.fdl } } })
+          }
+        })
         hostsAsking.set(key, asking)
         void asking.finally(() => { if (hostsAsking.get(key) === asking) hostsAsking.delete(key) }).catch(() => {})
       }
       await asking
     }
-    const found = hostOf.get(device)
+    const found = boardOf.get(device)
     if (!found) throw new Error(`bsp 里没有板子 ${device}`)
     return found
   }
+  const hostOfBoard = async (config: LabConfig, device: string) => (await recordOfBoard(config, device)).host
 
   // A registration dialog is a read of the host's inventory, not a discovery. Keep each host's GPIO list and watched
   // USB snapshot briefly, and share concurrent board dialogs (and a save's validation) instead of spawning three more
@@ -243,14 +251,12 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     const ask = (async () => {
       const [pins, ports] = await Promise.all([
         bsp<BspPin[]>(config, ['gpio', 'list'], 15_000, undefined, host).catch(() => [] as BspPin[]),
-        bsp<Array<{ usb: string, vid?: string, pid?: string }>>(config, ['dut', 'ports'], 15_000, undefined, host)
-          .catch(() => bsp<Record<string, { usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000, undefined, host)
-            .then(plans => Object.values(plans).flatMap(plan => plan.usb ?? []))),
+        bsp<Array<{ usb: string, vid?: string, pid?: string }>>(config, ['dut', 'ports'], 15_000, undefined, host),
       ])
       const value = {
         gpios: pins.filter(pin => pin.actions?.length).map(pin => ({ value: pin.target, label: `${pin.target}（${pin.label ?? 'GPIO'}）` })),
         ports: ports.map(port => {
-          const note = 'vid' in port && port.vid && port.pid ? `${port.vid}:${port.pid}` : 'product' in port ? port.product : undefined
+          const note = port.vid && port.pid ? `${port.vid}:${port.pid}` : ''
           return { value: port.usb, label: `${port.usb}${note ? `（${note}）` : ''}` }
         }),
       }
@@ -287,7 +293,10 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
       async devices(config) {
         const duts = await bsp<BspDut[]>(config, ['dut', 'list'])
-        for (const dut of duts) hostOf.set(dut.id, dut.host)
+        for (const dut of duts) {
+          hostOf.set(dut.id, dut.host)
+          boardOf.set(dut.id, { ...dut, control: { ...dut.control, reset: { ...dut.control?.reset }, fdl: { ...dut.control?.fdl } } })
+        }
         // Slots with no board yet are listed too, by their console: watchable, discoverable. Hosts without slots have none.
         const slots = await bsp<BspSlot[]>(config, ['slot', 'list']).catch(() => [] as BspSlot[])
         const empty = slots.filter(slot => !slot.dut && slot.online).map((slot): LabDevice => ({
@@ -566,10 +575,9 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
     },
     async boardConfig(config, device, fresh = false) {
-      const host = await hostOfBoard(config, device)
       const [record, choices] = await Promise.all([
-        bsp<BspDut>(config, ['dut', 'status', device], 15_000),
-        hostChoices(config, host, fresh),
+        fresh ? bsp<BspDut>(config, ['dut', 'status', device], 15_000) : recordOfBoard(config, device),
+        hostChoices(config, await hostOfBoard(config, device), fresh),
       ])
       return { control: record.control ?? {}, usb: record.usb ?? null, ...choices }
     },
