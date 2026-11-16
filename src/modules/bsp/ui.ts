@@ -54,8 +54,18 @@ interface BoardChoices {
   usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
 }
 /** A bsp board's record, edited as choices from its actual host, never hand-written GPIO/USB identifiers. */
-async function boardForm(board: string): Promise<Element[]> {
-  const current = await call<BoardChoices>('GET', `api/bsp/board?board=${encodeURIComponent(board)}`)
+const boardChoices = new Map<string, BoardChoices>()
+const boardAsking = new Map<string, Promise<BoardChoices>>()
+function readBoardChoices(board: string): Promise<BoardChoices> {
+  const asking = boardAsking.get(board)
+  if (asking) return asking
+  const ask = call<BoardChoices>('GET', `api/bsp/board?board=${encodeURIComponent(board)}`)
+  boardAsking.set(board, ask)
+  return ask.then(current => { boardChoices.set(board, current); return current })
+    .finally(() => { if (boardAsking.get(board) === ask) boardAsking.delete(board) })
+}
+function boardForm(board: string, current: BoardChoices): Element[] {
+  boardChoices.set(board, current)
   const actor = current.control.backend === 'human' ? 'human' : 'gpio-relay'
   const option = (value: string | undefined, label: string) => value ? [{ value, label }] : []
   const withCurrent = (options: Array<{ value: string, label: string }>, value: string | undefined) =>
@@ -92,6 +102,13 @@ async function boardForm(board: string): Promise<Element[]> {
         return (await call<{ message: string }>('POST', 'api/bsp/board', changed)).message
       }, { intent: 'primary' }) },
   ]
+}
+
+function openBoardForm(board: string) {
+  const cached = boardChoices.get(board)
+  return open('edit', '改登记…', `${board.toUpperCase()} 的 bsp 登记`, () => cached ? boardForm(board, cached) : [], {
+    load: () => readBoardChoices(board).then(current => boardForm(board, current)),
+  })
 }
 
 // ---- the site: SDKs, build servers and SoC profiles every host reads, kept by boardd ----
@@ -405,7 +422,7 @@ export const ui: ModuleUi = {
       return bspBoard ? [{
         id: 'bsp-board', slot: 'board', title: 'bsp 登记',
         body: [
-          { kind: 'actions', actions: [open('edit', '改登记…', `${board.name.toUpperCase()} 的 bsp 登记`, () => [], { load: () => boardForm(board.name) })] },
+          { kind: 'actions', actions: [openBoardForm(board.name)] },
           // The host's own page: its GPIO header, lines and events, opened on the host itself.
           ...(home?.url ? [text([{ link: 'GPIO 面板', href: gpioLink(home.url, home.id) }])] : []),
         ],

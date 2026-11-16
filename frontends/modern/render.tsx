@@ -67,7 +67,7 @@ function OpenBody({ op, ctx, onDone }: { op: Extract<Operation, { kind: 'open' }
     return () => { live = false }
   }, [op])
   if (error) return <p className="error">{error}</p>
-  return body ? <Elements body={body} ctx={ctx} onDone={onDone} /> : <p>正在读取主机选项…</p>
+  return body ? <Elements body={body} ctx={ctx} onDone={onDone} /> : <p className="sub">正在更新选项…</p>
 }
 
 function OpButton({ op, ctx, values = () => ({}), onDone }: { op: Operation, ctx: Ctx, values?: () => Values, onDone?: () => void }) {

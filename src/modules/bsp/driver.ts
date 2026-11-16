@@ -70,7 +70,7 @@ export interface BspBackend extends Backend {
   /** Change a board's record in bspd, holding its lease (`token`); says which fields changed. */
   change(config: LabConfig, device: string, token: string | null, change: BspBoardChange): Promise<string[]>
   /** The board's own record and the actual choices on its host for a dropdown editor. */
-  boardConfig(config: LabConfig, device: string): Promise<{
+  boardConfig(config: LabConfig, device: string, fresh?: boolean): Promise<{
     control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
     usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
   }>
@@ -210,11 +210,59 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
   /** The host each DUT is on, as last listed; a DUT not listed yet is looked up. */
   const hostOf = new Map<string, string>()
+  const hostsAsking = new Map<string, Promise<void>>()
   const hostOfBoard = async (config: LabConfig, device: string) => {
-    if (!hostOf.has(device)) for (const dut of await bsp<BspDut[]>(config, ['dut', 'list'])) hostOf.set(dut.id, dut.host)
+    if (!hostOf.has(device)) {
+      const key = `${config.url}\u0000${config.username}`
+      let asking = hostsAsking.get(key)
+      if (!asking) {
+        asking = bsp<BspDut[]>(config, ['dut', 'list']).then(duts => { for (const dut of duts) hostOf.set(dut.id, dut.host) })
+        hostsAsking.set(key, asking)
+        void asking.finally(() => { if (hostsAsking.get(key) === asking) hostsAsking.delete(key) }).catch(() => {})
+      }
+      await asking
+    }
     const found = hostOf.get(device)
     if (!found) throw new Error(`bsp 里没有板子 ${device}`)
     return found
+  }
+
+  // A registration dialog is a read of the host's inventory, not a discovery. Keep each host's GPIO list and watched
+  // USB snapshot briefly, and share concurrent board dialogs (and a save's validation) instead of spawning three more
+  // bsp processes per board. Cable news invalidates the USB snapshot; the current registration is revalidated on save.
+  const CHOICES_TTL_MS = 10_000
+  type HostChoices = { gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }> }
+  const choicesCache = new Map<string, { at: number, value: HostChoices }>()
+  const choicesAsking = new Map<string, Promise<HostChoices>>()
+  const hostChoices = (config: LabConfig, host: string, fresh = false): Promise<HostChoices> => {
+    const key = `${config.url}\u0000${config.username}\u0000${host}`
+    const hit = choicesCache.get(key)
+    if (!fresh && hit && Date.now() - hit.at < CHOICES_TTL_MS) return Promise.resolve(hit.value)
+    const asking = choicesAsking.get(key)
+    if (asking) return asking
+    const ask = (async () => {
+      const [pins, ports] = await Promise.all([
+        bsp<BspPin[]>(config, ['gpio', 'list'], 15_000, undefined, host).catch(() => [] as BspPin[]),
+        bsp<Array<{ usb: string, vid?: string, pid?: string }>>(config, ['dut', 'ports'], 15_000, undefined, host)
+          .catch(() => bsp<Record<string, { usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000, undefined, host)
+            .then(plans => Object.values(plans).flatMap(plan => plan.usb ?? []))),
+      ])
+      const value = {
+        gpios: pins.filter(pin => pin.actions?.length).map(pin => ({ value: pin.target, label: `${pin.target}（${pin.label ?? 'GPIO'}）` })),
+        ports: ports.map(port => {
+          const note = 'vid' in port && port.vid && port.pid ? `${port.vid}:${port.pid}` : 'product' in port ? port.product : undefined
+          return { value: port.usb, label: `${port.usb}${note ? `（${note}）` : ''}` }
+        }),
+      }
+      choicesCache.set(key, { at: Date.now(), value })
+      return value
+    })()
+    choicesAsking.set(key, ask)
+    return ask.finally(() => { if (choicesAsking.get(key) === ask) choicesAsking.delete(key) })
+  }
+  const forgetHost = (config: LabConfig, host: string) => {
+    const prefix = `${config.url}\u0000${config.username}\u0000${host}`
+    for (const key of choicesCache.keys()) if (key === prefix) choicesCache.delete(key)
   }
 
   return {
@@ -491,9 +539,9 @@ export function bspLab(options: BspOptions = {}): BspBackend {
             const host = String(data.host ?? '')
             const flat = (side: Record<string, string[]> | undefined) => [...(side?.tty ?? []), ...(side?.usb ?? []).map(item => item.split(' ')[0]!)]
             const at = host || String(event.host ?? '')
-            if (event.topic === 'registry.ports' && host) onNews({ kind: 'ports', host, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews)
+            if (event.topic === 'registry.ports' && host) { forgetHost(config, host); onNews({ kind: 'ports', host, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews) }
             else if (event.topic === 'registry.announced' && host) onNews({ kind: 'hosts', host })
-            else if (event.topic === 'dut.ports' && at) onNews({ kind: 'ports', host: at, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews)
+            else if (event.topic === 'dut.ports' && at) { forgetHost(config, at); onNews({ kind: 'ports', host: at, added: flat(data.added), removed: flat(data.removed) } satisfies LabNews) }
             // A board registered, removed, renamed, leased elsewhere, or a slot came and went: list the boards again.
             else if (at && /^dut\.(added|removed|renamed|slots|leased|released|attention|rebuilt)/.test(event.topic ?? '')) onNews({ kind: 'hosts', host: at })
           }
@@ -517,18 +565,13 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
       give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
     },
-    async boardConfig(config, device) {
+    async boardConfig(config, device, fresh = false) {
       const host = await hostOfBoard(config, device)
-      const [record, pins, ports] = await Promise.all([
-        bsp<BspDut>(config, ['dut', 'status', device], 60_000),
-        bsp<BspPin[]>(config, ['gpio', 'list'], 60_000, undefined, host).catch(() => [] as BspPin[]),
-        bsp<Record<string, { usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
+      const [record, choices] = await Promise.all([
+        bsp<BspDut>(config, ['dut', 'status', device], 15_000),
+        hostChoices(config, host, fresh),
       ])
-      return {
-        control: record.control ?? {}, usb: record.usb ?? null,
-        gpios: pins.filter(pin => pin.actions?.length).map(pin => ({ value: pin.target, label: `${pin.target}（${pin.label ?? 'GPIO'}）` })),
-        ports: Object.values(ports).flatMap(plan => (plan.usb ?? []).map(port => ({ value: port.usb, label: `${port.usb}${port.product ? `（${port.product}）` : ''}` }))),
-      }
+      return { control: record.control ?? {}, usb: record.usb ?? null, ...choices }
     },
 
     async change(config, device, token, change) {

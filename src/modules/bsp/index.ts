@@ -156,7 +156,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           if (fdl && !(FDL_STRATEGIES as readonly string[]).includes(fdl)) throw new BoardError('invalid', `fdl 只能是 ${FDL_STRATEGIES.join('、')}`)
           if (body.resetActor && body.resetActor !== 'human' && !text('resetPin')) throw new BoardError('invalid', 'GPIO reset 要选择复位线')
           if (body.fdlActor === 'gpio-relay' && !text('fdlPin')) throw new BoardError('invalid', 'GPIO FDL 要选择 FDL 线')
-          const choices = await (route.backend as BspBackend).boardConfig(route.config, route.target.device)
+          const choices = await (route.backend as BspBackend).boardConfig(route.config, route.target.device, true)
           for (const [field, pin] of [['resetPin', text('resetPin')], ['fdlPin', text('fdlPin')]] as const)
             if (pin && !choices.gpios.some(item => item.value === pin)) throw new BoardError('invalid', `${field} 不是这块板所在主机的 GPIO：${pin}`)
           const usb = text('usb')

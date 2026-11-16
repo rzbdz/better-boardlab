@@ -17,7 +17,12 @@ const config: LabConfig = { url: 'http://registry.test:8765', username: '', pass
 /** A bsp CLI that answers from a table by its arguments after the global options, and records every call. */
 function fakeBsp(answer: (args: string[]) => ReturnType<typeof ok>) {
   const calls: Array<{ args: string[], env: NodeJS.ProcessEnv }> = []
-  const run: BspRunner = async (args, { env }) => { calls.push({ args, env }); return answer(args.slice(args.indexOf('--stateless') + 1)) }
+  const run: BspRunner = async (args, { env }) => {
+    const rest = args.slice(args.indexOf('--stateless') + 1)
+    const routed = rest[0] === '-r' ? rest.slice(2) : rest
+    calls.push({ args, env })
+    return answer(routed)
+  }
   return { run, calls }
 }
 
@@ -141,6 +146,31 @@ describe('bsp lab driver', () => {
     expect(ports.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'bind', 'tmp-h1-ttyUSB3', '--console', '/dev/ttyUSB3', '--usb', 'usb:2-1.7', '--host', 'h1'])
     await bspLab({ run: probe.run }).discovery!.register(config, found.found[0]!, 'slot-3')
     expect(probe.calls[2]!.args.slice(2)).toEqual(['dut', 'add', 'h1', '--spec', JSON.stringify({ ...spec, id: 'slot-3' })])
+  })
+
+  it('reads registration choices without discovery, shares host reads and refreshes them for a save', async () => {
+    const board = 'test-board'
+    const host = 'test-host'
+    const duts = [{ id: board, host, control: { backend: 'human', reset: {}, fdl: { strategy: 'strapped' } }, usb: 'usb:1-2' }]
+    let listCalls = 0, gpioCalls = 0, portCalls = 0
+    const bsp = fakeBsp(args => {
+      const command = args.slice(0, 2).join(' ')
+      if (command === 'dut list') { listCalls++; return ok(duts) }
+      if (command === 'dut status') return ok(duts[0])
+      if (command === 'gpio list') { gpioCalls++; return ok([{ target: 'P1', label: 'reset', actions: ['pulse'] }]) }
+      if (command === 'dut ports') { portCalls++; return ok([{ usb: 'usb:1-2', vid: '1234', pid: 'abcd' }]) }
+      if (args[0] === 'probe') throw new Error('a registration read must not run a discovery plan')
+      return ok({})
+    })
+    const lab = bspLab({ run: bsp.run })
+    const [first, sameHostBoard] = await Promise.all([lab.boardConfig(config, board), lab.boardConfig(config, board)])
+    expect(first).toEqual(sameHostBoard)
+    expect(first).toMatchObject({ gpios: [{ value: 'P1' }], ports: [{ value: 'usb:1-2', label: 'usb:1-2（1234:abcd）' }] })
+    expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 1, portCalls: 1 })
+    await lab.boardConfig(config, board)
+    expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 1, portCalls: 1 })
+    await lab.boardConfig(config, board, true)
+    expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 2, portCalls: 2 })
   })
 
   it('flashes a package from a link or an uploaded file as a bsp job, passing on its progress', async () => {
