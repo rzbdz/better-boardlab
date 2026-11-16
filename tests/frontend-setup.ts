@@ -57,30 +57,6 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   return reply({ ok: true })
 }) as typeof fetch
 
-// Files the page sends go by XMLHttpRequest (for upload progress): recorded in `calls` with their name and size.
-class FakeXMLHttpRequest {
-  status = 0
-  responseText = ''
-  onload: (() => void) | null = null
-  onerror: (() => void) | null = null
-  readonly upload: { onprogress: ((event: { loaded: number }) => void) | null } = { onprogress: null }
-  private method = ''
-  private url = ''
-  open(method: string, url: string) { this.method = method; this.url = url }
-  setRequestHeader() {}
-  send(body: Blob) {
-    const url = new URL(this.url, 'http://localhost/')
-    calls.push({ method: this.method, path: url.pathname.replace(/^\//, '') + url.search, body: { size: body.size } })
-    setTimeout(() => {
-      this.upload.onprogress?.({ loaded: Math.floor(body.size / 2) })
-      this.status = 200
-      this.responseText = JSON.stringify({ sha256: url.pathname.split('/').pop(), size: body.size, stored: true })
-      this.onload?.()
-    }, 0)
-  }
-}
-globalThis.XMLHttpRequest = FakeXMLHttpRequest as unknown as typeof XMLHttpRequest
-
 class FakeEventSource {
   static readonly CLOSED = 2
   readyState = 1

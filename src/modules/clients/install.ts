@@ -32,12 +32,14 @@ export interface Hub {
   addUser(user: string): Promise<void>
   /** Give a directory and what is in it to a user (root only). */
   own(path: string, user: string): Promise<void>
+  /** Let the tunnel user write upload tickets under boardd's state (root only; optional). */
+  prepareUploads?(tunnel: string): Promise<void>
 }
 
 const run = (command: string, args: string[]) => new Promise<string>((resolve, reject) =>
   execFile(command, args, { timeout: 30_000 }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout)))
 
-export function localHub(): Hub {
+export function localHub(stateDir?: string): Hub {
   const self = userInfo().username
   return {
     user: self, root: process.getuid?.() === 0,
@@ -51,6 +53,19 @@ export function localHub(): Hub {
       await run('useradd', ['--create-home', '--shell', shell, user])
     },
     async own(path, user) { await run('chown', ['-R', `${user}:`, path]) },
+    async prepareUploads(tunnel) {
+      if (!stateDir) return
+      // The forced sftp-server runs as the tunnel user, but boardd creates the ticket directories as root.
+      // Give the group write access; the upload path itself is an unguessable id under .incoming.
+      const files = join(stateDir, 'files'), incoming = join(files, '.incoming')
+      mkdirSync(incoming, { recursive: true, mode: 0o2770 })
+      await run('chgrp', ['-R', tunnel, incoming]).catch(() => {})
+      await run('chmod', ['750', files]).catch(() => {})
+      await run('chmod', ['2770', incoming]).catch(() => {})
+      // A forced command is run through the user's shell; nologin would print its message instead of the sftp server.
+      const shell = (await run('getent', ['passwd', tunnel]).catch(() => '')).trim().split(':')[6]
+      if (!shell || /nologin|\/false$/.test(shell)) await run('usermod', ['--shell', '/bin/sh', tunnel]).catch(() => {})
+    },
   }
 }
 
@@ -72,7 +87,9 @@ export function tunnelUrl(tunnel: Tunnel): string {
 export function tunnelLine(publicKey: string, port: number, comment: string): string {
   const key = PUBLIC_KEY.exec(publicKey.trim())
   if (!key) throw new Error(`读不懂那台机器的公钥：${publicKey.slice(0, 60)}`)
-  return `restrict,port-forwarding,permitopen="127.0.0.1:${port}",command="/bin/false" ${key[1]} ${key[2]} ${comment}`
+  // The forced command is the sftp server: the key can still forward to boardd's port, and can copy files
+  // to a ticket path, but cannot run a shell. sftp (not scp) because OpenSSH 8's scp needs a shell.
+  return `restrict,port-forwarding,permitopen="127.0.0.1:${port}",command="/usr/lib/openssh/sftp-server" ${key[1]} ${key[2]} ${comment}`
 }
 export const keyBody = (line: string) => / ((?:ssh|ecdsa|sk)-\S+) ([A-Za-z0-9+/]+={0,3})(?:\s|$)/.exec(` ${line}`)?.[2] ?? null
 /** The tunnel line boardd made for machine `id` with key `body`: that key, forwarding only, tagged with the machine. */
@@ -82,7 +99,8 @@ const ownLine = (item: string, body: string, id: string) =>
 /** How to do it by hand, for whoever may: the commands to run on boardd's machine. */
 function byHand(tunnel: string, line: string): string {
   return [
-    `id ${tunnel} >/dev/null 2>&1 || sudo useradd --create-home --shell /usr/sbin/nologin ${tunnel}`,
+    `id ${tunnel} >/dev/null 2>&1 || sudo useradd --create-home --shell /bin/sh ${tunnel}`,
+    `sudo usermod --shell /bin/sh ${tunnel}`,
     `sudo -u ${tunnel} -H mkdir -p -m 700 ~${tunnel}/.ssh`,
     `echo '${line}' | sudo -u ${tunnel} -H tee -a ~${tunnel}/.ssh/authorized_keys >/dev/null`,
   ].join('\n')
@@ -111,7 +129,8 @@ export async function authorize(hub: Hub, tunnel: string, id: string, line: stri
   else appendFileSync(file, `${lines.length && lines.at(-1) !== '' ? '\n' : ''}${line}\n`, { mode: 0o600 })
   chmodSync(file, 0o600)
   if (hub.root && hub.user !== tunnel) await hub.own(dir, tunnel)
-  progress(`给 ${tunnel} 授权了那台机器的密钥（只能转发到 boardd 的端口）`)
+  await hub.prepareUploads?.(tunnel)
+  progress(`给 ${tunnel} 授权了那台机器的密钥（转发到 boardd 的端口，或 scp/sftp 到上传路径）`)
   return null
 }
 

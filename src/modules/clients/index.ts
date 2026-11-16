@@ -64,7 +64,7 @@ export function clients(options: ClientsOptions): Module {
         const path = join(options.stateDir, 'clients', 'node', arch, 'node')
         return existsSync(path) ? path : null
       }
-      const hub = options.machine ?? localHub()
+      const hub = options.machine ?? localHub(options.stateDir)
       const port = options.port ?? DEFAULT_PORT
       const settings = lab.kernel.settings('clients')
       const json = <T>(key: string, fallback: T): T => { try { return JSON.parse(settings.get(key) ?? '') as T } catch { return fallback } }

@@ -6,7 +6,7 @@
 
 - **SDK 的构建（首选）**：板子在能取构建产物的实验室里（bsp 主机，`boardlab list` 的卡片上列着能跑的 SDK）时，`boardlab boot <板子> --sdk <SDK>` 内存启动、`boardlab flash <板子> --sdk <SDK>` 刷机。SDK 的 load/download 配方是命令和步骤的序列；板子所在的主机按配方自己用 SSH/SCP 从构建服务器取产物，再执行 stage 或刷机 hook，不经过你这台机器，也不上传整份镜像。SDK 本身怎么编见 `boardlab sdk help`，流程怎么登记见 `boardlab registry help`。
 - **URL / 板端已有文件**：`boardlab boot <板子> https://…/Image.itb` 让板端主机下载；`host:/绝对路径` 让它读自己已经有的文件（例如脚本预先 scp 到那里）。板端会计算 sha256；这些引用不经过 boardd。
-- **本机文件上传（兜底）**：文件只在 workstation、又不能由 SDK 配方或 URL 提供时，按下面「fastboot 内存启动」加载；boardd 再把它交给板端。不烧录。
+- **本机文件（scp）**：文件只在 workstation、又不能由 SDK 配方或 URL 提供时，按下面「fastboot 内存启动」加载。CLI 会用 scp 把文件复制到 registry/boardd 的上传路径，boardd 只做 sha256 校验；网页上传已禁用。不烧录。
 - **网络启动**：板子上的 U-Boot 从 TFTP 取内核，见最后一节。
 
 ## 启动文件从哪来
@@ -45,7 +45,7 @@ FIT_HOST=<构建主机> skills/boardlab/fit/spacemit/k3/make-its.sh <内核的 O
 
 boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚本。
 
-1. SDK 构建产物不要拷回 workstation 再上传：用上面的 `--sdk`，由板端主机按配方 scp 拉取。只有确实在本机生成、SDK 配方拿不到的自定义文件，才走上传兜底。此时把文件放在本机一个新目录，算 sha256；boardd 自带的固件不用拷，直接写名字，boardd 自己核对 sha256。
+1. SDK 构建产物不要拷回 workstation 再传：用上面的 `--sdk`，由板端主机按配方 scp 拉取。只有确实在本机生成、SDK 配方拿不到的自定义文件，才让 CLI 用 scp 送过去。此时把文件放在本机一个新目录，算 sha256；boardd 自带的固件不用拷，直接写名字，boardd 自己核对 sha256。
 2. 拿锁，让板子进下载模式，确认这颗芯片的下载口在：
    ```sh
    boardlab lock <板子> --for "内存启动 <内核版本>"

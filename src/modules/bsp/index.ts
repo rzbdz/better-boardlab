@@ -4,11 +4,11 @@
  * clients (`boardlab sdk`, `boardlab registry`, `boardlab bsp`), all through the bsp CLI on boardd's machine. The site
  * every host reads (SoC profiles, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
  */
-import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { EventStream } from 'boardlab-core/core/api.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
+import { sha256File } from 'boardlab-core/core/files.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import { bspLab, FDL_STRATEGIES, type BspBackend, type BspBoardChange } from './driver.ts'
 import { hostsFor } from '../hosts/ssh.ts'
@@ -86,7 +86,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
             const saved: string = download
             try {
               if (code === 0 && existsSync(saved)) {
-                const stored = await lab.files.put(holder, createHash('sha256').update(readFileSync(saved)).digest('hex'), basename(String(args[2] ?? 'file')), createReadStream(saved))
+                const stored = await lab.files.put(holder, await sha256File(saved), basename(String(args[2] ?? 'file')), createReadStream(saved))
                 sha = stored.sha256
               }
             } finally { rmSync(saved, { force: true }) }

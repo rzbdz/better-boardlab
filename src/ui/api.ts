@@ -5,7 +5,6 @@
 import type { Action, BoardChannels, BoardDetail, LabPorts, LabSettings, Lease, LockResult, SendResult, State } from 'boardlab-core/shared/types.ts'
 import type { Scan, Slot } from '../shared/local.ts'
 import type { HaSettings } from '../shared/home-assistant.ts'
-import { sha256File } from './sha256.ts'
 
 /** The normalized page state, including the module-owned fields boardd adds when their modules are loaded. */
 export type PageState = State & { slots: Slot[], scan: Scan | null, ha: HaSettings | null }
@@ -83,38 +82,6 @@ export async function stream(path: string, body: unknown, sink: { line(text: str
   return result
 }
 
-/** How far sending a file has got: hashing it here, then uploading it (`total` bytes either way). */
-export type SendProgress = (step: 'hash' | 'upload', done: number, total: number) => void
-
-/**
- * Send a file to boardd under its sha256, unless boardd has it already, for `flashPackage`: returns `sha256:<hex>`. The
- * upload goes by XMLHttpRequest, the one way a page hears how much of a request body has been sent.
- */
-export async function sendFile(file: File, onProgress?: SendProgress): Promise<string> {
-  const sha256 = await sha256File(file, done => onProgress?.('hash', done, file.size))
-  const have = await call<{ present: boolean }>('GET', `api/files/${sha256}`)
-  if (!have.present) {
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('PUT', `api/files/${sha256}?name=${encodeURIComponent(file.name)}`)
-      const user = identity.get()
-      if (user) xhr.setRequestHeader('X-Boards-User', user)
-      xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-      if (xhr.upload) xhr.upload.onprogress = event => onProgress?.('upload', event.loaded, file.size)
-      xhr.onload = () => {
-        if (xhr.status < 400) return resolve()
-        let message = xhr.responseText
-        try { message = JSON.parse(message).error ?? message } catch {}
-        reject(new ApiError(xhr.status, `传 ${file.name} 失败：${message}`))
-      }
-      xhr.onerror = () => reject(new Error(`传 ${file.name} 时连接断了`))
-      xhr.send(file)
-    })
-  }
-  onProgress?.('upload', file.size, file.size)
-  return `sha256:${sha256}`
-}
-
 // The models people have typed in change only when one is saved; one read serves the page until it is refreshed.
 let modelsCache: string[] | null = null, modelsRead: Promise<string[]> | null = null, modelsEpoch = 0
 function readModels(): Promise<string[]> {
@@ -158,9 +125,8 @@ export const api = {
   bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
   /** Where an SDK's recipe can stop early (empty when it has none). */
   bootBreaks: (board: string, sdk: string) => call<{ load: string[], download: string[] }>('GET', `api/boot/breaks?board=${encodeURIComponent(board)}&sdk=${encodeURIComponent(sdk)}`),
-  sendFile,
-  /** Flash a package: a `url` the board's backend downloads itself, or a file sent first (`sendFile`'s `sha256`). */
-  flashPackage: (board: string, input: { url?: string, sha256?: string, flasher?: string }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
+  /** Flash a package: a `url` the board's backend downloads itself. */
+  flashPackage: (board: string, input: { url: string, flasher?: string }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
   fastboot: (board: string) => call('POST', 'api/fastboot', { board }),
   /** Keystrokes for the online console, sent as they are. */
   // People on the page type without the lock (agents use the CLI and need it).

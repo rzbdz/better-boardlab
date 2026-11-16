@@ -63,9 +63,11 @@ if [[ -n $GRANT && $REMOTE == ssh://* ]]; then
   echo "==> allow $TARGET to reach boardd through $TUNNEL_USER@${GRANT#*@}"
   "${SSH[@]}" "$GRANT" "set -e; id $TUNNEL_USER >/dev/null 2>&1 || useradd --create-home --shell /bin/sh $TUNNEL_USER
     H=\$(getent passwd $TUNNEL_USER | cut -d: -f6); mkdir -p \$H/.ssh; touch \$H/.ssh/authorized_keys
-    LINE='restrict,port-forwarding,permitopen=\"127.0.0.1:38127\" $KEY'
+    usermod --shell /bin/sh $TUNNEL_USER
+    LINE='restrict,port-forwarding,permitopen=\"127.0.0.1:38127\",command=\"/usr/lib/openssh/sftp-server\" $KEY'
     grep -qF '$KEY' \$H/.ssh/authorized_keys || echo \"\$LINE\" >> \$H/.ssh/authorized_keys
-    chown -R $TUNNEL_USER: \$H/.ssh; chmod 700 \$H/.ssh; chmod 600 \$H/.ssh/authorized_keys"
+    chown -R $TUNNEL_USER: \$H/.ssh; chmod 700 \$H/.ssh; chmod 600 \$H/.ssh/authorized_keys
+    S=${BOARDLAB_STATE_DIR:-/var/lib/boardlab}; mkdir -p \$S/files/.incoming; chgrp -R $TUNNEL_USER \$S/files/.incoming; chmod 750 \$S/files; chmod 2770 \$S/files/.incoming"
 fi
 
 echo "==> connect to $REMOTE"

@@ -9,7 +9,7 @@ import { clearConsole, reconnectConsole, SerialConsole, STATUS_TEXT, type Consol
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
-import { canRediscover, useBoardActions, useSending, type FlashPackage } from '../actions.tsx'
+import { canRediscover, useBoardActions, type FlashPackage } from '../actions.tsx'
 import { age, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import { LogPanel } from './logs.tsx'
@@ -174,9 +174,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 }
 
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
-  const sending = useSending(board.name)
   return <>
-    {sending && <div className="flag run"><span className="spin" /><div><b>{sending.text}</b><div className="bar2"><i style={{ width: `${sending.pct}%` }} /></div></div></div>}
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div>
@@ -286,9 +284,7 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
   const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name), canPackage = !!board.lab?.canFlashPackage, used = lastPackage(board.name)
   const [sdk, setSdk] = useState(last?.sdk && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? '')
   const [method, setMethod] = useState<'load' | 'download' | 'package'>(!sdks.length && canPackage ? 'package' : last?.method ?? 'load')
-  const [from, setFrom] = useState<'url' | 'file'>('url')
   const [url, setUrl] = useState(used?.url ?? '')
-  const [file, setFile] = useState<File | null>(null)
   const [flasher, setFlasher] = useState(used?.flasher ?? '')
   // Break points of the SDK's recipe (`breaker:` steps): boot U-Boot alone, say. Fastboot (load) only, for now.
   // The state starts from what the page already read (or null, still reading) so opening the dialog again is instant.
@@ -303,11 +299,11 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
     return () => { live = false }
   }, [board.name, sdk, method])
   const pkg = method === 'package', link = url.trim()
-  const ready = pkg ? (from === 'url' ? /^https?:\/\/\S+$/i.test(link) : !!file) : !!sdk
+  const ready = pkg ? /^https?:\/\/\S+$/i.test(link) : !!sdk
   const start = () => {
     close()
     if (!pkg) return onStart(sdk, method as 'load' | 'download', method === 'load' && brk ? brk : undefined)
-    onPackage({ ...(from === 'url' ? { url: link } : { file: file! }), flasher: flasher.trim() || undefined })
+    onPackage({ url: link, flasher: flasher.trim() || undefined })
   }
   return <>
     <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · {pkg ? '用一个刷机包刷写板子' : '用一个 SDK 编好的产物启动板子'}。开始后可以关掉这个窗口，进度在板子上显示。</p>
@@ -316,16 +312,10 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
     <div className="field">方式<div className="opts">
       <button className={`opt${method === 'load' ? ' on' : ''}`} onClick={() => setMethod('load')}><Icon name="rocket" /><div><b>内存启动</b><span>经下载口加载到内存，不动存储；复位就没了。</span></div></button>
       <button className={`opt${method === 'download' ? ' on' : ''}`} onClick={() => setMethod('download')}><Icon name="dl" /><div><b>刷机</b><span>写进 eMMC / SD，要几分钟；之后复位从存储启动。</span></div></button>
-      {canPackage && <button className={`opt${pkg ? ' on' : ''}`} onClick={() => setMethod('package')}><Icon name="link" /><div><b>刷机包</b><span>给一个刷机包的链接或者传一个文件，整个写进板子的存储。</span></div></button>}
+      {canPackage && <button className={`opt${pkg ? ' on' : ''}`} onClick={() => setMethod('package')}><Icon name="link" /><div><b>刷机包</b><span>给一个刷机包的链接，板子所在的主机自己下载，整个写进板子的存储。</span></div></button>}
     </div></div>
     {pkg && <>
-      <div className="field">刷机包<div className="chips">
-        <button className={`chip${from === 'url' ? ' on' : ''}`} onClick={() => setFrom('url')}>链接</button>
-        <button className={`chip${from === 'file' ? ' on' : ''}`} onClick={() => setFrom('file')}>上传文件</button>
-      </div></div>
-      {from === 'url'
-        ? <label className="field">链接<input className="input" type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/package.zip" /><span className="sub small">板子所在的主机自己下载。</span></label>
-        : <label className="field">文件<input className="input" type="file" onChange={e => setFile(e.target.files?.[0] ?? null)} /><span className="sub small">{file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB，先传给 boardd` : '从这台电脑选，先传给 boardd'}</span></label>}
+      <label className="field">链接<input className="input" type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/package.zip" /><span className="sub small">板子所在的主机自己下载；网页不接收文件。</span></label>
       <label className="field">刷机工具（可选）<input className="input" value={flasher} onChange={e => setFlasher(e.target.value)} placeholder="留空由后端按刷机包选" /></label>
     </>}
     {!pkg && method === 'load' && (breaks === null || breaks.length > 0) && <label className="field">停在哪

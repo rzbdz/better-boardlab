@@ -142,12 +142,12 @@ describe('installing the CLI on a compile machine', () => {
     expect(done.lines).toEqual(expect.arrayContaining([
       '用密码连上了 dev@build1.example.test，放 boardd 的密钥上去', '在那台机器上装命令行…', '==> installing boardlab 0.3.0 (abc1234) in ' + machine.file('.local/share/boardlab'),
       '那台机器上没有 ssh 密钥：生成了 ~/.ssh/id_ed25519（没有密码）', '这台机器上没有用户 boardlab：建一个只能开隧道的',
-      '给 boardlab 授权了那台机器的密钥（只能转发到 boardd 的端口）', '设成连这台 boardd：boardlab remote set ssh://boardlab@boardd.example.test',
+      '给 boardlab 授权了那台机器的密钥（转发到 boardd 的端口，或 scp/sftp 到上传路径）', '设成连这台 boardd：boardlab remote set ssh://boardlab@boardd.example.test',
       '检查：boardlab status', '板子     2 块',
     ]))
     // The machine's own key, for forwarding to boardd's port only, given to the tunnel user boardd made.
     const key = readFileSync(machine.file('.ssh/id_ed25519.pub'), 'utf8').trim().split(' ').slice(0, 2).join(' ')
-    expect(boardd.keys().trim()).toBe(`restrict,port-forwarding,permitopen="127.0.0.1:38127",command="/bin/false" ${key} boardlab-cli:build1`)
+    expect(boardd.keys().trim()).toBe(`restrict,port-forwarding,permitopen="127.0.0.1:38127",command="/usr/lib/openssh/sftp-server" ${key} boardlab-cli:build1`)
     expect(boardd.made).toEqual(['boardlab'])
     expect(boardd.owned).toEqual([`boardlab ${join(dir, 'hub/boardlab/.ssh')}`])
     expect(JSON.parse(readFileSync(machine.file('.config/boardlab/remote.json'), 'utf8'))).toEqual({ url: 'ssh://boardlab@boardd.example.test' })

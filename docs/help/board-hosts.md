@@ -43,7 +43,7 @@ boardd 会 ssh 过去，传一份 bsp，装好 bspd 服务，再把站点同步�
 
 每台主机都读同一个站点：SDK、编译服务器、SoC 资料、钩子。每台主机当前用的站点版本显示在列表里；不是最新时，在「SDK 与站点」里点「同步到所有主机」。主机自己的配置（`hosts/<id>.yaml`）由安装脚本生成，同步不会动它，重装也会保留已有的 registry announce 设置。
 
-bsp registry（若使用）负责主机 rendezvous 和 SDK/catalog 分发；boardd 的板子、锁、队列、页面和人工请求不放在 registry 里，也不在客户端另建一份。SDK 的大文件默认由板卡主机通过 SSH/SCP、HTTP(S) 或显式 `host:/absolute/path` 获取；工作站上传只是回退。recipe 可以在 download 或 fastboot load 前执行显式的 `scp` 等步骤。
+bsp registry（若使用）负责主机 rendezvous 和 SDK/catalog 分发；boardd 的板子、锁、队列、页面和人工请求不放在 registry 里，也不在客户端另建一份。SDK 的大文件由板卡主机通过 SSH/SCP、HTTP(S) 或显式 `host:/absolute/path` 获取；工作站上的本机文件由 `boardlab` CLI 先 scp 到 registry/boardd，再由 bsp 用 scp 送到板卡主机。网页上传已禁用。recipe 可以在 download 或 fastboot load 前执行显式的 `scp` 等步骤。
 
 ## 命令行
 
