@@ -87,7 +87,9 @@ release; the signed \`v${release.version}\` source tag identifies the revision i
   const listed = JSON.parse(execFileSync('gh', ['api', `repos/${where}/releases?per_page=100`], { encoding: 'utf8' }))
   const old = listed.filter(item => !item.draft).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(keep)
   for (const item of old) {
-    execFileSync('gh', ['release', 'delete', item.tag_name, '--repo', where, '--yes', '--cleanup-tag=false'], { stdio: 'inherit' })
+    // Delete the release through the API: gh 2.4 has no --cleanup-tag, and no version deletes the source tag with
+    // this call.
+    execFileSync('gh', ['api', '-X', 'DELETE', `repos/${where}/releases/${item.id}`], { stdio: 'inherit' })
   }
   if (old.length) console.log(`kept the newest ${keep} releases; deleted ${old.map(item => item.tag_name).join(', ')}`)
 }
