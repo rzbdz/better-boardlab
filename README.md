@@ -122,7 +122,7 @@ optional frontend-neutral views (`ui.ts`). Run `pnpm modules` after adding or re
 registries. Frontends in `frontends/<name>/` render those views without importing module internals.
 
 The kernel, backend contract, gateway, CLI framework, and client library belong to boardlab-core. The bsp host tools
-belong to [bsp](https://github.com/rzbdz/bsp-remote-dev-workflow). Both are submodules here: change them in their own
+belong to [boardctrl](https://github.com/rzbdz/boardctrl). Both are submodules here: change them in their own
 repositories, then update the gitlinks. `architecture.json` defines and enforces the module boundaries.
 
 ## Origin and license
