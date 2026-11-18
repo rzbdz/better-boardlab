@@ -28,7 +28,7 @@ function inline(part: Inline, key: number): ReactNode {
 }
 export const rich = (value: Rich): ReactNode => Array.isArray(value) ? value.map(inline) : inline(value, 0)
 
-interface Ctx { selections: Record<string, string[]>, setSelection: (id: string, values: string[]) => void }
+interface Ctx { selections: Record<string, string[]>, setSelection: (id: string, values: string[]) => void, defaults: Record<string, string[]> }
 
 function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: () => void) {
   const ui = useUI()
@@ -42,7 +42,7 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
     if (at && Number(at[2]) > 0) { setStep(`${at[1]}/${at[2]}`); setFraction(Math.min(1, Number(at[1]) / Number(at[2]))) }
     setLines(list => [...list.slice(-200), text])
   }
-  const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? []])) })
+  const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? ctx.defaults[id] ?? []])) })
   const go = async () => {
     if (op.kind === 'open') { ui.layer(close => <><h2>{op.title}</h2><div className="mv" style={{ marginTop: 12 }}><OpenBody op={op} ctx={ctx} onDone={close} /></div></>, 'wide'); return }
     setBusy(true)
@@ -164,6 +164,8 @@ function One({ element, ctx, onDone }: { element: Element, ctx: Ctx, onDone?: ()
       </table></div>
     ) : element.empty ? <p className="mv-text">{rich(element.empty)}</p> : null
     case 'select-many': {
+      // A selection nobody touched is the element's own initial list: the operation must send that, not nothing.
+      ctx.defaults[element.id] = element.initial
       const chosen = ctx.selections[element.id] ?? element.initial
       return (
         <fieldset disabled={element.disabled} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
@@ -205,7 +207,8 @@ function TerminalWithToasts({ api }: { api: string }) {
  */
 export function ViewPage({ view }: { view: View }) {
   const [selections, setSelections] = useState<Record<string, string[]>>({})
-  const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }
+  const defaults = useRef<Record<string, string[]>>({}).current
+  const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })), defaults }
   if (view.body.some(element => element.kind === 'custom')) return <div className="module-page"><Elements body={view.body} ctx={ctx} /></div>
   return (
     <div className="page">
@@ -218,7 +221,8 @@ export function ViewPage({ view }: { view: View }) {
 /** A module's view as a panel. */
 export function ViewPanel({ view }: { view: View }) {
   const [selections, setSelections] = useState<Record<string, string[]>>({})
-  const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }
+  const defaults = useRef<Record<string, string[]>>({}).current
+  const ctx: Ctx = { selections, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })), defaults }
   return (
     <section className="panel">
       {view.title && <h2>{view.title}{badge(view.status)}<HelpButtons view={view} /></h2>}

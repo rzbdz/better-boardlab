@@ -6,12 +6,13 @@
 import { useState, type ReactNode } from 'react'
 import { api } from '../../src/ui/api.ts'
 import { PURPOSES } from '../../src/ui/format.ts'
-import type { Board } from 'boardlab-core/shared/types.ts'
+import type { Board, LabSettings } from 'boardlab-core/shared/types.ts'
 import { Confirm, Icon, holder, refreshNow, setAsked, slotOf, upper, useAsked, useUI, Who } from './kit.tsx'
+import { DiscoverBoardDialog } from './discover.tsx'
 
-let current: { boards: Board[], you: string, rediscover: Set<string> } = { boards: [], you: '', rediscover: new Set() }
+let current: { boards: Board[], you: string, rediscover: Set<string>, labs: LabSettings[] } = { boards: [], you: '', rediscover: new Set(), labs: [] }
 /** The page tells the actions the latest state (who you are, every board, which labs can rediscover). */
-export function setActionState(boards: Board[], you: string, rediscover: string[] = []) { current = { boards, you, rediscover: new Set(rediscover) } }
+export function setActionState(boards: Board[], you: string, rediscover: string[] = [], labs: LabSettings[] = []) { current = { boards, you, rediscover: new Set(rediscover), labs } }
 export const canRediscover = (board: Board) => !!board.lab && current.rediscover.has(board.lab.id)
 
 function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: boolean, close: () => void, onDone: (purpose: string) => Promise<void> }) {
@@ -79,8 +80,11 @@ export function useBoardActions(board: Board) {
     flashPackage: (pkg: FlashPackage) => run('boot', '刷机', () => api.flashPackage(board.name, { url: pkg.url, flasher: pkg.flasher || undefined })),
     refresh: () => ask(`重新读取 ${name}`, '复位板子，从 EEPROM 读型号；换了板子时用。', '读取', () => void run('refresh', '重新读取', () => api.refresh(board.name, {}))),
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),
-    discoverSlot: () => ask(`发现 ${host} / ${slotOf(board).slot}`, '复位这个槽位的复位线，看串口认出插上的板子。只动这一个槽位。', '开始',
-      () => void run('discover', '发现', () => api.discoverLab(labId, { slots: [`${host}/${slotOf(board).slot}`] }))),
+    discoverSlot: () => {
+      const lab = current.labs.find(item => item.id === labId)
+      if (!lab) return ui.fail('不能发现', '这块板子的实验室不在了')
+      ui.layer(close => <DiscoverBoardDialog lab={lab} host={host} slot={`${host}/${slotOf(board).slot}`} close={close} />)
+    },
     rediscover: () => ask(`重新发现 ${host}`, <>保留在用的板子，忘掉串口不见的（比如 <b>{name}</b>），给新接上的串口建槽位并在空闲串口上找板子。只会复位没人用的复位线。</>,
       '重新发现', () => void run('rebuild', '重新发现', () => api.rebuildLab(labId, host, true), `${host} 重新发现好了`)),
     rebuild: () => {

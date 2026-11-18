@@ -28,7 +28,7 @@ function inline(part: Inline, key: number): ReactNode {
 }
 export const rich = (value: Rich): ReactNode => Array.isArray(value) ? value.map(inline) : inline(value, 0)
 
-interface Ctx { onRun: Run, onPrompt: (prompt: Prompt) => void, selections: Record<string, string[]> }
+interface Ctx { onRun: Run, onPrompt: (prompt: Prompt) => void, selections: Record<string, string[]>, setSelection: (id: string, values: string[]) => void, defaults: Record<string, string[]> }
 
 /** Run one operation: confirm first if it asks, then run it as an action, a job (its lines shown while it runs) or open it. */
 function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: () => void) {
@@ -36,7 +36,7 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   const [fraction, setFraction] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
   const [opened, setOpened] = useState(false)
-  const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? []])) })
+  const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? ctx.defaults[id] ?? []])) })
   const go = async () => {
     if (op.kind === 'open') { setOpened(true); return }
     if (op.kind === 'action') return ctx.onRun(op.label, async () => { const out = await op.run(input()); onDone?.(); return out.message }).then(() => {})
@@ -119,9 +119,11 @@ function Form({ element, ctx, onDone }: { element: Extract<Element, { kind: 'for
   )
 }
 
-function SelectMany({ element, ctx, onChange }: { element: Extract<Element, { kind: 'select-many' }>, ctx: Ctx, onChange: (values: string[]) => void }) {
+function SelectMany({ element, ctx }: { element: Extract<Element, { kind: 'select-many' }>, ctx: Ctx }) {
+  // A selection nobody touched is the element's own initial list: the operation must send that, not nothing.
+  ctx.defaults[element.id] = element.initial
   const chosen = ctx.selections[element.id] ?? element.initial
-  const toggle = (value: string) => onChange(chosen.includes(value) ? chosen.filter(item => item !== value) : [...chosen, value])
+  const toggle = (value: string) => ctx.setSelection(element.id, chosen.includes(value) ? chosen.filter(item => item !== value) : [...chosen, value])
   return (
     <fieldset className="toggles" disabled={element.disabled} aria-label={element.label}>
       {element.options.map(option => (
@@ -171,7 +173,7 @@ function One({ element, ctx, onDone }: { element: Element, ctx: Ctx, onDone?: ()
         </tr>)}</tbody>
       </table></div>
     ) : element.empty ? <p className="muted">{rich(element.empty)}</p> : null
-    case 'select-many': return <SelectMany element={element} ctx={ctx} onChange={values => { ctx.selections[element.id] = values }} />
+    case 'select-many': return <SelectMany element={element} ctx={ctx} />
     case 'timeline': return <ol className="steps">{element.items.map(item => <li key={item.key}>{item.at && <time>{time(item.at, false)}</time>}<span className={`slot-tag ${item.tag ? '' : 'ghost'}`}>{item.tag ?? '·'}</span><span>{rich(item.text)}</span></li>)}</ol>
     case 'progress': return <div className="job-log"><p className="muted">{rich(element.label)}</p>{element.fraction != null && <progress value={element.fraction} max={1} />}</div>
     case 'live': return <Live element={element} />
@@ -188,10 +190,11 @@ export function Elements({ body, ctx, onDone }: { body: Element[], ctx: Ctx, onD
 
 /** A module's view as one of this frontend's panels. */
 export function ViewPanel({ view, onRun, onPrompt }: { view: View, onRun: Run, onPrompt: (prompt: Prompt) => void }) {
-  const [selections] = useState<Record<string, string[]>>({})
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  const [defaults] = useState<Record<string, string[]>>({})
   return (
     <Section title={view.title ?? ''} extra={view.status ? <Pill tone={TONE[view.status.tone]}>{view.status.text}</Pill> : null}>
-      <Elements body={view.body} ctx={{ onRun, onPrompt, selections }} />
+      <Elements body={view.body} ctx={{ onRun, onPrompt, selections, defaults, setSelection: (id, values) => setSelections(current => ({ ...current, [id]: values })) }} />
     </Section>
   )
 }

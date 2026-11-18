@@ -15,6 +15,7 @@
  * settings (gpg.format, gpg.program, gpg.ssh.program).
  */
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -34,6 +35,10 @@ const release = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'))
 verifyStablePublication({ root, release })
 const files = ['install.sh', 'release.json', release.file].map(file => join(out, file))
 for (const file of files) if (!existsSync(file)) throw new Error(`${file} is missing: run scripts/release.mjs first`)
+// The tarball is what gets installed: published only if it is the file release.json names. A copy that ended early
+// or was edited after the release would otherwise be published as a release every install then refuses.
+const digest = createHash('sha256').update(readFileSync(join(out, release.file))).digest('hex')
+if (digest !== release.sha256) throw new Error(`${release.file} is not the file release.json names (sha256 ${digest}, expected ${release.sha256}): make the release again`)
 // What release.mjs wrote beside the tarball; a release made before changelog.mjs existed falls back to a line.
 const notesFile = join(out, 'CHANGELOG.md')
 const notes = existsSync(notesFile) ? readFileSync(notesFile, 'utf8') : `# boardlab ${release.version}\n\n${release.revision}\n`
@@ -48,11 +53,13 @@ if (how === 'git') {
     git(work, 'init', '-q'); git(work, 'checkout', '-q', '--orphan', branch)
     for (const file of files) copyFileSync(file, join(work, file.split('/').at(-1)))
     writeFileSync(join(work, 'CHANGELOG.md'), notes)
+    // Never write a credentialed URL (CI's job token) into the published README; the push above still uses it.
+    const shown = where.replace(/(^|\/\/)[^/@\s]+@/, '$1')
     writeFileSync(join(work, 'README.md'), `# boardlab ${release.version}
 
 The release boardlab installs and updates from. On the machine that will run boardlab, as root:
 
-    git clone -q --depth 1 -b ${branch} ${where} /tmp/boardlab-release && sh /tmp/boardlab-release/install.sh; rm -rf /tmp/boardlab-release
+    git clone -q --depth 1 -b ${branch} ${shown} /tmp/boardlab-release && sh /tmp/boardlab-release/install.sh; rm -rf /tmp/boardlab-release
 
 \`release.json\` names the tarball and its sha256. [CHANGELOG.md](CHANGELOG.md) says what changed since the previous
 release; the signed \`v${release.version}\` source tag identifies the revision it was built from. Each release replaces this branch's one commit.
@@ -80,7 +87,7 @@ release; the signed \`v${release.version}\` source tag identifies the revision i
     console.log(`could not build the changelog from the previous GitHub release (${String(error.stderr ?? error.message).trim().split('\n')[0]}); using the one release.mjs wrote`)
   }
   execFileSync('gh', ['release', 'create', tag, ...files, '--repo', where, '--title', `boardlab ${release.version}`,
-    '--notes-file', notesFile, '--target', option('target', 'main')], { stdio: 'inherit' })
+    '--notes-file', notesFile, '--verify-tag', '--target', option('target', 'main')], { stdio: 'inherit' })
   console.log(`published ${tag} on ${where}`)
   // Storage is not free: retain the newest release assets, but never delete source version tags.
   const keep = Math.max(1, Number(option('keep', '3')) || 3)

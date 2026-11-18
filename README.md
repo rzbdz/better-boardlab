@@ -89,6 +89,7 @@ storage. See the [guide](docs/guide.md) and [skill boot notes](skills/boardlab/b
 ## Documentation
 
 - [Guide](docs/guide.md): slots, locks, scans, remote labs, SDK workflows, and reverse proxies (Chinese).
+- [Design philosophy](docs/philosophy.md): what core, the distribution and each backend own, and the review checklist (Chinese).
 - [Clients](docs/help/clients.md) and [board hosts](docs/help/board-hosts.md): client and host configuration.
 - [Human requests](docs/help/human.md) and [SDK instances](docs/help/sdk-instances.md): assisted bench work and SDKs.
 - [Security](docs/security.md): deployment boundaries and credential handling (Chinese).

@@ -35,11 +35,21 @@ on() { if [[ $TARGET == local ]]; then bash -c "$1"; else "${SSH[@]}" "$TARGET" 
 feed() { if [[ $TARGET == local ]]; then bash -c "$1"; else "${SSH[@]}" "$TARGET" "$1"; fi; }
 
 REV=$(git rev-parse --short HEAD)
+VERSION=$(node -p "require('./package.json').version")
 [[ -z $(git status --porcelain --untracked-files=no -- src skills) ]] || [[ -n $ALLOW_DIRTY ]] || { echo "uncommitted changes in src/ or skills/; commit or pass --allow-dirty" >&2; exit 1; }
 [[ -f dist/cli.js ]] || { echo "build first: pnpm install && pnpm run build" >&2; exit 1; }
 
-echo "==> boardlab CLI $REV -> $TARGET"
-tar -czf - dist/*.js skills/boardlab | feed "set -e; D=~/.local/share/boardlab; rm -rf \$D/dist \$D/skills; mkdir -p \$D; tar -xzf - -C \$D; echo $REV > \$D/REVISION"
+echo "==> boardlab CLI $VERSION ($REV) -> $TARGET"
+# The same release layout the product's own installer uses: a directory under releases/, named by version and
+# revision, that `current` links to. boardd reads what a machine has from `current/VERSION` and `current/REVISION`,
+# so an update that only overwrote dist/ would leave it reporting the version it was first installed with.
+REL="$VERSION-$REV"
+tar -czf - dist/*.js skills/boardlab | feed "set -e; D=~/.local/share/boardlab
+  mkdir -p \$D/releases; rm -rf \$D/releases/$REL; mkdir -p \$D/releases/$REL
+  tar -xzf - -C \$D/releases/$REL
+  echo $REV > \$D/releases/$REL/REVISION; echo $VERSION > \$D/releases/$REL/VERSION
+  rm -rf \$D/dist \$D/skills
+  ln -sfn releases/$REL \$D/current.new && mv -Tf \$D/current.new \$D/current"
 
 # Node >= 24 (node:sqlite is not needed by the client, but the bundle targets Node 24).
 if ! on 'command -v node >/dev/null && [ "$(node -p "process.versions.node.split(\".\")[0]")" -ge 24 ]'; then
@@ -55,7 +65,9 @@ if ! on 'command -v node >/dev/null && [ "$(node -p "process.versions.node.split
 else
   NODE=node
 fi
-on "set -e; mkdir -p ~/.local/bin; printf '%s\n' '#!/bin/sh' 'exec $NODE \"\$HOME/.local/share/boardlab/dist/cli.js\" \"\$@\"' > ~/.local/bin/boardlab; chmod +x ~/.local/bin/boardlab; ln -sf boardlab ~/.local/bin/boards"
+# `--no-warnings` as the entry's own shebang has it: node's SQLite is experimental, and its warning would be the
+# first thing every run prints, before anything a person or a program asked for.
+on "set -e; mkdir -p ~/.local/bin; printf '%s\n' '#!/bin/sh' 'exec $NODE --no-warnings \"\$HOME/.local/share/boardlab/current/dist/cli.js\" \"\$@\"' > ~/.local/bin/boardlab; chmod +x ~/.local/bin/boardlab; ln -sf boardlab ~/.local/bin/boards"
 
 if [[ -n $GRANT && $REMOTE == ssh://* ]]; then
   TUNNEL=${REMOTE#ssh://}; TUNNEL=${TUNNEL%%/*}; TUNNEL_USER=${TUNNEL%@*}; TUNNEL_USER=${TUNNEL_USER:-boardlab}

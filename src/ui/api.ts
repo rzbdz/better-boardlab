@@ -2,7 +2,7 @@
  * Browser access to boardd's API, for every frontend and for modules' UI parts. The page acts as the local user, so it
  * never handles lease tokens. Paths are relative, so a page also works behind a reverse proxy under `/boardlab/`.
  */
-import type { Action, BoardChannels, BoardDetail, LabPorts, LabSettings, Lease, LockResult, SendResult, State } from 'boardlab-core/shared/types.ts'
+import type { Action, BoardChannels, BoardDetail, DiscoveryContext, DiscoveryMethod, LabPorts, LabSettings, Lease, LockResult, SendResult, State } from 'boardlab-core/shared/types.ts'
 import type { Scan, Slot } from '../shared/local.ts'
 import type { HaSettings } from '../shared/home-assistant.ts'
 
@@ -139,9 +139,18 @@ export const api = {
   testLab: (id: string) => call<LabSettings>('POST', 'api/labs/test', { id }),
   refresh: (board: string, options: { name?: string, rename?: boolean }) => call<{ board: string, message: string }>('POST', 'api/boards/refresh', { board, ...options }),
   rebuildLab: (id: string, host: string, keepInUse = false) => call<{ message: string }>('POST', 'api/labs/rebuild', { id, host, confirmed: true, keepInUse }),
-  discoverLab: (id: string, options: { human?: boolean, host?: string, slots?: string[], prefer?: number[] | string } = {}) => call<{ message: string }>('POST', 'api/labs/discover', { id, confirmed: true, ...options }),
+  discoverMethods: (id: string, context: DiscoveryContext = {}) => {
+    const query = new URLSearchParams({ id })
+    if (context.host) query.set('host', context.host)
+    if (context.slot) query.set('slot', context.slot)
+    return call<DiscoveryMethod[]>('GET', `api/labs/discover/methods?${query}`)
+  },
+  discoverLab: (id: string, request: { method: string, values?: Record<string, string>, host?: string, slot?: string }) =>
+    call<{ message: string, proposals: number, registered?: string[] }>('POST', 'api/labs/discover', { id, confirmed: true, ...request }),
   cancelDiscovery: (id: string) => call<{ message: string }>('POST', 'api/labs/discover/cancel', { id }),
+  /** Register a board a scan cannot see, from a backend's `compose` method (a person says what each role is). */
+  composeBoard: (id: string, request: { method: string, values?: Record<string, string>, host?: string, slot?: string }) =>
+    call<{ name: string, message: string }>('POST', 'api/labs/compose', { id, ...request }),
   labPorts: (id: string, fresh = false) => call<LabPorts>('GET', `api/labs/slots?id=${encodeURIComponent(id)}${fresh ? '&fresh=1' : ''}`),
-  bindLab: (id: string, input: { host: string, console: string, usb: string, name?: string }) => call<{ board: string }>('POST', 'api/labs/bind', { id, ...input }),
   removeBoard: (name: string) => call('POST', 'api/boards/remove', { name }),
 }

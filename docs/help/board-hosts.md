@@ -23,9 +23,9 @@ boardd 会 ssh 过去，传一份 bsp，装好 bspd 服务，再把站点同步�
 
 ## 主机型号和 GPIO
 
-主机型号决定 GPIO 排针的布局：哪个物理引脚是哪个 GPIO 号，哪些是电源和地。不填时，安装脚本读主机的 `/proc/device-tree/model`，和 bsp 自带的排针图（`packs/*/boards/<id>.yaml` 里的 `name:`）匹配。认不出来时，这台主机没有复位线，只能靠人按复位（页面上会请人按 RESET，确认后继续）。
+主机型号决定 GPIO 排针的布局：哪个物理引脚是哪个 GPIO 号，哪些是电源和地。不填时，安装脚本读主机的 `/proc/device-tree/model`，和 bsp 自带的排针图（`platforms/*/boards/<id>.yaml` 里的 `name:`）匹配。认不出来时，这台主机没有复位线，只能靠人按复位（页面上会请人按 RESET，确认后继续）。
 
-自己的主机型号，可以照 bsp 的 `examples/site/boards/example-40pin.yaml` 写一份排针图，放进 bsp 的 pack，然后在「主机型号」里填它的 id。
+自己的主机型号，可以照 bsp 的 `tests/fixtures/site/boards/example-40pin.yaml` 写一份排针图，放进 bsp 的一个 platform（或你自己的 site），然后在「主机型号」里填它的 id。
 
 ## 接线
 

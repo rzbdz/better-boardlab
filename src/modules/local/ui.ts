@@ -4,6 +4,7 @@
  */
 import { api, call } from '../../ui/api.ts'
 import { action, job, notice, text, type Element, type ModuleUi, type View } from '../../ui/contract.ts'
+import { events } from '../../ui/events.ts'
 import type { Scan, ScanRow } from '../../shared/local.ts'
 
 const scanApi = {
@@ -42,22 +43,29 @@ function result(rows: ScanRow[]): Element[] {
 /** Follow a scan through the page state until it ends, reporting each new step; resolves with its last state. */
 function follow(id: string, scope: number[], sink: { line(text: string): void, progress(fraction: number): void }, signal: AbortSignal): Promise<Scan> {
   return new Promise((resolve, reject) => {
-    const source = new EventSource('api/events')
-    let seen = 0
+    // The shared stream reconnects by itself; a stop of the job is noticed by the state read, not by a lost stream.
+    let seen = 0, ended = false, reading = false
     const check = async () => {
+      // A `scan` event, the stream coming back and the tick can land together: one read at a time, so a step is not
+      // reported twice.
+      if (ended || reading) return
+      reading = true
       try {
         const scan = (await api.state()).scan
         if (!scan || scan.id !== id) return
         for (const step of scan.steps.slice(seen)) sink.line(`${step.slot !== null ? `槽位 ${step.slot} · ` : ''}${shortenLinks(step.summary)}`)
         seen = scan.steps.length
-        const done = new Set(scan.steps.map(step => step.slot).filter(slot => slot !== null)).size
-        sink.progress(Math.min(0.99, done / Math.max(1, scope.length)))
-        if (scan.status !== 'running') { source.close(); resolve(scan) }
-      } catch (error) { source.close(); reject(error) }
+        const ran = new Set(scan.steps.map(step => step.slot).filter(slot => slot !== null)).size
+        sink.progress(Math.min(0.99, ran / Math.max(1, scope.length)))
+        if (scan.status !== 'running') { ending(); resolve(scan) }
+      } catch (error) { ending(); reject(error) } finally { reading = false }
     }
-    source.addEventListener('scan', () => void check())
-    source.addEventListener('changed', () => void check())
-    signal.addEventListener('abort', () => { void scanApi.cancel(id).catch(() => {}) })
+    // The shared stream brings the scan's steps; the tick reads them anyway while the page cannot hear it. `scan` is
+    // this module's own event, so it is named here: the shared stream knows no module's words.
+    const stop = events().listen({ names: ['scan', 'changed'], event: name => { if (name === 'scan' || name === 'changed') void check() }, back: () => void check() })
+    const tick = window.setInterval(() => void check(), 5_000)
+    const ending = () => { if (ended) return; ended = true; stop(); window.clearInterval(tick) }
+    signal.addEventListener('abort', () => { ending(); void scanApi.cancel(id).catch(() => {}) })
     void check()
   })
 }

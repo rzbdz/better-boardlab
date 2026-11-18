@@ -273,7 +273,7 @@ async function siteCommand({ client, args, argv, flag, json, out }: CommandConte
     const file = flag('file') ?? shortFile()
     if (!id || !file) throw new BoardsApiError(400, `要给 skill 的 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
     const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
-    // Writing over the site's own skill of that id is an edit; otherwise it takes over from a pack's.
+    // Writing over the site's own skill of that id is an edit; otherwise it takes over from a platform's.
     const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
     const original = site.skills?.some(skill => skill.id === id && skill.layer === 'site') ? id : undefined
     const result = await client.call<{ file: string }>('POST', '/api/bsp/site/skill', { id, text, ...(original ? { original } : {}) })
@@ -284,7 +284,7 @@ async function siteCommand({ client, args, argv, flag, json, out }: CommandConte
     const file = flag('file') ?? shortFile()
     if (!id || !file) throw new BoardsApiError(400, `要给 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
     const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
-    // Writing over the site's own document of that id is an edit; anything else adds one (or takes over from a pack's).
+    // Writing over the site's own document of that id is an edit; anything else adds one (or takes over from a platform's).
     const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
     const original = site.docs.some(doc => doc.kind === kind && doc.id === id && doc.layer === 'site') ? id : undefined
     const result = await client.call<{ file: string }>('POST', '/api/bsp/site/doc', { kind, id, text, ...(original ? { original } : {}) })
@@ -343,6 +343,42 @@ const set: Command = {
   },
 }
 
+const guidance: Command = {
+  name: 'guidance', noBoard: true,
+  usage: [
+    'guidance [--list]\t分层知识：通用提示、有笔记的 SoC、有 skill 的 SDK（--list 只说有哪些）',
+    'guidance --soc <soc>\t这颗 SoC 的笔记和它的资料在哪（socs/<soc>/*.md）',
+    'guidance --sdk <sdk>\t这个 SDK 自己的 SKILL.md（构建、启动、刷机怎么做）',
+    'guidance --dut <板>\t这个板子适用的全部知识：问它的 SoC 和 SDK，自动带上各层（先看板子的 lab.soc、lab.sdks）',
+  ],
+  async run({ client, flag, flags, out }) {
+    if (flags.has('list')) {
+      const got = await client.call<{ socs: string[], skills: string[], hints: string[] }>('GET', '/api/bsp/site/guidance')
+      return out(got, () => {
+        for (const [label, items] of [['通用提示', got.hints], ['有笔记的 SoC', got.socs], ['有 skill 的 SDK', got.skills]] as const)
+          console.log(`${label}：${items.length ? items.join('、') : '（没有）'}`)
+        if (!got.socs.length && !got.skills.length && !got.hints.length) console.log('站点里还没有知识：问维护者要，或 boardlab feedback --kind design')
+      })
+    }
+    const query = new URLSearchParams()
+    const dut = flag('dut')
+    if (dut) {
+      // The board says which levels apply; its host is the authority on its SoC and SDKs.
+      const detail = await client.board(dut)
+      const soc = flag('soc') ?? detail.board.soc ?? ''
+      const sdks = flag('sdk') ? [flag('sdk')!] : (detail.board.lab?.sdks ?? [])
+      if (soc) query.set('soc', soc)
+      for (const sdk of sdks) query.set('sdk', sdk)
+      if (!soc && !sdks.length) throw new Error(`${dut} 还没有登记 SoC 和 SDK：先 boardlab set ${dut} --soc <soc>，或用 guidance --list 看有哪些`)
+    } else {
+      if (flag('soc')) query.set('soc', flag('soc')!)
+      if (flag('sdk')) query.set('sdk', flag('sdk')!)
+    }
+    const got = await client.call<{ blocks: unknown[], text: string }>('GET', `/api/bsp/site/guidance?${query}`)
+    out(got, () => process.stdout.write(got.text.endsWith('\n') ? got.text : `${got.text}\n`))
+  },
+}
+
 const bsp: Command = {
   name: 'bsp', noBoard: true, usage: ['bsp <bsp 命令> …\t任何 bsp 命令，在 boardd 那边执行（本机不用装 bsp），例如 boardlab bsp hosts'],
   async run({ client, argv, json }) {
@@ -354,4 +390,4 @@ const bsp: Command = {
   },
 }
 
-export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [set, sdk, site, registry, bsp] }
+export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [guidance, set, sdk, site, registry, bsp] }

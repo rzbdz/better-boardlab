@@ -28,3 +28,12 @@ describe('module help and update feedback', () => {
     vi.unstubAllGlobals()
   })
 })
+
+
+describe('guidance', () => {
+  it('the site view carries the guidance help page', () => {
+    const state = { boards: [], labs: [], modules: [] } as never
+    const site = bspUi.views(state, {}).find((view: View) => view.id === 'bsp-site')
+    expect(site?.extra).toEqual({ 'bsp.guidanceHelp': 'guidance' })
+  })
+})

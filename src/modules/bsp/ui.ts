@@ -2,12 +2,12 @@
  * The bsp module's part of the page: in settings, its board hosts. Add one (a name and how to reach the machine: an
  * address, a user, a password or nothing when boardd's key or this machine's ssh setup gets in), install bspd on it
  * with its progress shown as it goes, update it (install again) or remove it. And the site the hosts read: where it
- * comes from, its SDKs and build servers (added, edited, removed), its SoC profiles and the images they need, and
+ * comes from, its SDKs and build servers (added, edited, removed), its SoC facts and the images they need, and
  * syncing it to every host.
  */
 import { call, stream } from '../../ui/api.ts'
 import { action, job, notice, open, text, type Element, type ModuleUi, type View } from '../../ui/contract.ts'
-import type { LabSettings } from 'boardlab-core/shared/types.ts'
+import type { Board, LabSettings } from 'boardlab-core/shared/types.ts'
 
 const ACCESS = [
   { kind: 'text' as const, id: 'address', label: '主机地址', placeholder: 'IP、域名、ssh 配置里的名字，或 localhost（就是这台）', required: true },
@@ -34,8 +34,15 @@ function install(lab: LabSettings | null): Element[] {
       submit: job('install', lab ? '重新安装' : '添加并安装', async (input, sink, signal) => {
         const id = lab?.id ?? String(input.id).trim()
         if (!lab) { sink.line(`添加实验室 ${id}…`); await call('POST', 'api/labs/add', { id, kind: 'bsp' }) }
-        const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board }, sink, signal)
-        return done.message
+        try {
+          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board }, sink, signal)
+          return done.message
+        } catch (error) {
+          // A lab added for this attempt and then not installed is not a lab: without this, the next try would be
+          // refused ("已经有实验室") and the form could never retry.
+          if (!lab) await call('POST', 'api/labs/remove', { id }).catch(() => {})
+          throw error
+        }
       }, { intent: 'primary' }),
     },
   ]
@@ -52,6 +59,8 @@ function gpioLink(url: string | null, lab: string): string {
 interface BoardChoices {
   control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
   usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
+  /** Its SoC and SDKs as registered, and the SoCs and SDKs the catalog offers (`sdks` empty: every SDK of its SoC). */
+  soc: string | null, sdks: string[], socs: Array<{ value: string, label: string }>, sdkOptions: Array<{ value: string, label: string }>
 }
 /** A bsp board's record, edited as choices from its actual host, never hand-written GPIO/USB identifiers. */
 const boardChoices = new Map<string, BoardChoices>()
@@ -66,7 +75,6 @@ function readBoardChoices(board: string): Promise<BoardChoices> {
 }
 function boardForm(board: string, current: BoardChoices): Element[] {
   boardChoices.set(board, current)
-  const actor = current.control.backend === 'human' ? 'human' : 'gpio-relay'
   const option = (value: string | undefined, label: string) => value ? [{ value, label }] : []
   const withCurrent = (options: Array<{ value: string, label: string }>, value: string | undefined) =>
     options.some(item => item.value === value) || !value ? options : [...options, { value, label: `${value}（当前登记，未在扫描中）` }]
@@ -75,32 +83,36 @@ function boardForm(board: string, current: BoardChoices): Element[] {
   const ports = withCurrent(current.ports, current.usb ?? undefined)
   const currentFdl = current.control.fdl?.strategy ?? 'unset'
   return [
-    text('改登记（保存时检查你持有这块板子的锁）。GPIO 和下载口来自主机的实际列表；human 表示由人完成该动作。'),
+    text('改登记（保存时检查你持有这块板子的锁）。GPIO 和下载口来自主机的实际列表；human 表示由人完成该动作。SoC 和 SDK 决定这块板子能用哪些启动/刷机配方。'),
+    { kind: 'select-many', id: 'sdks', label: 'SDK（不选 = 这个 SoC 的全部）', options: current.sdkOptions, initial: current.sdks },
     { kind: 'form', fields: [
-      { kind: 'choice', id: 'resetActor', label: 'reset 由谁执行', initial: actor, options: [
-        { value: 'human', label: 'human（请人按 RESET）' }, { value: 'gpio-relay', label: 'GPIO（下面选择复位线）' }] },
+      { kind: 'choice', id: 'soc', label: 'SoC', initial: current.soc ?? '', options: [
+        { value: '', label: '不改 / 不知道' }, ...current.socs] },
       { kind: 'choice', id: 'resetPin', label: 'reset GPIO', initial: current.control.reset?.pin ?? '', options: [
         { value: '', label: '不改 / 不使用' }, ...gpios] },
-      { kind: 'choice', id: 'fdlActor', label: 'FDL 由谁执行', initial: currentFdl === 'strapped' ? 'strapped' : actor, options: [
-        { value: 'human', label: 'human（请人按 BOOT + RESET）' }, { value: 'gpio-relay', label: 'GPIO（下面选择 FDL 线）' },
-        { value: 'strapped', label: 'strapped（复位就进下载模式）' }] },
+      { kind: 'choice', id: 'fdl', label: '怎么进下载模式', initial: currentFdl, options: [
+        { value: 'unset', label: '还不知道' }, { value: 'button', label: '按 BOOT + RESET' },
+        { value: 'strapped', label: '复位就进下载模式' }] },
       { kind: 'choice', id: 'fdlPin', label: 'FDL GPIO', initial: current.control.fdl?.pin ?? '', options: [
         { value: '', label: '不改 / 不使用' }, ...fdlGpios] },
       { kind: 'choice', id: 'usb', label: '下载口', initial: current.usb ?? '', options: [
         { value: '', label: '不改' }, ...ports] },
     ], submitLabel: '保存',
       submit: action('save', '保存', async input => {
-        if (input.resetActor === 'gpio-relay' && !input.resetPin) throw new Error('选择 GPIO 执行 reset 时必须选一根 reset GPIO')
-        if (input.fdlActor === 'gpio-relay' && !input.fdlPin) throw new Error('选择 GPIO 执行 FDL 时必须选一根 FDL GPIO')
-        const nextFdl = input.fdlActor === 'strapped' ? 'strapped' : input.fdlActor === actor ? currentFdl : 'button'
-        const changed: Record<string, unknown> = { board, usb: input.usb }
-        if (input.resetPin && input.resetPin !== current.control.reset?.pin) changed.resetPin = input.resetPin
-        if (input.fdlPin && input.fdlPin !== current.control.fdl?.pin) changed.fdlPin = input.fdlPin
-        if (input.resetActor !== actor) changed.resetActor = input.resetActor
-        if (input.fdlActor !== actor) changed.fdlActor = input.fdlActor
-        if (nextFdl !== currentFdl) changed.fdl = nextFdl
+        // Only what changed is sent: an untouched field that is only observable in some state (the download port is
+        // enumerated in download mode) must not make a save fail. Every save may say which SDKs explicitly; an
+        // empty list means every SDK of the SoC (bsp's own default).
+        const changed: Record<string, unknown> = { board }
+        const sdks = input.sdks as string[] | undefined
+        if (sdks !== undefined && sdks.join('\u0000') !== (current.sdks ?? []).join('\u0000')) changed.sdks = sdks
+        if (typeof input.usb === 'string' && input.usb && input.usb !== current.usb) changed.usb = input.usb
+        if (typeof input.soc === 'string' && input.soc && input.soc !== current.soc) changed.soc = input.soc
+        if (typeof input.resetPin === 'string' && input.resetPin && input.resetPin !== current.control.reset?.pin) changed.resetPin = input.resetPin
+        if (typeof input.fdlPin === 'string' && input.fdlPin && input.fdlPin !== current.control.fdl?.pin) changed.fdlPin = input.fdlPin
+        if (typeof input.fdl === 'string' && input.fdl && input.fdl !== currentFdl) changed.fdl = input.fdl
+        if (Object.keys(changed).length === 1) return '没有改动'
         return (await call<{ message: string }>('POST', 'api/bsp/board', changed)).message
-      }, { intent: 'primary' }) },
+      }, { intent: 'primary', using: ['sdks'] }) },
   ]
 }
 
@@ -111,7 +123,7 @@ function openBoardForm(board: string) {
   })
 }
 
-// ---- the site: SDKs, build servers and SoC profiles every host reads, kept by boardd ----
+// ---- the site: SDKs, build servers and SoC facts every host reads, kept by boardd ----
 
 type Kind = 'instances' | 'servers' | 'workspaces' | 'families'
 interface SiteDoc { kind: Kind, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
@@ -330,7 +342,7 @@ function advanced(s: SiteStatus): Element {
         { kind: 'list', empty: '没有 SoC 资料', items: s.socs.map(item => ({ key: `${item.layer}/${item.soc}`, title: item.soc, description: item.layer === 'site' ? `站点的 socs/${item.soc}` : `bsp 自带（${item.layer}）` })) },
       ] },
       { kind: 'group', title: 'SDK skill', body: [
-        text('SDK 可以带自己的 SKILL.md（站点的 skills/<id>.md，或 bsp 自带 pack 里的 skills/<id>.md）：agent 在那个 SDK 的仓库里工作时，用 boardlab sdk skill <id> 打印，或 --install 装到 .claude/skills/<id>/SKILL.md。'),
+        text('SDK 可以带自己的 SKILL.md（站点的 skills/<id>.md，或 bsp 自带平台里的 skills/<id>.md）：agent 在那个 SDK 的仓库里工作时，用 boardlab sdk skill <id> 打印，或 --install 装到 .claude/skills/<id>/SKILL.md。'),
         { kind: 'list', empty: '还没有 SDK skill', items: (s.skills ?? []).map(skill => ({ key: `${skill.layer}/${skill.id}`, title: skill.id, description: `${skill.file}${skill.title !== skill.id ? ` · ${skill.title}` : ''}`, tag: skill.layer === 'site' ? undefined : `bsp 自带（${skill.layer}）` })) },
       ] },
       { kind: 'group', title: '编辑原文', body: [
@@ -359,7 +371,10 @@ function siteView(labs: LabSettings[]): View {
   const loose = sdks.filter(doc => doc.fields.workspace || !servers.some(server => server.id === doc.fields.server))
   const optional = s?.images?.optional ?? []
   return {
-    id: 'bsp-site', slot: 'settings', title: 'SDK 与站点', help: 'site',
+    id: 'bsp-site', slot: 'settings', title: 'SDK 与站点', help: 'site', order: 20,
+    summary: 'SDK 在哪、怎么刷，同步到每台板卡主机。',
+    // The guidance levels are read from this site; the help says how an agent asks for them.
+    extra: { 'bsp.guidanceHelp': 'guidance' },
     hint: {
       commands: ['boardlab site show', 'boardlab site set server <id> --file <yaml>', 'boardlab site set sdk <id> --file <yaml>', 'boardlab site remove <sdk|server|family|workspace> <id>', 'boardlab site sync', 'boardlab sdk plan <sdk> --boot load|download'],
       context: () => s ? siteContext(s) : '（站点还没读到）',
@@ -419,17 +434,22 @@ export const ui: ModuleUi = {
     if (board) {
       const bspBoard = !!board.lab && !board.lab.empty && labs.some(lab => lab.id === board.lab!.id)
       const home = bspBoard ? labs.find(lab => lab.id === board.lab!.id) : undefined
-      return bspBoard ? [{
+      if (!bspBoard) return []
+      // A board its host can debug carries the debug block: the path is asked for once, then kept.
+      if (hasDebug(board)) void readDebug(board.name)
+      return [{
         id: 'bsp-board', slot: 'board', title: 'bsp 登记',
         body: [
           { kind: 'actions', actions: [openBoardForm(board.name)] },
           // The host's own page: its GPIO header, lines and events, opened on the host itself.
           ...(home?.url ? [text([{ link: 'GPIO 面板', href: gpioLink(home.url, home.id) }])] : []),
+          ...debugView(board),
         ],
-      }] : []
+      }]
     }
     return [{
-      id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机', help: 'board-hosts',
+      id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机', help: 'board-hosts', order: 10,
+      summary: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。',
       status: labs.length ? { tone: labs.every(lab => lab.enabled && lab.verifyOk !== false) ? 'ok' : 'warn', text: `${labs.length} 台` } : undefined,
       body: [
         text('接着板子的机器。每台装上 bspd，就是一个实验室：它的复位线、串口和下载口由 boardd 管，锁和排队在这里。'),
@@ -453,4 +473,105 @@ export const ui: ModuleUi = {
       ],
     }, siteView(labs)]
   },
+}
+
+// ---- debug: what can debug a board, and its session ----
+
+
+interface DebugPath {
+  provider: string, title?: string, about?: string, kinds: string[], running: boolean,
+  endpoint?: string | null, state?: Array<{ label: string, value: string }>,
+}
+
+const paths = new Map<string, DebugPath | null>()
+const asking = new Map<string, Promise<DebugPath | null>>()
+
+/** The board's debug path as its host reported it last, or null (no path, or not asked yet). */
+export function debugPath(board: string): DebugPath | null { return paths.get(board) ?? null }
+export function hasDebug(board: Board): boolean { return !!board.lab?.debug }
+
+export function readDebug(board: string, refresh = false): Promise<DebugPath | null> {
+  if (!refresh && paths.has(board)) return Promise.resolve(paths.get(board) ?? null)
+  const pending = asking.get(board)
+  if (pending) return pending
+  const ask = call<{ debug: DebugPath | null }>('POST', 'api/debug', { board, action: 'path' })
+    .then(got => { const path = got?.debug ?? null; paths.set(board, path); return path })
+    .catch(() => { paths.set(board, null); return null })
+    .finally(() => { if (asking.get(board) === ask) asking.delete(board) })
+  asking.set(board, ask)
+  return ask
+}
+
+const KINDS: Record<string, { label: string, intent?: 'default' | 'danger' }> = {
+  halt: { label: '暂停' }, run: { label: '继续' }, reset: { label: '复位（调试口）' }, step: { label: '单步' },
+  regs: { label: '寄存器' },
+}
+
+function runAction(board: string, kind: string) {
+  return action(`debug-${kind}`, KINDS[kind]?.label ?? kind, async () => {
+    const got = await call<{ debug: { message?: string, data?: Array<{ label: string, value: string }> } }>('POST', 'api/debug', { board, action: kind })
+    paths.delete(board)
+    const data = got.debug?.data ?? []
+    return { message: got.debug?.message ?? `${kind} 已完成`, data }
+  }, { intent: KINDS[kind]?.intent })
+}
+
+/** A session's trace, shown as it arrives: lines are what the channel prints, in order. */
+function trace(board: string): Element {
+  return {
+    kind: 'live',
+    height: 'large',
+    stream: {
+      id: `bsp-debug-${board}`,
+      open(sink) {
+        const source = new EventSource(`api/debug/stream?board=${encodeURIComponent(board)}`)
+        let pending = ''
+        source.onmessage = event => {
+          let bytes: Uint8Array
+          try { bytes = Uint8Array.from(atob(event.data), char => char.charCodeAt(0)) } catch { return }
+          pending += new TextDecoder().decode(bytes, { stream: true })
+          const lines = pending.split(/\r?\n/)
+          pending = lines.pop() ?? ''
+          for (const line of lines) sink.line(line)
+        }
+        return () => { if (pending) sink.line(pending); source.close() }
+      },
+    },
+  }
+}
+
+/** The board slot's debug block, once its path is known. */
+export function debugView(board: Board): Element[] {
+  const path = debugPath(board.name)
+  if (!path) return []
+  const kinds = path.kinds.filter(kind => kind in KINDS)
+  return [
+    {
+      kind: 'group', title: `调试（${path.title ?? path.provider}）`, help: 'debug',
+      status: path.running ? { tone: 'ok', text: '会话在跑' } : { tone: 'neutral', text: '未启动' },
+      body: [
+        ...(path.about ? [text(path.about, 'neutral')] : []),
+        ...(path.state?.length ? [{ kind: 'facts' as const, items: path.state.map(item => ({ label: item.label, value: item.value })) }] : []),
+        {
+          kind: 'actions',
+          actions: path.running
+            ? [
+                action('debug-stop', '停止调试会话', async () => {
+                  const got = await call<{ debug: { message: string } }>('POST', 'api/debug', { board: board.name, action: 'stop' })
+                  paths.delete(board.name)
+                  return got.debug.message
+                }),
+                ...kinds.map(kind => runAction(board.name, kind)),
+              ]
+            : [job('debug-start', '启动调试会话', async (_input, sink) => {
+                sink.line('让主机把调试口交给这块板子…')
+                const got = await call<{ debug: DebugPath }>('POST', 'api/debug', { board: board.name, action: 'start' })
+                paths.delete(board.name)
+                return `调试会话起来了${got.debug?.endpoint ? `：${got.debug.endpoint}` : ''}（跟着板子的锁，板子一释放就停）`
+              }, { intent: 'primary' })],
+        },
+        ...(path.running && path.kinds.includes('trace') ? [trace(board.name)] : []),
+      ],
+    },
+  ]
 }

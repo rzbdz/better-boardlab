@@ -61,7 +61,7 @@ SoC 资料里可以列一些探测用的镜像（例如 K1 的 FSBL 和 U-Boot�
 
 ## SDK 自己的说明（skill）
 
-SDK 可以带一份自己的 `SKILL.md`，说明一份源码树在这个 SDK 里怎么用（例如同一份 bsp 源码的不同启动配置：edk2、u-boot、ACPI）。它放在站点的 `skills/<sdk>.md`；bsp 自带的 pack 也可以放 `<pack>/skills/<sdk>.md`，站点里的同 id 覆盖 pack 的。这是 Markdown，不是目录里的 YAML，所以不参与目录校验，同步时也不发给板卡主机。
+SDK 可以带一份自己的 `SKILL.md`，说明一份源码树在这个 SDK 里怎么用（例如同一份 bsp 源码的不同启动配置：edk2、u-boot、ACPI）。它放在站点的 `skills/<sdk>.md`；bsp 自带的 platform 也可以放 `<platform>/skills/<sdk>.md`，站点里的同 id 覆盖 platform 的。这是 Markdown，不是目录里的 YAML，所以不参与目录校验，同步时也不发给板卡主机。
 
 在 SDK 的仓库里工作时，agent 可以这样取到它：
 

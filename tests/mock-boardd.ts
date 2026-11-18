@@ -28,7 +28,8 @@ export function mockState(you = 'user:alice'): State {
     yields: [{ id: 'y1', board: 'bsp-k1-musecard', holder: 'claude:kernel-bisect-mmc', purpose: 'bisect the mmc0 timeout', owner: you, at: now, until: now }],
     modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'bsp', title: 'bsp 板卡主机' }, { id: 'clients', title: '客户端配置' }, { id: 'system', title: '系统' }],
     boards: [
-      board('bsp-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'bsp/host-a/s1', lab: inLab('k1-musecard') }),
+      board('bsp-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'bsp/host-a/s1',
+        lab: inLab('k1-musecard', { debug: { provider: 'my-swd', title: 'SWD over GPIO', kinds: ['halt', 'run', 'step', 'regs', 'trace'] } }) }),
       board('bsp-k3-deb1', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s3', lease: lease('bsp-k3-deb1', you, '临时调试'), lab: inLab('k3-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null } }) }),
       board('bsp-k3-cm1', { product: 'k3_com260', soc: 'k3', slotRef: 'bsp/host-b/s4', lease: lease('bsp-k3-cm1', 'user:bob', '跑启动回归'), waiters: [{ id: 'w1', board: 'bsp-k3-cm1', holder: 'user:carol', purpose: '临时开发任务', queuedAt: now }], lab: inLab('k3-cm1') }),
       board('bsp-k1-pico', { product: 'k1-x_pico', soc: 'k1', slotRef: 'bsp/host-a/s2', lab: inLab('k1-pico', { attention: '请按一下 k1-pico 的 RESET 键，然后点「我已完成」' }) }),
@@ -40,9 +41,10 @@ export function mockState(you = 'user:alice'): State {
     ],
     labs: [{
       id: 'bsp', kind: 'bsp 板卡主机', about: 'boardd 用 bsp 命令行操作 bsp 管理的板子。', fields: { url: { label: 'bsp 主机 registry', placeholder: 'http://registry:8765', required: false } },
-      canDiscover: true, canRebuild: true, canRediscover: true, canRemove: true, canBind: true, canRelay: true, hosts: ['host-a', 'host-b'],
+      canDiscover: true, canRebuild: true, canRediscover: true, canRemove: true, canListPorts: true, canRelay: true, hosts: ['host-a', 'host-b'],
       discovery: { running: false, line: '登记了 1 块：host-a/k1-musecard', at: now }, enabled: true, url: 'http://registry.example:8765', username: null,
       hasPassword: false, jump: null, defaultJump: null, devices: null, verifiedAt: now, verifyOk: true, verifyMessage: '2 台 bsp 主机（host-a、host-b），5 块板子',
+      addedAs: 'bsp',
     }],
     firmware: [{ soc: 'k3', purpose: 'fsbl', path: 'firmware/k3/FSBL.bin', sha256: 'a'.repeat(64), note: null }],
     proposals: [{ id: 'p1', scanId: 's1', kind: 'new-board', board: null, slot: 2, summary: '槽位 2 上的新板子：k1-x_deb1，串口 USB 1.3，下载口 1-1.2', change: { name: 'k1-deb1-2' }, status: 'pending' }],

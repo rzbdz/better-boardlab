@@ -5,6 +5,7 @@ import { ACTIONS } from '../../../src/ui/format.ts'
 import { ask, onPrefs, permission, prefs, support, TOPICS, type Topic } from '../../../src/ui/notify.ts'
 import type { Board, LabSettings, Proposal } from 'boardlab-core/shared/types.ts'
 import { age, Confirm, fmtAt, Icon, model, slotOf, upper, useUI, Who } from '../kit.tsx'
+import { AddDevicePanel, DiscoverBoardDialog, DiscoverLabDialog } from '../discover.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import type { View } from '../../../src/ui/contract.ts'
 
@@ -36,33 +37,20 @@ function Proposals({ proposals }: { proposals: Proposal[] }) {
 function LabPanel({ lab, state, open }: { lab: LabSettings, state: PageState, open: (board: string) => void }) {
   const ui = useUI()
   const boards = state.boards.filter(b => b.lab?.id === lab.id), running = !!lab.discovery?.running
-  const anyHeld = boards.filter(held)
   const fire = (label: string, promise: Promise<{ message?: string }>) => void promise.then(out => ui.toast(`${label}：开始了`, out?.message), e => ui.fail(`${label}失败`, e))
-  const discoverAll = () => ui.layer(close => <DiscoverDialog lab={lab} close={close} onGo={prefer => fire('发现', api.discoverLab(lab.id, { prefer }))} />)
+  const discoverAll = () => ui.layer(close => <DiscoverLabDialog lab={lab} close={close} />)
   const cancel = () => void api.cancelDiscovery(lab.id).then(out => ui.toast('取消发现', out.message), e => ui.fail('取消发现失败', e))
   return <>
     <section className="panel">
-      <h2><Icon name="radar" /><span className="ttl">实验室 {lab.id}</span><span className="sub small">{lab.kind}{lab.syncedAt ? ` · ${age(lab.syncedAt)}前同步` : ''}</span>
-        <span className="acts"><button className="pill sm danger-o" disabled={running || anyHeld.length > 0} title={anyHeld.length ? `${anyHeld.map(b => upper(b.name)).join('、')} 有锁` : undefined} onClick={discoverAll}><Icon name="radar" />发现新板子</button></span></h2>
-      <p className="lead">{anyHeld.length ? `有 ${anyHeld.length} 块板子有锁，整个实验室的发现要等它们释放；单个空槽位和人工配对随时可以。` : '找到的板子马上登记；没能自动登记的列在「待确认」。'}</p>
+      <header className="lab-head">
+        <div className="title"><Icon name="radar" /><h2>实验室 {lab.id}</h2><span className="sub small">{lab.kind}{lab.syncedAt ? ` · ${age(lab.syncedAt)}前同步` : ''}</span></div>
+        <div className="acts">{lab.canDiscover && <button className="pill sm danger-o" disabled={running} onClick={discoverAll}><Icon name="search" />发现板子</button>}</div>
+      </header>
+      <p className="lead">找到的板子马上登记；没能自动登记的列在「待确认」。正在使用的板子不受影响。</p>
       {lab.discovery && <div className={`flag${running ? ' run' : ''}`} style={{ margin: 0 }}>{running ? <span className="spin" /> : <Icon name="clock" />}<div><b>{running ? '正在发现' : '上次发现'}</b><span>{lab.discovery.line} · {age(lab.discovery.at)}前</span></div>
         {running && <button className="pill sm" onClick={cancel}><Icon name="x" />取消发现</button>}</div>}
     </section>
     <div className="panels">{lab.hosts.map(host => <HostPanel key={host} lab={lab} host={host} state={state} boards={boards.filter(b => slotOf(b).host === host)} running={running} open={open} />)}</div>
-  </>
-}
-
-/** Discovery over the whole lab, with the GPIO numbers the person knows this batch is wired to, tried first. */
-function DiscoverDialog({ lab, close, onGo }: { lab: LabSettings, close: () => void, onGo: (prefer: string) => void }) {
-  const [typed, setTyped] = useState('')
-  return <>
-    <h2>在实验室 {lab.id} 发现新板子</h2>
-    <div className="lead">在所有主机上找新接的板子：逐个拉还没用过的复位线，看哪个串口有反应、哪个下载口出现。<b>接在这些线上的板子会被复位。</b></div>
-    <label className="field wide" style={{ marginTop: 12 }}><span>先试这些 GPIO（可选）</span>
-      <input className="input" placeholder="例如 12,13、GPIO12、gpio_13、P15" value={typed} onChange={e => setTyped(e.target.value)} />
-      <span className="sub small">{typed ? '会先试这些，再按主机原来的顺序试别的；认不出编号会提示。' : '知道这批板子接在哪些排针上时填上，先试这些；不填就按主机原来的顺序。'}</span>
-    </label>
-    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill danger" onClick={() => { close(); onGo(typed) }}>开始发现</button></div>
   </>
 }
 
@@ -75,22 +63,22 @@ function HostPanel({ lab, host, state, boards, running, open }: { lab: LabSettin
     .sort((a, b) => a.slot.localeCompare(b.slot, 'en', { numeric: true }))
   const rebuild = () => ui.layer(close => <RebuildDialog host={host} boards={boards} close={close} onGo={() => fire(`重建 ${host}`, api.rebuildLab(lab.id, host))} />)
   const rediscover = () => ui.layer(close => <RediscoverDialog host={host} boards={boards} close={close} onGo={() => fire(`重新发现 ${host}`, api.rebuildLab(lab.id, host, true))} />)
-  const human = () => ui.layer(close => <Confirm title={`人工配对 · ${host}`} ok="开始" close={close} onOk={() => fire('人工配对', api.discoverLab(lab.id, { human: true, host }))}>
-    没有复位线的板子用这个：开始后按页面上的提示，<b>一次只让一块还没登记的板子进下载模式</b>，实验室把串口和下载口配成一对。不会复位别的板子，有人在用板子时也能用。</Confirm>)
   return (
     <section className="panel">
-      <h2><Icon name="server" /><span className="ttl">{host}</span><span className="sub small">{boards.filter(b => !b.lab?.empty).length} 块板子{lockedHere.length ? ` · ${lockedHere.length} 块有锁` : ''}</span>
-        <span className="acts">
-          <button className="pill sm" disabled={running} onClick={human}><Icon name="hand" />人工配对</button>
+      <header className="lab-head">
+        <div className="title"><Icon name="server" /><h2>{host}</h2><span className="sub small">{boards.filter(b => !b.lab?.empty).length} 块板子{lockedHere.length ? ` · ${lockedHere.length} 块有锁` : ''}</span></div>
+        <div className="acts">
+          {running && <button className="pill sm danger-o" onClick={() => void api.cancelDiscovery(lab.id).then(out => ui.toast('取消发现', out.message), error => ui.fail('取消发现失败', error))}><Icon name="x" />取消发现</button>}
           {lab.canRediscover && <button className="pill sm" disabled={running} title="保留在用的板子，只重做变动的" onClick={rediscover}><Icon name="radar" />重新发现</button>}
           {lab.canRebuild && <button className="pill sm danger-o" disabled={running || lockedHere.length > 0} title={lockedHere.length ? `${lockedHere.map(b => upper(b.name)).join('、')} 有锁` : '整台主机从头来过'} onClick={rebuild}><Icon name="rebuild" />重建</button>}
-        </span></h2>
-      <p className="lead">{lab.canRediscover ? '重新布线后：「重新发现」保留在用的板子，只去掉串口不见的、找空闲串口上的板子；「重建」整台主机从头来过。' : '重新布线后重建，按现在的接线重新对出串口、复位线和下载口。'}{lockedHere.length ? <> <Icon name="lock" /> {lockedHere.map(b => upper(b.name)).join('、')} 有锁{lab.canRebuild ? '，重建要等它们释放' : ''}。</> : null}</p>
-      <div className="slots">{slots.map(({ slot, b, p }) => {
-        if (p) return <div key={p.id} className="slot prop"><b>{slot}</b><span className="n">新板子 · 待确认</span><span className="sub">{String(p.change.product ?? '')}</span></div>
+        </div>
+      </header>
+      <p className="lead">{lab.canRediscover ? '重新布线后：「重新发现」保留在用的板子，只重做变动的；「重建」整台主机从头来过。' : '重新布线后重建，按现在的接线重新发现这台主机上的板子。'}{lockedHere.length ? <> <Icon name="lock" /> {lockedHere.map(b => upper(b.name)).join('、')} 有锁{lab.canRebuild ? '，重建要等它们释放' : ''}。</> : null}</p>
+      <div className="slot-list">{slots.map(({ slot, b, p }) => {
+        if (p) return <div key={p.id} className="slot-row prop"><span className="sid">{slot}</span><span className="sname">新板子 · 待确认</span><span className="sstatus">{String(p.change.product ?? '')}</span><span className="sact" /></div>
         const m = model(b!, state.you)
-        if (m.lock === 'empty') return <button key={b!.name} className="slot empty" onClick={() => ui.layer(close => <Confirm title={`发现 ${host} / ${slot}`} ok="开始" close={close} onOk={() => fire('发现', api.discoverLab(lab.id, { slots: [`${host}/${slot}`] }))}>复位这个槽位的复位线，看串口认出插上的板子。只动这一个槽位。</Confirm>)}><b>{slot}</b><span className="sub">空 · 点这里发现</span></button>
-        return <button key={b!.name} className={`slot ${m.key}`} onClick={() => open(b!.name)}><b>{slot}</b><span className="n" title={upper(b!.name)}>{upper(b!.name)}</span><span><span className={`dot ${m.tone}`} /> {m.word}</span></button>
+        if (m.lock === 'empty') return <div key={b!.name} className="slot-row empty"><span className="sid">{slot}</span><span className="sname">空槽位</span><span className="sstatus">还没有登记板子</span><span className="sact">{lab.canDiscover && <button className="pill sm" onClick={() => ui.layer(close => <DiscoverBoardDialog lab={lab} host={host} slot={`${host}/${slot}`} close={close} />)}><Icon name="search" />发现这块板</button>}</span></div>
+        return <button key={b!.name} className={`slot-row ${m.key}`} onClick={() => open(b!.name)}><span className="sid">{slot}</span><span className="sname" title={upper(b!.name)}>{upper(b!.name)}</span><span className="sstatus"><span className={`dot ${m.tone}`} /> {m.word}</span><span className="sact"><Icon name="chev" /></span></button>
       })}{!slots.length && <span className="sub small">这台主机上还没有槽位。</span>}</div>
     </section>
   )
@@ -104,7 +92,7 @@ function RediscoverDialog({ host, boards, close, onGo }: { host: string, boards:
       <ul className="blist">
         <li>保留在用的板子：{inUse.length ? inUse.map(b => upper(b.name)).join('、') : '（没有）'}</li>
         <li>忘掉串口不见的板子：{gone.length ? gone.map(b => upper(b.name)).join('、') : '（没有）'}</li>
-        <li>给新接上的串口建槽位，在空闲串口上找板子（会复位没人用的复位线）</li>
+        <li>给新接上的串口建槽位，在空闲串口上找板子（可能复位没人用的板子）</li>
       </ul></div>
     <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" onClick={() => { close(); onGo() }}>重新发现</button></div>
   </>
@@ -113,7 +101,7 @@ function RediscoverDialog({ host, boards, close, onGo }: { host: string, boards:
 function RebuildDialog({ host, boards, close, onGo }: { host: string, boards: Board[], close: () => void, onGo: () => void }) {
   return <>
     <h2>重建 {host}</h2>
-    <div className="lead">boardd 会<b>忘掉</b>这台主机上的板子和槽位，然后复位每条复位线，按现在的接线重新对出串口和下载口：
+    <div className="lead">boardd 会<b>忘掉</b>这台主机上的板子和槽位，按现在的接线重新发现，可能复位没人用的板子：
       <ul className="blist">{boards.map(b => <li key={b.name}>{b.lab?.empty ? `空槽位 ${slotOf(b).slot}` : `${upper(b.name)} · ${slotOf(b).slot}`}</li>)}</ul>认出来的板子沿用原名。</div>
     <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill danger" onClick={() => { close(); onGo() }}>重建</button></div>
   </>
@@ -121,10 +109,13 @@ function RebuildDialog({ host, boards, close, onGo }: { host: string, boards: Bo
 
 export function DiscoverPage({ state, open }: { state: PageState, open: (board: string) => void }) {
   const labs = state.labs.filter(l => l.enabled && l.canDiscover)
+  // Every enabled lab is asked whether it can describe a board by hand; the panel shows nothing when none can.
+  const canCompose = state.labs.filter(l => l.enabled)
   const scans = viewsFor(state, 'scan'), results = viewsFor(state, 'scan-result')
   return (
     <div className="page">
-      <section className="hero"><h1>发现</h1><p>新接的板子、重新布线、没有复位线的板子。</p></section>
+      <section className="hero"><h1>发现</h1><p>新接的板子、重新布线，以及扫不到的板子怎么登记。</p></section>
+      <AddDevicePanel labs={canCompose} />
       <Proposals proposals={state.proposals} />
       {labs.map(lab => <LabPanel key={lab.id} lab={lab} state={state} open={open} />)}
       {(scans.length > 0 || results.length > 0) && <div className="panels" style={{ marginTop: 12 }}>{[...scans, ...results].map(view => <ViewPanel key={view.id} view={view} />)}</div>}
@@ -261,11 +252,10 @@ function LabSettingsPanel({ lab }: { lab: LabSettings }) {
 }
 
 export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void, focus?: string }) {
-  // One column of sections, and a list of them on the left that follows the scroll.
-  // The lab's setup in the order it is done: board hosts, then the machines that use boardlab, then the site.
-  const FIRST = ['bsp-hosts', 'cli-machines', 'bsp-site']
-  const rank = (view: View) => { const at = FIRST.indexOf(view.id); return at < 0 ? FIRST.length : at }
-  const views = viewsFor(state, 'settings').map((view, index) => ({ view, index })).sort((a, b) => rank(a.view) - rank(b.view) || a.index - b.index).map(item => item.view)
+  // One column of sections, and a list of them on the left that follows the scroll. Each module says where its
+  // sections belong (a setup starts with its hosts, say), so this page names no module and no module's parts.
+  const views = viewsFor(state, 'settings').map((view, index) => ({ view, index }))
+    .sort((a, b) => (a.view.order ?? 100) - (b.view.order ?? 100) || a.index - b.index).map(item => item.view)
   const sections: Array<{ id: string, title: string, group: string, body: JSX.Element }> = [
     { id: 'me', title: '我是谁', group: '你', body: <Identity you={state.you} onSaved={onIdentity} /> },
     { id: 'look', title: '外观', group: '你', body: <Appearance theme={theme} onTheme={onTheme} /> },

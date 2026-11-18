@@ -26,19 +26,38 @@ function isAncestor(ref, cwd) {
 }
 
 /**
- * The release this tree last made: the revision and version its release.json names while that revision is an ancestor,
- * else the newest version tag reachable from HEAD. Null when there is none.
+ * The release this tree last made: the newest version tag reachable from HEAD that is not HEAD itself (a release tag
+ * marks the release commit, so the one being made is already on HEAD and is not a base), or a release.json this output
+ * directory holds that names a later ancestor than that tag — releasing twice into one directory with no tag in
+ * between counts from the previous run. A release.json older than the newest tag is a stale file from an old run and
+ * is ignored. Null when there is none.
  */
 export function previousRelease(cwd = root, out = join(cwd, 'release')) {
+  const head = git(cwd, 'rev-parse', 'HEAD')
+  const commitOf = ref => { try { return git(cwd, 'rev-parse', `${ref}^{commit}`) } catch { return null } }
+  /** A commit a release may be counted from: one on HEAD, and not HEAD itself. */
+  const usable = ref => { const commit = ref && commitOf(ref); return commit && commit !== head && isAncestor(commit, cwd) ? commit : null }
+  let best = null
+  try {
+    const tag = git(cwd, 'tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*').split('\n').filter(Boolean).find(usable)
+    if (tag) best = { revision: commitOf(tag), version: tag.replace(/^v/, '') }
+  } catch {}
   try {
     const previous = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'))
-    if (isAncestor(previous.revision, cwd)) return { revision: previous.revision, version: previous.version }
+    const commit = usable(previous.revision)
+    // Later than the tag, or nothing else: a run that stopped before tagging left this. Earlier: stale, keep the tag.
+    if (commit && (!best || after(commit, best.revision, cwd))) best = { revision: commit, version: previous.version }
   } catch {}
-  try {
-    const tag = git(cwd, 'tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*').split('\n').filter(Boolean)[0]
-    if (tag && isAncestor(tag, cwd)) return { revision: tag, version: tag.replace(/^v/, '') }
-  } catch {}
-  return null
+  return best
+}
+
+/** Whether revision `a` is `later` or comes after `b` (either may be anything git resolves, such as a short hash). */
+function after(a, later, cwd) {
+  const commitOf = ref => { try { return git(cwd, 'rev-parse', `${ref}^{commit}`) } catch { return null } }
+  const from = commitOf(a), to = commitOf(later)
+  if (!from || !to) return false
+  if (from === to) return true
+  try { execFileSync('git', ['merge-base', '--is-ancestor', to, from], { cwd, stdio: 'ignore' }); return true } catch { return false }
 }
 
 /** The subjects of the commits since `from` (or of the last commit when there is no base), oldest first. */
@@ -46,7 +65,8 @@ export function subjectsSince(from, to = 'HEAD', cwd = root) {
   const args = ['log', '--no-merges', '--reverse', '--pretty=format:%s']
   if (from) args.push(`${from}..${to}`); else args.push('-1', to)
   return git(cwd, ...args).split('\n').map(line => line.trim()).filter(Boolean)
-    .filter(subject => !/^boardlab \d/.test(subject))
+    // A release's marker commit (`release: 0.4.27`) is not a change; nor is the older `boardlab 0.4.6` spelling.
+    .filter(subject => !/^(?:boardlab |release: )\d+\.\d+\.\d+(?:rc\d+)?$/.test(subject))
 }
 
 /** The markdown for one release: its version and revision, the day, the base, and the subjects. */
@@ -69,9 +89,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const option = name => { const at = args.indexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined }
   const version = option('version') ?? JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
   const previous = previousRelease(root, option('out') ? dirname(resolve(option('out'))) : join(root, 'release'))
-  const since = option('since') ?? previous?.revision ?? ''
+  const given = option('since')
+  const since = given ?? previous?.revision ?? ''
   const revision = option('revision') ?? git(root, 'rev-parse', '--short', 'HEAD')
-  const text = changelog(version, revision, subjectsSince(since, 'HEAD', root), { since: previous?.version })
+  const text = changelog(version, revision, subjectsSince(since, 'HEAD', root), { since: given ?? previous?.version })
   if (option('out')) { writeFileSync(resolve(option('out')), text); console.log(`wrote ${resolve(option('out'))}`) }
   else process.stdout.write(text)
 }

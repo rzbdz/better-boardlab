@@ -89,10 +89,10 @@ fi
 # The release, unpacked by install.sh.
 [ -n "$UNPACKED" ] && [ -f "$UNPACKED/VERSION" ] || die "setup.sh installs a release install.sh has unpacked: run install.sh --from <source>"
 DIR=$UNPACKED; VERSION=$(cat "$DIR/VERSION"); REV=$(cat "$DIR/REVISION")
-# New packages carry explicit distribution metadata. Historical packages without package.json remain installable;
-# the bootstrap preserves a managed source's release.json for this check but does not interpret new fields itself.
-if [ -f "$DIR/package.json" ]; then
-  "$NODE" $FLAGS - "$DIR" <<'NODE' || exit 1
+# Every release carries VERSION and REVISION; they are checked before either becomes part of a path. A package.json
+# (new packages) must agree with them; historical packages without one remain installable. The bootstrap preserves a
+# managed source's release.json for this check but does not interpret new fields itself.
+"$NODE" $FLAGS - "$DIR" <<'NODE' || exit 1
 const fs = require('fs')
 const path = require('path')
 const root = process.argv[2]
@@ -100,13 +100,18 @@ const fail = message => { console.error(`!! ${message}`); process.exit(1) }
 const read = file => { try { return fs.readFileSync(path.join(root, file), 'utf8').trim() } catch { return '' } }
 const version = read('VERSION'), revision = read('REVISION')
 if (!/^0\.\d+\.\d+(?:rc[1-9]\d*)?$/.test(version)) fail('release VERSION is missing or invalid')
-if (!/^[0-9a-f]{40}$/.test(revision)) fail('release REVISION is missing or not a full source revision')
-let manifest
-try { manifest = JSON.parse(read('package.json')) } catch { fail('release package.json is not valid JSON') }
-if (manifest.name !== 'boardlab' || manifest.version !== version) fail('release package.json does not match VERSION')
+// New packages carry the full revision; historical ones used a short hexadecimal one, which is just as safe in paths.
+const manifestFile = path.join(root, 'package.json')
+const full = fs.existsSync(manifestFile)
+if (!(full ? /^[0-9a-f]{40}$/ : /^[0-9a-f]{7,40}$/).test(revision)) fail(full ? 'release REVISION is missing or not a full source revision' : 'release REVISION is missing or not a source revision')
 const expected = `boardlab-${version}.tar.gz`
 if (path.basename(root) !== `boardlab-${version}` && path.basename(root) !== `${version}-${revision}`) {
   fail(`release directory does not match VERSION (expected ${expected})`)
+}
+if (fs.existsSync(manifestFile)) {
+  let manifest
+  try { manifest = JSON.parse(read('package.json')) } catch { fail('release package.json is not valid JSON') }
+  if (manifest.name !== 'boardlab' || manifest.version !== version) fail('release package.json does not match VERSION')
 }
 const sourceFile = path.join(root, '.release-source.json')
 if (fs.existsSync(sourceFile)) {
@@ -117,8 +122,7 @@ if (fs.existsSync(sourceFile)) {
   }
 }
 NODE
-  rm -f "$DIR/.release-source.json"
-fi
+rm -f "$DIR/.release-source.json"
 NOW=$(readlink -f "$PREFIX/current" 2>/dev/null || true)
 if [ -n "$NOW" ] && [ "$(cat "$NOW/REVISION" 2>/dev/null)" = "$REV" ] && [ -z "$FORCE" ]; then say "boardlab $VERSION ($REV) is already installed"; exit 0; fi
 say "installing boardlab $VERSION ($REV) in $PREFIX"
@@ -217,7 +221,9 @@ EOF
   fi
   [ -z "$SUPERVISED" ] && systemctl restart boardd.service
   for i in $(seq 1 30); do curl -fsS -m 2 -o /dev/null -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 1; done
-  ls -1dt "$PREFIX"/releases/* | tail -n +4 | xargs -r rm -rf
+  # The release just installed may have been built earlier than the ones already here: its install time decides.
+  touch "$PREFIX/releases/$VERSION-$REV"
+  ls -1dt "$PREFIX"/releases/* | grep -vxF "$PREFIX/releases/$VERSION-$REV" | tail -n +3 | xargs -r rm -rf
   say "boardd $VERSION is up: http://127.0.0.1:$PORT/ (on this machine; open it from elsewhere with --host <address> or through a proxy)"
   command -v python3 >/dev/null || say "WARNING: no python3 here: the bsp module (board hosts, SDKs) runs the bsp CLI with it; install python3"
   command -v ssh >/dev/null || say "WARNING: no ssh client here: boardd reaches board hosts and CLI machines with it; install openssh-client"

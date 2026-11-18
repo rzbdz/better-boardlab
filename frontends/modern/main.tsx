@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, onFetched, type PageState } from '../../src/ui/api.ts'
+import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, onPrefs, prefs, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
@@ -69,7 +70,7 @@ function Shell() {
         if (version.current && version.current !== v.revision) location.reload()
         version.current = v.revision
       }).catch(() => {})
-      setBoards(next.boards); setActionState(next.boards, next.you, next.labs.filter(l => l.canRediscover).map(l => l.id))
+      setBoards(next.boards); setActionState(next.boards, next.you, next.labs.filter(l => l.canRediscover).map(l => l.id), next.labs)
       if (last.current) {
         const told = changes(last.current.boards, next.boards, next.you, prefs.get().watched)
         if (told.length) setNotes(list => [...told.map(n => ({ ...n, at: new Date().toISOString(), read: false })), ...list].slice(0, 100))
@@ -109,15 +110,31 @@ function Shell() {
   useEffect(() => setRefresher(refresh), [refresh])
   useEffect(() => {
     void refresh()
-    const source = new EventSource('api/events')
-    let timer: number | undefined
-    const soon = () => { window.clearTimeout(timer); timer = window.setTimeout(refresh, 150) }
-    for (const event of ['changed', 'scan', 'lease-stolen', 'lease-granted', 'attention']) source.addEventListener(event, soon)
-    source.addEventListener('lab-ports', event => { const data = JSON.parse((event as MessageEvent).data) as { host?: string, added?: string[] }; if (data.host && data.added?.length) ui.toast(`${data.host} 接上了新线`, data.added.join('、')) })
-    // A stream hiccup is not a lost boardd: re-read the state, and only a failed read marks the page disconnected.
-    source.onerror = soon
+    // The stream keeps itself open (a proxy dropping it, boardd restarting): this page hears each event, and re-reads
+    // the state as soon as it is back, so nothing has to be reloaded by hand.
+    const soon = (() => {
+      let timer: number | undefined
+      return () => { window.clearTimeout(timer); timer = window.setTimeout(refresh, 150) }
+    })()
+    const stop = events().listen({
+      names: CORE_EVENTS,
+      event: (name, data) => {
+        if (name === 'lab-ports') {
+          const news = data as { host?: string, added?: string[] }
+          if (news.host && news.added?.length) ui.toast(`${news.host} 接上了新线`, news.added.join('、'))
+          return
+        }
+        if (name === 'hello') return
+        soon()
+      },
+      // The stream is gone (this page cannot tell why, and boardd may be answering): read the state, and only a read
+      // that fails marks the page disconnected.
+      lost: soon,
+      // boardd answers again: the page is connected, and what changed while the stream was out is read now.
+      back: () => { setConnected(true); soon() },
+    })
     const tick = window.setInterval(refresh, 30_000)
-    return () => { source.close(); window.clearInterval(tick) }
+    return () => { stop(); window.clearInterval(tick) }
   }, [refresh])
   useEffect(() => { const on = () => { setWhere(route()); setFull(false); window.scrollTo(0, 0) }; window.addEventListener('hashchange', on); return () => window.removeEventListener('hashchange', on) }, [])
   useEffect(() => {

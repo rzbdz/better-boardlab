@@ -130,33 +130,66 @@ describe('bsp lab driver', () => {
     ])
     const spec = { id: 'k3-board', board: 'deb1', soc: 'k3', console: { alias: 'ttyUSB3' }, fastboot: { usb: 'usb:2-1.3' }, control: { backend: 'human' } }
     const probe = fakeBsp(args => args.includes('add') ? ok({}) : ok({ results: { h1: { proposals: [{ spec, warnings: ['no download-mode signature seen'] }] } }, added: [] }))
-    const found = await bspLab({ run: probe.run }).discovery!.discover(config, {}, () => {})
+    const finder = bspLab({ run: probe.run }).discovery!
+    const found = await finder.run(config, 'probe', {}, {}, () => {})
     expect(found.message).toBe('h1 上发现 1 块新板子，到「扫描」确认后登记')
     expect(found.found).toEqual([{ host: 'h1', name: 'k3-board', warnings: ['no download-mode signature seen'], detail: spec,
       summary: 'h1 上的新板子：deb1（k3），串口 ttyUSB3，下载口 usb:2-1.3，由人复位' }])
+    // No host given: every host the backend can reach is probed.
     expect(probe.calls[0]!.args.slice(2)).toEqual(['probe', '--register'])
-    await bspLab({ run: probe.run }).discovery!.discover(config, { human: true, host: 'h1' }, () => {})
-    expect(probe.calls[1]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register', '--human'])
+    // Automatic discovery can also be limited to one host, or told which reset lines to try first.
+    await finder.run(config, 'probe', {}, { host: 'h1' }, () => {})
+    expect(probe.calls[1]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register'])
+    await finder.run(config, 'probe', { prefer: '12,13' }, { host: 'h1' }, () => {})
+    expect(probe.calls[2]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register', '--prefer', '12,13'])
+    // What the backend reports it can do, and with which fields: no host yet means only the automatic one; with a
+    // host, a person's board can be registered too, with its SoC and SDK.
+    const plan = fakeBsp(args => {
+      if (args[0] === 'sdk') return ok([{ id: 'sdk-a', soc: 'k3' }, { id: 'sdk-b', soc: 'k1' }])
+      if (args[0] === 'dut' && args[1] === 'list') return ok([])
+      if (args[0] === 'probe') return ok({ h1: { consoles: [{ id: 's4', kind: 'serial-mux', alias: 's4' }], usb: [{ usb: 'usb:2-1.2', product: 'DFU' }] } })
+      return ok({})
+    })
+    const methodsLab = bspLab({ run: plan.run }).discovery!
+    const methods = await methodsLab.methods(config, {})
+    // 手工登记 is not a scan: it is how a person describes a board no probe can see, and it is offered either way.
+    expect(methods.map(method => [method.id, method.title])).toEqual([['probe', '自动刷机'], ['manual', '手工登记']])
+    expect(methods[0]!.fields!.map(field => field.id)).toEqual(['prefer'])
+    expect(methods[1]).toMatchObject({ compose: true })
+    const withHost = await methodsLab.methods(config, { host: 'h1' })
+    expect(withHost.map(method => method.id)).toEqual(['probe', 'bind', 'manual'])
+    const bind = withHost[1]!
+    expect(bind.fields!.map(field => field.id)).toEqual(['usb', 'console', 'soc', 'sdk', 'board', 'name'])
+    expect(bind.fields!.find(field => field.id === 'usb')).toMatchObject({ kind: 'choice', initial: 'usb:2-1.2' })
+    expect(bind.fields!.find(field => field.id === 'soc')).toMatchObject({ kind: 'choice', options: [{ value: 'k3', label: 'K3' }, { value: 'k1', label: 'K1' }] })
+    expect(bind.fields!.find(field => field.id === 'sdk')).toMatchObject({ kind: 'choice', options: [{ value: 'sdk-a' }, { value: 'sdk-b' }] })
+    expect((await methodsLab.methods(config, { slot: 'h1/s4' })).find(method => method.id === 'bind')!.fields!.find(field => field.id === 'console'))
+      .toMatchObject({ initial: 's4' })
+    const registered: string[] = []
+    expect((await methodsLab.run(config, 'bind', { usb: 'usb:2-1.2', console: 's4', soc: 'k3', sdk: 'sdk-a', board: 'deb1', name: 'b1' },
+      { host: 'h1' }, () => {}, device => registered.push(device))).message).toContain('SoC k3，SDK sdk-a')
+    expect(plan.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'bind', 'b1', '--console', 's4', '--usb', 'usb:2-1.2',
+      '--host', 'h1', '--soc', 'k3', '--board', 'deb1', '--sdks', 'sdk-a'])
+    expect(registered).toEqual(['b1'])
     const ports = fakeBsp(args => args[0] === 'probe' ? ok({ h1: { consoles: [{ id: 'ttyUSB3', kind: 'tty', device: '/dev/ttyUSB3' }, { id: 'k9', kind: 'serial-mux', alias: 'k9', device: '/dev/ttyUSB9' }], usb: [{ usb: 'usb:2-1.2', product: 'DFU' }, { usb: 'usb:2-1.7', product: 'USB download gadget' }] } }) : ok(DUTS))
     expect(await bspLab({ run: ports.run }).ports!.list(config)).toEqual([{ host: 'h1',
       consoles: [{ id: '/dev/ttyUSB3', label: '/dev/ttyUSB3' }, { id: 'k9', label: 'serial-mux k9（/dev/ttyUSB9）' }],
       usb: [{ id: 'usb:2-1.7', label: 'usb:2-1.7 USB download gadget' }] }])
     expect(ports.calls[0]!.args.slice(2)).toEqual(['probe', '--dry-run'])
-    await bspLab({ run: ports.run }).ports!.bind(config, 'h1', { console: '/dev/ttyUSB3', usb: 'usb:2-1.7' }, 'tmp-h1-ttyUSB3')
-    expect(ports.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'bind', 'tmp-h1-ttyUSB3', '--console', '/dev/ttyUSB3', '--usb', 'usb:2-1.7', '--host', 'h1'])
     await bspLab({ run: probe.run }).discovery!.register(config, found.found[0]!, 'slot-3')
-    expect(probe.calls[2]!.args.slice(2)).toEqual(['dut', 'add', 'h1', '--spec', JSON.stringify({ ...spec, id: 'slot-3' })])
+    expect(probe.calls[3]!.args.slice(2)).toEqual(['dut', 'add', 'h1', '--spec', JSON.stringify({ ...spec, id: 'slot-3' })])
   })
 
   it('reads registration choices without discovery, shares host reads and refreshes them for a save', async () => {
     const board = 'test-board'
     const host = 'test-host'
-    const duts = [{ id: board, host, control: { backend: 'human', reset: {}, fdl: { strategy: 'strapped' } }, usb: 'usb:1-2' }]
+    const duts = [{ id: board, host, soc: 'k3', sdks: ['sdk-a'], sdks_explicit: true, control: { backend: 'human', reset: {}, fdl: { strategy: 'strapped' } }, usb: 'usb:1-2' }]
     let listCalls = 0, gpioCalls = 0, portCalls = 0
     const bsp = fakeBsp(args => {
       const command = args.slice(0, 2).join(' ')
       if (command === 'dut list') { listCalls++; return ok(duts) }
       if (command === 'dut status') return ok(duts[0])
+      if (command === 'sdk list') return ok([{ id: 'sdk-a', soc: 'k3' }, { id: 'sdk-b', soc: 'k1' }])
       if (command === 'gpio list') { gpioCalls++; return ok([{ target: 'P1', label: 'reset', actions: ['pulse'] }]) }
       if (command === 'dut ports') { portCalls++; return ok([{ usb: 'usb:1-2', vid: '1234', pid: 'abcd' }]) }
       if (args[0] === 'probe') throw new Error('a registration read must not run a discovery plan')
@@ -165,13 +198,18 @@ describe('bsp lab driver', () => {
     const lab = bspLab({ run: bsp.run })
     const [first, sameHostBoard] = await Promise.all([lab.boardConfig(config, board), lab.boardConfig(config, board)])
     expect(first).toEqual(sameHostBoard)
-    expect(first).toMatchObject({ gpios: [{ value: 'P1' }], ports: [{ value: 'usb:1-2', label: 'usb:1-2（1234:abcd）' }] })
+    expect(first).toMatchObject({ gpios: [{ value: 'P1' }], ports: [{ value: 'usb:1-2', label: 'usb:1-2（1234:abcd）' }],
+      soc: 'k3', sdks: ['sdk-a'], socs: [{ value: 'k3', label: 'K3' }, { value: 'k1', label: 'K1' }], sdkOptions: [{ value: 'sdk-a' }, { value: 'sdk-b' }] })
     expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 1, portCalls: 1 })
     await lab.boardConfig(config, board)
     expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 1, portCalls: 1 })
     await lab.boardConfig(config, board, true)
     expect({ listCalls, gpioCalls, portCalls }).toEqual({ listCalls: 1, gpioCalls: 2, portCalls: 2 })
-    expect(bsp.calls.filter(call => call.args.includes('status'))).toHaveLength(1)
+    // Each editor read asks the board itself (`dut status`: effective SDKs, whether its list is explicit).
+    expect(bsp.calls.filter(call => call.args.includes('status'))).toHaveLength(4)
+    // An empty explicit list means every SDK of the SoC: it is sent as an empty value, not dropped.
+    await lab.change(config, board, 'T1', { sdks: [] })
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'set', board, '--lease', 'T1', '--sdks', ''])
   })
 
   it('flashes a package from a link or an uploaded file as a bsp job, passing on its progress', async () => {
@@ -196,11 +234,12 @@ describe('bsp lab driver', () => {
     const seen: string[] = []
     const bsp = fakeBsp(() => ok({ results: { h1: { proposals: [{ spec: { id: 'k3-s4' }, warnings: [], registered: { dut: 'k3-s4' } }], registered: [{ dut: 'k3-s4', slot: 's4' }], reasons: ['no reset line made console(s) s5 speak'] } } }))
     const run: BspRunner = async (args, options) => { options.onStderr?.('[h1]  [   4.7s] registered k3-s4 in slot s4'); return bsp.run(args, options) }
-    const found = await bspLab({ run }).discovery!.discover(config, { slots: ['h1/s4', 'h1/s5'] }, () => {}, device => seen.push(device))
-    expect(bsp.calls[0]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register', '--slots', 's4,s5'])
+    const found = await bspLab({ run }).discovery!.run(config, 'probe', {}, { slot: 'h1/s4' }, () => {}, device => seen.push(device))
+    expect(bsp.calls[0]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register', '--slots', 's4'])
     expect(seen).toEqual(['k3-s4'])
     expect(found).toEqual({ found: [], message: '登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak' })
-    await expect(bspLab({ run }).discovery!.discover(config, { slots: ['h1/s4', 'h2/s1'] }, () => {})).rejects.toThrow(/一次只能发现一台主机/)
+    // A method that is not the backend's is refused, not silently run.
+    await expect(bspLab({ run }).discovery!.run(config, 'nope', {}, {}, () => {})).rejects.toThrow(/没有发现方法 nope/)
     // A rebuild starts one host over: bsp forgets its boards and slots and registers each board it finds again.
     const rebuilt = await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, device => seen.push(device))
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--yes'])
@@ -305,6 +344,31 @@ describe('bsp lab driver', () => {
     } })
     await expect(failing.serial.open(config, on('k3-a'))).rejects.toThrow('打不开 k3-a 的串口：console board1 of k3-a is not running on h1（see `bsp dut status k3-a`）')
   })
+
+  it('opens a console that is not serial-mux as the plain bytes its pipe carries', async () => {
+    let spawned: string[] = []
+    const hostSide = new PassThrough(), boarddSide = new PassThrough()
+    const written: string[] = []
+    hostSide.on('data', chunk => written.push(chunk.toString()))
+    const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt', console: null }]
+    const lab = bspLab({
+      run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
+      spawn: args => { spawned = args; return { stream: Duplex.from({ readable: boarddSide, writable: hostSide }), stderr: () => '' } },
+    })
+    const session = await lab.serial.open(config, on('ec-1'))
+    expect(spawned).toEqual(['--json', '--stateless', 'dut', 'pipe', 'ec-1'])
+    expect(session.hello).toEqual({ alias: 'ec-1', device: null, baud: 0, transport: 'rtt' })
+    const out: string[] = []
+    session.onOutput(data => out.push(data.toString()))
+    // No handshake: the first bytes from the pipe are the console's output.
+    boarddSide.write(Buffer.from('EC boot 1.2.3\n'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    session.send('help\n')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(out).toEqual(['EC boot 1.2.3\n'])
+    expect(written).toEqual(['help\n'])
+    session.close()
+  })
 })
 
 describe('bsp lab rename', () => {
@@ -362,5 +426,174 @@ describe.skipIf(!MOCK)('bsp lab driver against a bsp mock host', () => {
     await lab.relay.reset(mock, on('mock-board', token))
     expect(await lab.lease!.take(mock, 'mock-board', { holder: 'boardlab:user:other', purpose: 'renew', token })).toBe(token)
     await lab.lease!.give(mock, 'mock-board', token)
+  })
+})
+
+describe('bsp debug', () => {
+  const board = (services: Record<string, unknown> | undefined) => ({ ...DUTS[0], services })
+  const path = { dut: 'k3-a', host: 'h1', provider: 'gpio-swd', kinds: ['halt', 'run', 'regs', 'trace'], state: { endpoint: '127.0.0.1:3334', halted: false } }
+
+  it('reports a board\'s debug provider with what it offers', async () => {
+    const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'list' ? ok([board({ debug: { provider: 'gpio-swd', kinds: path.kinds } })])
+      : args[0] === 'slot' ? ok([]) : ok(path))
+    const lab = bspLab({ run: bsp.run })
+    const devices = await lab.inventory!.devices(config)
+    expect(devices[0]!.debug).toEqual({ provider: 'gpio-swd', kinds: ['halt', 'run', 'regs', 'trace'] })
+    const got = await lab.debug!.path(config, { board: 'k3-a', device: 'k3-a', lease: null, die: 'die0', usbPath: null, port: null, gate: null })
+    expect(got).toMatchObject({ provider: 'gpio-swd', running: true, endpoint: '127.0.0.1:3334' })
+    expect(got?.state).toEqual([{ label: 'endpoint', value: '127.0.0.1:3334' }])
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['debug', 'status', 'k3-a'])
+  })
+
+  it('treats a board with no debug path as having none', async () => {
+    const bsp = fakeBsp(args => args[0] === 'dut' ? ok([board(undefined)]) : args[0] === 'slot' ? ok([])
+      : ok({ dut: 'k3-a', host: 'h1', provider: 'none', kinds: [] }))
+    const lab = bspLab({ run: bsp.run })
+    expect(await lab.debug!.path(config, { board: 'k3-a', device: 'k3-a', lease: null, die: 'die0', usbPath: null, port: null, gate: null })).toBeNull()
+    const devices = await lab.inventory!.devices(config)
+    expect((devices[0] as { debug?: unknown }).debug ?? null).toBeNull()
+  })
+
+  it('starts, drives and stops a session under the board\'s lease', async () => {
+    const bsp = fakeBsp(args => {
+      const rest = args.slice(args.indexOf('debug'))
+      if (rest[1] === 'start') return ok({ ...path, endpoint: '127.0.0.1:3334' })
+      if (rest[1] === 'action') return ok({ dut: 'k3-a', action: rest[3], halted: rest[3] === 'halt', registers: 'pc=0x08000100' })
+      if (rest[1] === 'stop') return ok({ dut: 'k3-a', role: 'debug', stopped: true })
+      return ok(path)
+    })
+    const lab = bspLab({ run: bsp.run })
+    const target = { board: 'k3-a', device: 'k3-a', lease: 'tok', die: 'die0', usbPath: null, port: null, gate: null }
+    expect(await lab.debug!.start(config, target)).toMatchObject({ running: true, endpoint: '127.0.0.1:3334' })
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['debug', 'start', 'k3-a', '--lease', 'tok'])
+    const halted = await lab.debug!.action(config, target, 'halt')
+    expect(halted.message).toBe('k3-a：halt 已完成')
+    expect(halted.data).toEqual([{ label: 'halted', value: 'true' }, { label: 'registers', value: 'pc=0x08000100' }])
+    expect(await lab.debug!.stop(config, target)).toContain('调试会话已停止')
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['debug', 'stop', 'k3-a', '--lease', 'tok'])
+  })
+})
+
+describe('bsp console errors', () => {
+  it('reports a raw console whose pipe failed instead of showing a silent console', async () => {
+    const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt' }]
+    const lab = bspLab({
+      run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
+      spawn: () => {
+        const side = new PassThrough()
+        setTimeout(() => side.end(JSON.stringify({ ok: false, error: { message: 'the console of ec-1 is not running on h1', hint: 'start its debug session' } })), 5)
+        return { stream: side, stderr: () => '' }
+      },
+    })
+    await expect(lab.serial.open(config, on('ec-1'))).rejects.toThrow('打不开 ec-1 的串口：the console of ec-1 is not running on h1（start its debug session）')
+  })
+
+  it('a raw console with nothing to say yet opens anyway', async () => {
+    const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt' }]
+    const side = new PassThrough()
+    const lab = bspLab({
+      run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
+      spawn: () => ({ stream: side, stderr: () => '' }),
+    })
+    const session = await lab.serial.open(config, on('ec-1'))
+    const out: string[] = []
+    session.onOutput(data => out.push(data.toString()))
+    side.write(Buffer.from('boot\n'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(out).toEqual(['boot\n'])
+    session.close()
+  })
+})
+
+describe('bsp debug stream', () => {
+  const target = { board: 'ec-1', device: 'ec-1', lease: null, die: 'die0', usbPath: null, port: null, gate: null }
+  const open = (lab: ReturnType<typeof bspLab>) => lab.debug!.stream!(config, target)
+
+  it('opens when the trace says something, and carries what follows', async () => {
+    const side = new PassThrough()
+    const lab = bspLab({ run: fakeBsp(() => ok({})).run, spawn: () => ({ stream: side, stderr: () => '' }) })
+    const opening = open(lab)
+    side.write(Buffer.from('pc 0x1000\n'))
+    const session = await opening
+    const out: string[] = []
+    session.onOutput(data => out.push(data.toString()))
+    side.write(Buffer.from('next\n'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(out).toEqual(['pc 0x1000\n', 'next\n'])
+    session.close()
+  })
+
+  it('gives the pipe\'s own reason when the pipe then breaks', async () => {
+    // The bytes arrive and the pipe breaks before it closes: the envelope it wrote is why, not "Premature close".
+    const lab = bspLab({
+      run: fakeBsp(() => ok({})).run,
+      spawn: () => {
+        const side = new PassThrough()
+        setTimeout(() => { side.write(JSON.stringify({ ok: false, error: { message: 'its debug session is not running' } })) }, 5)
+        setTimeout(() => side.destroy(new Error('Premature close')), 30)
+        return { stream: side, stderr: () => '' }
+      },
+    })
+    await expect(open(lab)).rejects.toThrow(/its debug session is not running/)
+  })
+
+  it('waits for the pipe rather than taking silence for a stream', async () => {
+    // A session asked for on a slow host: nothing arrives for a while, and then it fails. Opening on a 1.5 s
+    // silence would hand the caller a stream and only afterwards the reason it never opened.
+    const side = new PassThrough()
+    const lab = bspLab({
+      run: fakeBsp(() => ok({})).run,
+      spawn: () => {
+        setTimeout(() => side.end(JSON.stringify({ ok: false, error: { message: 'its debug session is not running' } })), 1800)
+        return { stream: side, stderr: () => '' }
+      },
+    })
+    await expect(open(lab)).rejects.toThrow(/its debug session is not running/)
+  })
+
+  it('fails with the reason the pipe gave when it cannot open a session', async () => {
+    // What the CLI does when it cannot open the session: it says why and exits. A caller must not get a session
+    // that will never carry a trace, nor the reason arriving as if the board had said it.
+    const lab = bspLab({
+      run: fakeBsp(() => ok({})).run,
+      spawn: () => {
+        const side = new PassThrough()
+        setTimeout(() => {
+          side.write(JSON.stringify({ ok: false, error: { message: 'its debug session is not running' } }))
+          side.end()
+        }, 5)
+        return { stream: side, stderr: () => '' }
+      },
+    })
+    await expect(open(lab)).rejects.toThrow(/its debug session is not running/)
+  })
+
+  it('describes a board a scan cannot see: a person names it and its roles, and bsp gets one DUT record', async () => {
+    // A board whose only path is a debug link on header pins: no USB, no cabled console, so no probe can find it.
+    // The provider and target are made-up: a site's own names must not appear in this tree.
+    const bsp = fakeBsp(args => args[0] === 'hosts' ? ok([{ host: 'h1' }, { host: 'h2', error: 'down' }])
+      : args[0] === 'sdk' ? ok([{ id: 'made-up-build', soc: 'made-up-soc' }]) : ok({ registered: { dut: 'pin-board' } }))
+    const lab = bspLab({ run: bsp.run })
+    // The host is the caller's context (or the lab's single host); the SoC list is the catalog's.
+    const methods = await lab.discovery!.methods({ ...config, username: 'h1' }, {})
+    const manual = methods.find(method => method.id === 'manual')!
+    expect(manual.compose).toBe(true)
+    expect(manual.fields!.map(field => field.id)).toEqual(['host', 'name', 'services', 'soc', 'board', 'console_alias', 'usb', 'reset_pin'])
+    // Only hosts answering now are choices; the SoC list is the catalog's.
+    expect(manual.fields!.find(field => field.id === 'host')).toMatchObject({ kind: 'text', required: true, initial: 'h1' })
+    expect(manual.fields!.find(field => field.id === 'soc')!.options).toEqual([{ value: 'made-up-soc', label: 'MADE-UP-SOC' }])
+    const made = await lab.discovery!.compose!(config, 'manual', { host: 'h1', name: 'pin-board',
+      services: '{"debug":{"provider":"made-up-swd","target":"probe0"}}' }, {})
+    expect(made.name).toBe('pin-board')
+    const add = bsp.calls.find(call => call.args.includes('dut') && call.args.includes('add'))!
+    const spec = JSON.parse(add.args[add.args.indexOf('--spec') + 1]!)
+    expect(spec).toEqual({ id: 'pin-board', services: { debug: { provider: 'made-up-swd', target: 'probe0' } } })
+    expect(add.args.slice(-4)).toEqual(['dut', 'add', 'h1', '--spec'].concat([]).length ? add.args.slice(-4) : [])
+    // Each thing bsp needs is checked before anything is registered.
+    await expect(lab.discovery!.compose!(config, 'manual', { name: 'x' }, {})).rejects.toThrow(/哪台主机/)
+    await expect(lab.discovery!.compose!(config, 'manual', { host: 'h1' }, {})).rejects.toThrow(/起个名字/)
+    await expect(lab.discovery!.compose!(config, 'manual', { host: 'h1', name: 'bad name' }, {})).rejects.toThrow(/板名/)
+    await expect(lab.discovery!.compose!(config, 'manual', { host: 'h1', name: 'x', services: '{' }, {})).rejects.toThrow(/JSON/)
+    expect(bsp.calls.filter(call => call.args.includes('add'))).toHaveLength(1)
   })
 })

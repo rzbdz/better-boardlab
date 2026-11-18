@@ -48,13 +48,13 @@ dest=\${args[1]#*:}; dest=\${dest//\\/tmp\\//${remote}/tmp/}; mkdir -p "$(dirnam
 }
 
 /** A bsp tree whose installer only says it is ready (and that it ran as root with the token given), after `steps`. */
-function fakeBspTree(steps = '') {
+function fakeBspTree(steps = '', ready = 'BSPD-READY $id 8765 f61b6f8') {
   const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
   writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
 id=""; token=""; while [[ $# -gt 0 ]]; do case $1 in --id) id=$2; shift 2;; --token) token=$2; shift 2;; *) shift;; esac; done
 echo "--> installing $id"; echo "token-len \${#token}"
 ${steps}
-echo "BSPD-READY $id 8765 f61b6f8"
+echo "${ready}"
 `)
   writeFileSync(join(tree, 'REVISION'), 'f61b6f8\n')
   return tree
@@ -125,7 +125,7 @@ describe('setting up a bsp board host', () => {
     expect(done).toMatchObject({ target: 'local', url: 'bspd+http://127.0.0.1:8765', token: 'a'.repeat(48) })
   })
 
-  it('puts the host tools for the host\'s architecture in /opt/bspd/tools, and none when there are none', async () => {
+  it('puts the host tools for the host\'s architecture in the install\'s tools dir, and none when there are none', async () => {
     const remote = join(dir, 'remote')
     const ssh = fakeSsh(remote)
     // The host says it is a riscv64 machine.
@@ -146,19 +146,20 @@ describe('setting up a bsp board host', () => {
       const lines: string[] = []
       await installHost(hosts, fakeBspTree(), setup, null, line => lines.push(line), undefined, tools)
       expect(lines).toContain('放主机工具：flasher')
-      const shipped = join(remote, 'opt/bspd/tools/flasher')
+      // The new install's tools dir (the fake host has no old one).
+      const shipped = join(remote, 'opt/boardctrl/tools/flasher')
       expect(readFileSync(shipped, 'utf8')).toContain('echo riscv64')
       expect(statSync(shipped).mode & 0o777).toBe(0o755)
       // A file that is not what host-tools.json says does not go.
       rmSync(join(remote, 'opt'), { recursive: true })
       writeFileSync(join(tools, 'riscv64/flasher'), 'something else')
       await expect(installHost(hosts, fakeBspTree(), setup, null, () => {}, undefined, tools)).rejects.toThrow(/riscv64\/flasher.*sha256/)
-      expect(existsSync(join(remote, 'opt/bspd/tools'))).toBe(false)
+      expect(existsSync(join(remote, 'opt/boardctrl/tools'))).toBe(false)
       // Without host-tools/ nothing is put there.
       const quiet: string[] = []
       await installHost(hosts, fakeBspTree(), setup, null, line => quiet.push(line), undefined, join(dir, 'absent'))
       expect(quiet.some(line => line.includes('主机工具'))).toBe(false)
-      expect(existsSync(join(remote, 'opt/bspd/tools'))).toBe(false)
+      expect(existsSync(join(remote, 'opt/boardctrl/tools'))).toBe(false)
     } finally { delete process.env.FAKE_SSH_INHERIT }
   })
 
@@ -174,5 +175,21 @@ describe('setting up a bsp board host', () => {
     const hosts = new Hosts(join(dir, 'state'))
     await expect(hosts.reach({ address: 'lab-1; rm -rf /', user: 'root' })).rejects.toThrow(/不合法/)
     await expect(hosts.reach({ address: 'lab-1', user: '$(id)' })).rejects.toThrow(/不合法/)
+  })
+})
+
+describe('the names before boardctrl', () => {
+  it('installs from a tree that prints the new ready line, and from one that prints only the old', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    const hosts = new Hosts(join(dir, 'state'))
+    const access = { address: 'lab-1', user: 'root', password: 'opensesame' }
+    const lines: string[] = []
+    const now = await installHost(hosts, fakeBspTree('', 'BOARDCTRLD-READY $id 8765 abc123'), { id: 'lab1', access }, null, line => lines.push(line))
+    expect(now.version).toBe('abc123')
+    expect(lines).toContain('--> installing lab1')      // the new ready line is not passed on as a stage line
+    const older = await installHost(hosts, fakeBspTree('', 'BSPD-READY $id 8765 def456'), { id: 'lab1', access }, null, () => {})
+    expect(older.version).toBe('def456')
   })
 })

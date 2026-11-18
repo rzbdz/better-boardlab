@@ -1,6 +1,6 @@
 # 发布源和更新
 
-boardlab 从一个发布源安装，以后也从那里更新。安装时用的发布源记在 `/opt/boardlab/release-source`；私有项目的令牌记在 `/opt/boardlab/release-token`（只有 root 能读）。
+boardlab 从一个发布源安装，以后也从那里更新。安装时用的发布源记在安装目录的 `release-source`：以 root 装服务时是 `/opt/boardlab/release-source`，只装命令行或非 root 安装时在 `~/.local/share/boardlab/release-source`。私有项目的令牌记在同一个目录的 `release-token`（只有安装用户能读）。
 
 ## 发布源的几种写法
 

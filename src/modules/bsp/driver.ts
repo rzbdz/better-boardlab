@@ -8,10 +8,13 @@ import { execFile, spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews, type Notice } from 'boardlab-core/core/backend.ts'
+import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews, type LabSlots, type Notice } from 'boardlab-core/core/backend.ts'
+import type { DiscoveryContext, DiscoveryMethod, DiscoveryValues } from 'boardlab-core/shared/types.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
 import { askedIn } from 'boardlab-core/core/relay.ts'
+import { bspDebug } from './debug.ts'
+import { openRaw } from './console.ts'
 
 /** Holders boardd gives its bsp leases: `boardlab:<holder of the lock>`. */
 export const HOLDER_PREFIX = 'boardlab:'
@@ -21,6 +24,12 @@ const TIMEOUT_MS = 60_000
 /** A reset of a board that needs a person waits for them. */
 const RESET_TIMEOUT_MS = 30 * 60_000
 const BOOT_TIMEOUT_MS = 30 * 60_000
+
+/** The controller CLI on this machine: `boardctrl` when it is installed, else the old `bsp`. */
+export function cliName(): string {
+  const found = (process.env.PATH ?? '').split(':').filter(Boolean).find(dir => existsSync(join(dir, 'boardctrl')))
+  return found ? 'boardctrl' : 'bsp'
+}
 
 export interface BspResult { code: number | null, stdout: string, stderr: string }
 /** `onStderr` gets the progress lines bsp prints while it works; `signal` stops it (the lock it runs under ended). */
@@ -44,23 +53,35 @@ interface BspSlot { id: string, host: string, ref: string, alias?: string | null
 const isSlot = (device: string) => device.includes('/')
 /** The lease boardd holds on an empty slot: bsp leases boards, and an empty slot has none yet. */
 const SLOT_LEASE = 'slot'
+/** A board name bsp's `dut add` takes: the same rule its CLI enforces. */
+const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/
 
 /** A header pin as `bsp --json gpio list` reports it (the fields boardd uses). */
 interface BspPin { target: string, label?: string, aliases?: string[], state?: string, actions?: string[], channel?: { mode?: string } }
 
+/** The debug role of a DUT as its host reports it in `services` (`{debug: {provider, kinds}}`), or null. */
+function debugOf(services: Record<string, unknown> | undefined): { provider: string, kinds: string[] } | null {
+  const debug = services?.debug
+  if (!debug || typeof debug !== 'object') return null
+  const record = debug as { provider?: string, kinds?: string[] }
+  return record.provider && record.provider !== 'none' ? { provider: record.provider, kinds: record.kinds ?? [] } : null
+}
+
 /** A bsp DUT as `bsp --json dut list` reports it (the fields boardd uses). */
 interface BspDut {
   id: string, host: string, slot?: string | null, board?: string | null, soc?: string | null, usb?: string | null, console?: string | null,
-  stage?: string, console_up?: boolean, slot_online?: boolean | null, sdks?: string[], lease?: { holder: string, purpose?: string, expires_in_s?: number } | null,
-  needs_human?: { action: string, message: string, waiting_s: number } | null,
+  stage?: string, console_up?: boolean, slot_online?: boolean | null, sdks?: string[], sdks_explicit?: boolean, lease?: { holder: string, purpose?: string, expires_in_s?: number } | null,
+  /** Which provider serves the console: `serial-mux` speaks that protocol, another serves plain bytes. */
+  console_provider?: string | null,
+  needs_human?: { id?: string | null, action: string, message: string, waiting_s: number } | null,
   control?: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } },
   media_boot?: { method: string | null, available: boolean, why?: string } | null,
+  services?: Record<string, unknown>,
 }
 
 /** How a board's bsp record may be changed from boardlab (`bsp dut set`); fields left out stay as they are. */
 export interface BspBoardChange {
   board?: string, soc?: string, description?: string, usb?: string,
-  resetActor?: 'human', fdlActor?: 'human',
   resetPin?: string, pulseMs?: number, fdl?: 'strapped' | 'button' | 'unset', fdlPin?: string, sdks?: string[],
 }
 export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
@@ -73,11 +94,13 @@ export interface BspBackend extends Backend {
   boardConfig(config: LabConfig, device: string, fresh?: boolean): Promise<{
     control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
     usb: string | null, gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }>
+    soc: string | null, sdks: string[], socs: Array<{ value: string, label: string }>, sdkOptions: Array<{ value: string, label: string }>
   }>
 }
 
 export function bspLab(options: BspOptions = {}): BspBackend {
-  const bin = options.bin ?? process.env.BOARDS_BSP ?? 'bsp'
+  // The board controller CLI; `bsp` is its old name, still installed on machines set up before the rename.
+  const bin = options.bin ?? process.env.BOARDS_BSP ?? cliName()
   const run: BspRunner = options.run ?? ((args, { env, timeoutMs, onStderr, signal }) => new Promise(resolve => {
     const child = execFile(bin, args, { env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, signal }, (error, stdout, stderr) => {
       resolve({ code: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr: stderr || (error && !stdout ? error.message : '') })
@@ -271,6 +294,31 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     for (const key of choicesCache.keys()) if (key === prefix) choicesCache.delete(key)
   }
 
+  /**
+   * Each host's free consoles and unbound download ports: what a person binds a board of, and what a probe plans on.
+   * Only offered through `ports`; a discovery method's choices are built from it too.
+   */
+  const freePorts = async (config: LabConfig): Promise<LabSlots[]> => {
+    // A dry-run probe touches nothing: it lists each host's free consoles and the download-mode USB devices on it.
+    const [plans, duts] = await Promise.all([
+      bsp<Record<string, { consoles?: Array<{ id: string, kind: string, alias?: string, device?: string }>, usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
+      bsp<BspDut[]>(config, ['dut', 'list']),
+    ])
+    const used = new Set((Array.isArray(duts) ? duts : []).map(dut => dut.usb))
+    return Object.entries(plans).map(([host, plan]) => ({
+      host,
+      consoles: (plan.consoles ?? []).map(con => ({ id: con.alias ?? con.device ?? con.id, label: con.alias ? `serial-mux ${con.alias}${con.device ? `（${con.device}）` : ''}` : (con.device ?? con.id) })),
+      usb: (plan.usb ?? []).filter(device => !used.has(device.usb)).map(device => ({ id: device.usb, label: `${device.usb}${device.product ? ` ${device.product}` : ''}` })),
+    }))
+  }
+  /** The SDK catalog's instances: a board's SDKs, and the SoCs they are built for. */
+  const sdkCatalog = async (config: LabConfig): Promise<Array<{ id: string, soc: string | null }>> => {
+    const listed = await bsp<Array<{ id: string, soc: string | null }>>(config, ['sdk', 'list'], 60_000).catch(() => [] as Array<{ id: string, soc: string | null }>)
+    return Array.isArray(listed) ? listed : []
+  }
+  /** A context's slot as bsp's `--slots` takes it (`/s2` → `s2`). */
+  const slotId = (slot?: string | null) => slot?.split('/').at(-1) ?? null
+
   return {
     kind: 'bsp 板卡主机',
     about: 'boardd 经 bsp 操作这台主机上的板子：复位线、下载口、串口、刷机和启动都由主机上的 bspd 做，锁和排队以这台 boardd 为准（拿锁时它同时持有 bspd 的租约）。',
@@ -315,7 +363,11 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           // A board found without a download cable has `usb:UNKNOWN` until its port is known.
           downloadUsbPath: dut.usb && !/UNKNOWN/.test(dut.usb) ? dut.usb.replace(/^usb:/, '') : null, ip: null,
           heldBy: dut.lease && !dut.lease.holder.startsWith(HOLDER_PREFIX) ? dut.lease.holder : null,
+          // What can debug it, as its host reports it (a provider name plus what it offers; null: none).
+          debug: debugOf(dut.services),
           attention: dut.needs_human?.message ?? null,
+          // The host's id for that ask: answering it twice with the same id is answering once, even after a restart.
+          attentionRequest: dut.needs_human?.id ?? null,
         })), ...empty]
       },
       async refresh(config, target, options, progress, signal) {
@@ -406,7 +458,13 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           '--limit', String(query.limit ?? 20000), ...(query.first ? ['--first'] : [])], 120_000)
       },
       async open(config, { device }) {
+        // A console that is not serial-mux (a trace channel over a debug adapter) serves plain bytes: the pipe's
+        // output is the console, from the moment it is open. serial-mux consoles handshake their protocol.
+        const record = await recordOfBoard(config, device).catch(() => null)
         const child = start([...global(config), 'dut', 'pipe', device], env(config))
+        if (record?.console_provider && record.console_provider !== 'serial-mux') {
+          return openRaw(child, device, record.console_provider)
+        }
         // A pipe that could not start prints bsp's error envelope instead of protocol frames.
         let first = ''
         const peek = (chunk: Buffer) => { first += chunk.toString('utf8'); if (first.length > 4096) child.stream.off('data', peek) }
@@ -446,16 +504,116 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     },
 
     discovery: {
-      async discover(config, discovery, progress, registered, signal) {
-        // bsp probe pulses free reset lines on the free slots of every selected host (or, with a person resetting the
-        // boards, works on one host), watches consoles and USB, and registers each board the moment it is found.
-        const slots = discovery.slots ?? []
-        const hosts = [...new Set(slots.map(slot => slot.split('/')[0]!))]
-        if (hosts.length > 1) throw new Error(`一次只能发现一台主机上的槽位（这里有 ${hosts.join('、')}）`)
-        const host = hosts[0] ?? (discovery.human ? discovery.host ?? undefined : undefined)
-        const args = ['probe', '--register', ...(discovery.human ? ['--human'] : []), ...(slots.length ? ['--slots', slots.map(slot => slot.split('/')[1]).join(',')] : []),
-          ...(discovery.prefer?.length ? ['--prefer', discovery.prefer.join(',')] : [])]
-        return probed(config, args, progress, registered, host, signal)
+      // What bsp can do here, in bsp's own terms: probe the host's free reset lines itself, or take a board a person
+      // already put in download mode. boardd only shows these; it knows neither the titles nor the fields.
+      async methods(config, context) {
+        const host = context.host ?? (context.slot ? context.slot.split('/')[0]! : null)
+        const methods: DiscoveryMethod[] = []
+        methods.push({
+          id: 'probe',
+          title: '自动刷机',
+          about: context.slot
+            ? '复位这个槽位的复位线，看哪个串口有反应、哪个下载口出现，把板子配成一对并登记。只动这一个槽位。'
+            : host
+              ? '实验室逐个拉这台主机上还没用过的复位线，看哪个串口有反应、哪个下载口出现，把板子配成一对并登记。接在这些线上的板子会被复位。已经在用的板子不受影响。'
+              : '实验室逐个拉每台主机上还没用过的复位线，看哪个串口有反应、哪个下载口出现，把板子配成一对并登记。接在这些线上的板子会被复位。已经在用的板子不受影响。',
+          fields: [
+            { id: 'prefer', label: '先试这些复位线', kind: 'text' as const, required: false, placeholder: '例如 12,13、GPIO12、P15',
+              note: '知道这批板子接在哪些排针上时填上，先试这些；不填就按主机原来的顺序。' },
+          ],
+        })
+        if (host) {
+          const [free, sdkList] = await Promise.all([freePorts(config).then(list => list.find(item => item.host === host)), sdkCatalog(config)])
+          const usbs = free?.usb ?? [], consoles = free?.consoles ?? []
+          const socs = [...new Set(sdkList.map(item => item.soc).filter((soc): soc is string => !!soc))]
+          const wanted = slotId(context.slot)
+          const consoleForSlot = wanted ? consoles.find(item => item.id === wanted || item.label.endsWith(`/${wanted}`)) : undefined
+          methods.push({
+            id: 'bind',
+            title: '人工刷机',
+            about: '板子没有复位线或按钮：你按住 BOOT 再按 RESET，让它进下载模式，再按新出现的下载口和它的串口登记，选上它的 SoC（SDK 按 SoC 给出来）。请保证此时只有一块还没登记的板子处于下载模式。',
+            fields: [
+              { id: 'usb', label: '下载口', kind: 'choice', required: true, initial: usbs.length === 1 ? usbs[0]!.id : null,
+                options: usbs.map(item => ({ value: item.id, label: item.label })), note: usbs.length ? null : '没有看到未绑定的下载口：让板子进下载模式后刷新；已经登记的下载口不算。' },
+              { id: 'console', label: '串口', kind: 'choice', required: true, initial: consoleForSlot?.id ?? (consoles.length === 1 ? consoles[0]!.id : null),
+                options: consoles.map(item => ({ value: item.id, label: item.label })), note: consoles.length ? null : '没有空闲串口：接上串口适配器后刷新。' },
+              ...(socs.length
+                ? [{ id: 'soc', label: 'SoC', kind: 'choice' as const, required: true, initial: socs.length === 1 ? socs[0]! : null,
+                  options: socs.map(soc => ({ value: soc, label: soc.toUpperCase() })), note: '登记后这块板子的 SDK 从它和 bsp 的 SDK 目录来。' }]
+                : [{ id: 'soc', label: 'SoC', kind: 'text' as const, required: false, placeholder: '例如 k1、k3', note: 'bsp 的 SDK 目录里还没有 SoC；登记后可以再补。' }]),
+              ...(sdkList.length
+                ? [{ id: 'sdk', label: 'SDK（可选）', kind: 'choice' as const, required: false, initial: null,
+                  options: sdkList.map(item => ({ value: item.id, label: `${item.id}${item.soc ? `（${item.soc.toUpperCase()}）` : ''}` })), note: '留空：用这个 SoC 的全部 SDK。' }]
+                : []),
+              { id: 'board', label: '型号（可选）', kind: 'text', required: false, placeholder: '例如 k3_com260',
+                note: '自动发现会从板子上读型号；人工方式读不到，知道就填上，登记后也能改。' },
+              { id: 'name', label: '板名（可选）', kind: 'text', required: false, placeholder: '留空用 tmp-<主机>-<串口>' },
+            ],
+          })
+        }
+        // A board a probe cannot find, because what it has is not USB or a cabled console: a person says what it is and
+        // gets a DUT record, which the next sync lists like any other board. The host is the one the caller is asking
+        // about (the lab knows its hosts), and the SoC list is the catalog's; `services` is bsp's own record, passed
+        // through unchanged.
+        const knownHost = context.host ?? context.slot?.split('/')[0] ?? (config.username ? config.username.split(',')[0]!.trim() : '')
+        const catalog = await sdkCatalog(config)
+        const socs = [...new Set(catalog.map(item => item.soc).filter((soc): soc is string => !!soc))]
+        methods.push({
+          id: 'manual',
+          title: '手工登记',
+          about: '扫不到的板子（比如全靠两根排针上的 GPIO 调试、没有 USB 的板子）：说出它在哪台主机上、各个角色由什么提供，登记成一块板子。',
+          compose: true,
+          fields: [
+            { id: 'host', label: '主机', kind: 'text' as const, required: true, initial: knownHost || null,
+              placeholder: '板子接在哪台 bsp 主机上（设置里那台的名字）' },
+            { id: 'name', label: '板名', kind: 'text' as const, required: true, placeholder: '例：my-board' },
+            { id: 'services', label: '各角色的提供者（JSON）', kind: 'text' as const, required: false,
+              placeholder: '{ "debug": { "provider": "<provider>", "target": "<target>" } }',
+              note: '这块板子怎么被调试、看串口、刷写：每个角色一个 provider（relay / console / download / flash / debug）。只有调试口也要写在这里。' },
+            ...(socs.length
+              ? [{ id: 'soc', label: 'SoC（可选）', kind: 'choice' as const, required: false,
+                options: socs.map(soc => ({ value: soc, label: soc.toUpperCase() })), note: 'SDK 按 SoC 给出来。' }]
+              : [{ id: 'soc', label: 'SoC（可选）', kind: 'text' as const, required: false, placeholder: '例如 k3' }]),
+            { id: 'board', label: '型号（可选）', kind: 'text' as const, required: false, placeholder: '例如 k3_com260', note: '板上读不到型号时，知道就填。' },
+            { id: 'console_alias', label: '串口（可选）', kind: 'text' as const, required: false, placeholder: '主机上的 serial-mux 别名', note: '有串口控制台时填；全靠调试口的话留空。' },
+            { id: 'usb', label: '下载口（可选）', kind: 'text' as const, required: false, placeholder: 'usb:2-1.4', note: '有 USB 下载口时填。' },
+            { id: 'reset_pin', label: '复位线（可选）', kind: 'text' as const, required: false, placeholder: '例如 P15', note: '接到 GPIO 复位线时填；靠人按复位就留空。' },
+          ],
+        })
+        return methods
+      },
+      async run(config, method, values, context, progress, registered, signal) {
+        const host = context.host ?? (context.slot ? context.slot.split('/')[0]! : null)
+        if (method === 'probe') {
+          // bsp probe pulses free reset lines on the selected host (or every selected slot of it), watches consoles
+          // and USB, and registers each board the moment it is found.
+          const slots = slotId(context.slot)
+          const prefer = (values.prefer ?? '').split(/[\s,]+/).filter(Boolean)
+          const args = ['probe', '--register', ...(slots ? ['--slots', slots] : []), ...(prefer.length ? ['--prefer', prefer.join(',')] : [])]
+          return probed(config, args, progress, registered, host ?? undefined, signal)
+        }
+        if (method === 'bind') {
+          // The board is in download mode already: bsp makes a DUT of the console and the port it appeared on. Its SoC
+          // (and optionally one SDK) is what gives it a boot recipe; without it the board has no SDK at all.
+          if (!host) throw new Error('人工刷机要知道板子在哪台主机上：选一台主机')
+          const usb = values.usb?.trim() ?? '', consoleId = values.console?.trim() ?? ''
+          if (!usb) throw new Error('人工刷机要选下载口')
+          if (!consoleId) throw new Error('人工刷机要选串口')
+          const soc = values.soc?.trim() ?? '', sdk = values.sdk?.trim() ?? '', model = values.board?.trim() ?? ''
+          // The catalog is the authority for both: a SoC it does not know, or an SDK built for another SoC, would give
+          // the board no working recipe. It is only a check when the catalog answered at all.
+          const catalog = (soc || sdk) ? await sdkCatalog(config) : []
+          const knownSocs = new Set(catalog.map(item => item.soc).filter((item): item is string => !!item))
+          if (soc && knownSocs.size && !knownSocs.has(soc)) throw new Error(`bsp 的 SDK 目录里没有 SoC ${soc}`)
+          const sdkSoc = catalog.find(item => item.id === sdk)?.soc
+          if (sdk && sdkSoc && soc && sdkSoc !== soc) throw new Error(`SDK ${sdk} 是给 ${sdkSoc} 的，不是 ${soc}`)
+          const name = values.name?.trim() || `tmp-${host}-${consoleId.replace(/[^A-Za-z0-9_.-]+/g, '-')}`
+          await bsp(config, ['dut', 'bind', name, '--console', consoleId, '--usb', usb, '--host', host,
+            ...(soc ? ['--soc', soc] : []), ...(model ? ['--board', model] : []), ...(sdk ? ['--sdks', sdk] : [])], 180_000)
+          registered?.(name)
+          return { message: `登记了 ${name}（${host}：串口 ${consoleId}，下载口 ${usb}${soc ? `，SoC ${soc}` : ''}${sdk ? `，SDK ${sdk}` : ''}；由人复位）`, found: [] }
+        }
+        throw new Error(`bsp 后端没有发现方法 ${method}`)
       },
       // bsp starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
       // console plugged in now, and probes them all, registering each board as found. With --keep-used it keeps the
@@ -469,26 +627,41 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         if (!finding.host) throw new Error('不知道这块板子在哪台 bsp 主机上')
         await bsp(config, ['dut', 'add', finding.host, '--spec', JSON.stringify(spec)], 180_000)
       },
+      /**
+       * A board no probe can see: its console, download port and debug path are not USB things, so a person says what
+       * they are. The method is `manual` below, and every field is one a DUT record has (the same ones `bsp dut set`
+       * takes), so the record bsp gets is the one a site file would carry — boardlab writes no bsp vocabulary of its
+       * own, it passes the person's answers through.
+       */
+      async compose(config, method, values, context) {
+        if (method !== 'manual') throw new Error(`bsp 后端没有手工登记方法 ${method}`)
+        const host = values.host?.trim() || context.host?.trim()
+        if (!host) throw new Error('手工登记要知道板子在哪台主机上')
+        const name = values.name?.trim() ?? ''
+        if (!name) throw new Error('手工登记要给板子起个名字')
+        if (!DEVICE_NAME.test(name)) throw new Error('板名只能用字母、数字和 . _ -')
+        const services = (values.services ?? '').trim()
+        if (services) {
+          let parsed: unknown
+          try { parsed = JSON.parse(services) } catch { throw new Error('各角色的提供者要写成 JSON（{ "debug": { "provider": "<provider>" } }）') }
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('各角色的提供者要写成一个 JSON 对象')
+        }
+        const spec = {
+          id: name,
+          ...(values.board?.trim() ? { board: values.board.trim() } : {}),
+          ...(values.soc?.trim() ? { soc: values.soc.trim() } : {}),
+          ...(values.console_alias?.trim() ? { console: { alias: values.console_alias.trim() } } : {}),
+          ...(values.usb?.trim() ? { fastboot: { usb: values.usb.trim() } } : {}),
+          ...(values.reset_pin?.trim() ? { control: { backend: 'gpio-relay', reset: { pin: values.reset_pin.trim(), mode: 'button' } } } : {}),
+          ...(services ? { services: JSON.parse(services) } : {}),
+        }
+        await bsp(config, ['dut', 'add', host, '--spec', JSON.stringify(spec)], 180_000)
+        const what = Object.keys(spec).filter(key => !['id'].includes(key))
+        return { name, message: `登记了 ${name}（${host}${what.length ? `：${what.join('、')}` : ''}）` }
+      },
     },
 
-    ports: {
-      async list(config) {
-        // A dry-run probe touches nothing: it lists each host's free consoles and the download-mode USB devices on it.
-        const [plans, duts] = await Promise.all([
-          bsp<Record<string, { consoles?: Array<{ id: string, kind: string, alias?: string, device?: string }>, usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
-          bsp<BspDut[]>(config, ['dut', 'list']),
-        ])
-        const used = new Set(duts.map(dut => dut.usb))
-        return Object.entries(plans).map(([host, plan]) => ({
-          host,
-          consoles: (plan.consoles ?? []).map(con => ({ id: con.alias ?? con.device ?? con.id, label: con.alias ? `serial-mux ${con.alias}${con.device ? `（${con.device}）` : ''}` : (con.device ?? con.id) })),
-          usb: (plan.usb ?? []).filter(device => !used.has(device.usb)).map(device => ({ id: device.usb, label: `${device.usb}${device.product ? ` ${device.product}` : ''}` })),
-        }))
-      },
-      async bind(config, host, ports, name) {
-        await bsp(config, ['dut', 'bind', name, '--console', ports.console, '--usb', ports.usb, '--host', host], 180_000)
-      },
-    },
+    ports: { list: freePorts },
 
     async cancel(config, { device, lease: token }) {
       const done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device, ...lease(token)], 60_000)
@@ -565,6 +738,12 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
     },
 
+    // The board's debug path, whatever its host provides: ask what it offers, run its actions, stream its trace.
+    debug: bspDebug({
+      run: <T>(config: LabConfig, args: string[]) => bsp<T>(config, args, 120_000),
+      spawnStream: (config, args) => start([...global(config), ...args], env(config)),
+    }),
+
     lease: {
       async take(config, device, holder: LabHolder) {
         if (isSlot(device)) return SLOT_LEASE
@@ -575,18 +754,33 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
     },
     async boardConfig(config, device, fresh = false) {
-      const [record, choices] = await Promise.all([
-        fresh ? bsp<BspDut>(config, ['dut', 'status', device], 15_000) : recordOfBoard(config, device),
+      // `dut status` carries the effective SDKs and whether the board's own list is explicit (an empty list means every
+      // SDK of its SoC); `dut list` does not, so the editor reads the board once.
+      const [record, choices, sdkList] = await Promise.all([
+        bsp<BspDut>(config, ['dut', 'status', device], 15_000),
         hostChoices(config, await hostOfBoard(config, device), fresh),
+        sdkCatalog(config),
       ])
-      return { control: record.control ?? {}, usb: record.usb ?? null, ...choices }
+      // The SoCs the catalog has SDKs for; the board's own stays a choice even when nothing is built for it.
+      const socs = [...new Set(sdkList.map(item => item.soc).filter((soc): soc is string => !!soc))]
+      if (record.soc && !socs.includes(record.soc)) socs.unshift(record.soc)
+      // An SDK registered here but gone from the catalog stays choosable, so an untouched save does not drop it.
+      const sdkOptions = sdkList.map(item => ({ value: item.id, label: `${item.id}${item.soc ? `（${item.soc.toUpperCase()}）` : ''}` }))
+      for (const id of record.sdks_explicit ? (record.sdks ?? []) : []) if (!sdkOptions.some(item => item.value === id)) sdkOptions.unshift({ value: id, label: `${id}（当前登记，不在目录中）` })
+      return {
+        control: record.control ?? {}, usb: record.usb ?? null, ...choices,
+        soc: record.soc ?? null, sdks: record.sdks_explicit ? (record.sdks ?? []) : [],
+        socs: socs.map(soc => ({ value: soc, label: soc.toUpperCase() })),
+        sdkOptions,
+      }
     },
 
     async change(config, device, token, change) {
       const flags: Array<[string, string | number | undefined]> = [['--board', change.board], ['--soc', change.soc], ['--description', change.description], ['--usb', change.usb],
-        ['--reset-pin', change.resetPin], ['--pulse-ms', change.pulseMs], ['--fdl', change.fdl], ['--fdl-pin', change.fdlPin], ['--sdks', change.sdks?.join(',')],
-        ['--reset-actor', change.resetActor], ['--fdl-actor', change.fdlActor]]
+        ['--reset-pin', change.resetPin], ['--pulse-ms', change.pulseMs], ['--fdl', change.fdl], ['--fdl-pin', change.fdlPin]]
       const given = flags.filter(([, value]) => value !== undefined && value !== '').flatMap(([flag, value]) => [flag, String(value)])
+      // An empty SDK list is a value of its own (`dut set --sdks ''`): use every SDK of the SoC.
+      if (change.sdks !== undefined) given.push('--sdks', change.sdks.join(','))
       if (!given.length) throw new Error('没有要改的')
       const done = await bsp<{ changed: string[] }>(config, ['dut', 'set', device, ...lease(token), ...given], 120_000)
       return done.changed ?? []

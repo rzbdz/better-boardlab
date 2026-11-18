@@ -106,7 +106,8 @@ export const ui: ModuleUi = {
     const noRelease = clients.release ? undefined : '这个 boardd 是从源码跑的'
     const behind = clients.machines.filter(machine => badge(machine, clients).tone !== 'ok')
     return [{
-      id: 'cli-machines', slot: 'settings', title: '客户端配置', help: 'clients',
+      id: 'cli-machines', slot: 'settings', title: '客户端配置', help: 'clients', order: 15,
+      summary: '编译服务器和笔记本装上 boardlab 命令行，连到这里。',
       hint: {
         commands: [`boardlab remote set ${hubUrl(clients)}`, 'boardlab remote show', 'boardlab status', 'boardlab install'],
         context: () => clientsContext(clients),

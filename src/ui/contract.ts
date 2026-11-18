@@ -44,6 +44,13 @@ export interface View {
   help?: string
   /** What an AI assistant needs to help someone set this part up (see Hint). */
   hint?: Hint
+  /**
+   * For a settings view: where it belongs in the list — a lower number first — and, with it, one line on what setting
+   * this part up is for (a frontend may lead someone through it). A module names its own place (setting a lab up
+   * starts with its hosts, say) so that a frontend never has to know which module a section comes from.
+   */
+  order?: number
+  summary?: string
   /** Anything else this module wants a frontend that knows it to have (see Extra). */
   extra?: Extra
 }

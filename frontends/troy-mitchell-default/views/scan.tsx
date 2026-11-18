@@ -11,7 +11,7 @@ export function ScanTab(props: ViewProps) {
     <div className="columns">
       <div className="stack">
         {viewsFor(state, 'scan').map(view => <ViewPanel key={view.id} view={view} onRun={props.onRun} onPrompt={props.onPrompt} />)}
-        {state.labs.filter(lab => lab.enabled && lab.canDiscover).map(lab => <LabScan key={lab.id} lab={lab} state={state} onPrompt={props.onPrompt} />)}
+        {state.labs.filter(lab => lab.enabled && lab.canDiscover).map(lab => <LabScan key={lab.id} lab={lab} state={state} onPrompt={props.onPrompt} onRun={props.onRun} />)}
         <ProposalList proposals={state.proposals} onRun={props.onRun} />
       </div>
       {results.length > 0 && <div className="stack">{results.map(view => <ViewPanel key={view.id} view={view} onRun={props.onRun} onPrompt={props.onPrompt} />)}</div>}

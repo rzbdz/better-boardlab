@@ -1,12 +1,12 @@
-# An OVERLAY on bsp's public k3 profile (bsp: packs/spacemit/socs/k3/soc.yaml).
+# An OVERLAY on bsp's public k3 SoC facts (bsp: platforms/spacemit/socs/k3/soc.yaml).
 #
 # A site only writes what it adds or changes: everything not mentioned here (fingerprint,
-# download mode, USB ids, identify fields, probe image names) still comes from the pack, and
-# the pack is what ships with boardlab. This file shows the one thing a site commonly adds:
+# download mode, USB ids, identify fields, probe image names) still comes from the shipped
+# platform, and that is what ships with boardlab. This file shows the one thing a site commonly adds:
 # a boot-ROM helper kept outside any public repository, and the steps that use it on a board
 # whose download-mode strap never comes off.
 #
-# The same pattern fits any vendor-private detail. Public silicon facts belong in a bsp pack
+# The same pattern fits any vendor-private detail. Public silicon facts belong in a bsp platform
 # (contribute there); anything only your lab may have belongs here.
 images:
   handoff:

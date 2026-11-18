@@ -123,7 +123,7 @@ export function system(options: { root: string | null, release?: { version: stri
           },
         },
         {
-          method: 'POST', path: '/api/system/update', about: '升级到新版：新版本接手新连接，旧版本把手上的串口和任务跑完（不停机；force=true 不等没人用的板子）', handle: async ({ body, caller }) => {
+          method: 'POST', path: '/api/system/update', about: '升级到新版：新版本接手新连接，旧版本把手上的串口和任务跑完（不停机，锁和排队都保留；force=true 也重装一次；只有不能接手的旧安装才等锁，那时它不等）', handle: async ({ body, caller }) => {
             if (!prefix || !source) throw new BoardError('invalid', '这个 boardlab 不是用 install.sh 装的（比如从源码跑的）：在源码里 git pull 再 build')
             if (updating) throw new BoardError('conflict', '已经在升级')
             const now = await check(true)

@@ -185,7 +185,7 @@ describe('install.sh', () => {
 
   it('refuses inconsistent identity in a new managed release', async () => {
     const cases = [
-      ['VERSION', '0.9.6\n', /package\.json does not match VERSION|release\.json does not match/],
+      ['VERSION', '0.9.6\n', /package\.json does not match VERSION|release\.json does not match|release directory does not match/],
       ['REVISION', 'short\n', /REVISION is missing or not a full source revision/],
       ['package.json', '{ invalid', /package\.json is not valid JSON/],
     ] as const

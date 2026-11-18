@@ -1,6 +1,6 @@
 /**
  * The bsp site's endpoints, `/api/bsp/site/...`: what the site is (its source, revision, SDKs, build servers, SoC
- * profiles, what each host has), changing it (its source, pulling and pushing, SDKs and build servers, any catalog
+ * facts, what each host has), changing it (its source, pulling and pushing, SDKs and build servers, any catalog
  * document as YAML, taking one out), and syncing it to every bsp host, streamed like an install.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -66,6 +66,16 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
   }
 
   return [{
+    method: 'GET', path: '/api/bsp/site/guidance', about: '分层知识：通用提示、一颗 SoC 的笔记（socs/<soc>/*.md）、一个 SDK 的 skill（skills/<id>.md）；soc/sdk 都给了就给两个，不给给通用提示；同时列出可问的层级',
+    handle: ({ query }) => {
+      const got = site.guidance({ soc: text(query.get('soc')), sdk: text(query.get('sdk')) })
+      return {
+        blocks: got.blocks,
+        text: got.blocks.map(block => `## ${block.name} (${block.layer})\n${block.text}`).join('\n\n') || '这一层还没有内容',
+        socs: got.socs, skills: got.skills, hints: got.hints,
+      }
+    },
+  }, {
     method: 'GET', path: '/api/bsp/site', about: 'bsp 站点：来源、版本、SDK、编译服务器、编译方式、源码树、SoC 资料、问题，和每台主机上的站点版本',
     handle: () => site.status(bspLabs(lab).map(item => item.id)),
   }, {
@@ -95,7 +105,7 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
     method: 'POST', path: '/api/bsp/site/remove', about: '从站点删掉一个文档（kind、id）；还有别的在用它时不删',
     handle: async ({ body, caller }) => ({ message: await done(caller.holder, `remove ${text(body.kind)} ${text(body.id)}`, () => site.remove(caller.holder, text(body.kind), text(body.id))) }),
   }, {
-    method: 'GET', path: '/api/bsp/site/skills', about: '站点和它的 pack 里的 SDK skill（skills/<id>.md，站点的同名盖住 pack 的）：id、layer、file、title',
+    method: 'GET', path: '/api/bsp/site/skills', about: '站点和它读的平台的 SDK skill（skills/<id>.md，站点的同名盖住平台的）：id、layer、file、title',
     handle: () => ({ skills: site.skills() }),
   }, {
     method: 'GET', path: '/api/bsp/site/skill', about: '一个 SDK skill 的 Markdown 原文（query 的 id）',
@@ -104,7 +114,7 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
     method: 'POST', path: '/api/bsp/site/skill', about: '写入一个 SDK skill（id、text；改名时给 original）：skills/<id>.md，以改的人的名义提交',
     handle: ({ body, caller }) => done(caller.holder, `skill ${text(body.id)}`, () => site.putSkill(caller.holder, text(body.id), text(body.text), text(body.original) || undefined), out => out.file),
   }, {
-    method: 'POST', path: '/api/bsp/site/skill/remove', about: '从站点删掉一个 SDK skill（id）；pack 里有同名的就用回 pack 的',
+    method: 'POST', path: '/api/bsp/site/skill/remove', about: '从站点删掉一个 SDK skill（id）；平台里有同名的就用回平台的',
     handle: async ({ body, caller }) => ({ message: await done(caller.holder, `remove skill ${text(body.id)}`, () => site.removeSkill(caller.holder, text(body.id))) }),
   }, {
     method: 'POST', path: '/api/bsp/site/sync', about: '先取站点的镜像，再把站点（socs、sdk、hooks、.blobs）同步到每台 bsp 主机（或 lab 指定的一台）并让 bspd 重新读它，输出边做边推送',

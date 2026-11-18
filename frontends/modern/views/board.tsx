@@ -48,13 +48,17 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
   const [tab, setTab] = useState<'tty' | 'log'>('tty')
   const [status, setStatus] = useState<ConsoleStatus>('connecting')
   const [die, setDie] = useState<string | undefined>()
+  const ui = useUI()
   if (!board) return <div className="page"><section className="hero"><h1>没有这块板子</h1><p>可能被移除了。<a href="#/">回到板子</a></p></section></div>
   const m = model(board, state.you)
   const dies = board.chips.filter(c => c.online || board.lab).map(c => c.die), chosen = die ?? dies[0]
+  const lab = board.lab ? state.labs.find(item => item.id === board.lab!.id) : null
   return (
     <div className={`detail${full ? ' full' : ''}`}>
       <aside className="side">{full ? <Rail board={board} m={m} /> : <Side state={state} board={board} m={m} watched={watched} openLogs={() => setTab('log')} />}</aside>
       <section className="con">
+        {lab?.discovery?.running && <div className="flag run" style={{ margin: '0 12px 8px' }}><span className="spin" /><div><b>实验室正在发现板子</b><span>{lab.discovery.line}</span></div>
+          <button className="pill sm" onClick={() => void api.cancelDiscovery(lab.id).then(out => ui.toast('取消发现', out.message), error => ui.fail('取消发现失败', error))}>取消发现</button></div>}
         <button className="handle" onClick={() => setFull(!full)} title={full ? '还原（F）' : '串口占满全屏（F）'} aria-label={full ? '还原' : '串口占满'}><Icon name={full ? 'chev' : 'back'} /></button>
         <div className="ctb">
           <button className={`tab${tab === 'tty' ? ' on' : ''}`} onClick={() => setTab('tty')}>串口</button>
@@ -308,7 +312,7 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
   return <>
     <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · {pkg ? '用一个刷机包刷写板子' : '用一个 SDK 编好的产物启动板子'}。开始后可以关掉这个窗口，进度在板子上显示。</p>
     {!pkg && (sdks.length ? <label className="field">SDK<select className="select" value={sdk} onChange={e => setSdk(e.target.value)}>{sdks.map(s => <option key={s}>{s}</option>)}</select></label>
-      : <div className="mv-note warn">这块板子没有登记可用的 SDK。</div>)}
+      : <div className="mv-note warn">这块板子没有登记可用的 SDK：先在它的登记里选好 SoC 或 SDK。</div>)}
     <div className="field">方式<div className="opts">
       <button className={`opt${method === 'load' ? ' on' : ''}`} onClick={() => setMethod('load')}><Icon name="rocket" /><div><b>内存启动</b><span>经下载口加载到内存，不动存储；复位就没了。</span></div></button>
       <button className={`opt${method === 'download' ? ' on' : ''}`} onClick={() => setMethod('download')}><Icon name="dl" /><div><b>刷机</b><span>写进 eMMC / SD，要几分钟；之后复位从存储启动。</span></div></button>

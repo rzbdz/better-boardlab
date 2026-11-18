@@ -24,13 +24,9 @@ export const shortenLinks = (text: string) => text.replace(/\/dev\/serial\/by-pa
 /** `user:troy` → `troy`; other holder kinds keep their prefix so agents stay recognisable. */
 export const who = (holder: string) => holder.startsWith('user:') ? holder.slice(5) : holder
 
-export const ACTIONS: Record<string, string> = {
-  lock: '拿锁', unlock: '放锁', queue: '排队', unqueue: '退出排队', steal: '抢锁', reset: '复位', fastboot: '进入 fastboot',
-  send: '串口输入', stage: '加载镜像', boot: '内存启动', scan: '开始扫描', 'scan-end': '扫描结束',
-  'scan-cancel': '取消扫描', 'proposal-apply': '应用建议', 'proposal-reject': '拒绝建议', 'ha-config': '配置 HA', 'ha-test': '验证 HA',
-  'slots-confirm': '确认槽位', 'slots-sync': '同步槽位', 'slot-save': '保存自定义槽位', 'slot-remove': '删除自定义槽位', image: '登记镜像', 'image-remove': '移除镜像', add: '登记板子', remove: '移除板子', edit: '编辑板子',
-  'lab-config': '配置实验室', 'lab-test': '验证实验室', 'lab-sync': '实验室板子变动', 'lab-lease': '实验室租约', 'lab-discover': '实验室发现板子', 'lab-bind': '用空闲端口登记', 'lab-ports': '实验室接线变化', confirm: '确认人工操作', 'console-input': '串口交互', flash: '刷机', sdk: 'SDK 操作', relay: '继电器', refresh: '重新读取板子', 'lab-slot': '槽位换板',
-}
+// The shared table: one place names what an action did, so neither frontend shows a raw id and the two never
+// disagree about a word.
+export { ACTIONS } from '../../src/ui/format.ts'
 export const MODE: Record<Board['mode'], string> = { unknown: '状态未知', normal: '已复位', resetting: '复位中', fastboot: 'fastboot 模式' }
 export const KIND: Record<Proposal['kind'], string> = { 'new-board': '新板', 'replace-board': '换板', 'serial-moved': '串口', 'download-moved': '下载口', 'product-changed': '型号', 'slot-empty': '空槽位' }
 export const STATUS: Record<Scan['status'], string> = { running: '进行中', done: '完成', failed: '失败', cancelled: '已取消' }

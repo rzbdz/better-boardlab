@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { Board, Chip } from 'boardlab-core/shared/types.ts'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import { MODE, Pill, Tabs, shortLink, time, who, type Prompt, type Run, type Tab } from '../kit.tsx'
-import { LabPorts } from './labs.tsx'
+import { DiscoverBoardDialog, LabPorts } from './labs.tsx'
 
 // ---------- boards ----------
 
@@ -44,6 +44,8 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
   const canReset = board.lab ? !vacant : !!slot?.canReset
   const canFastboot = board.lab ? !vacant : !!slot?.canFastboot
   const labSlot = board.lab && board.slotRef ? board.slotRef.split('/').slice(1).join('/') : null
+  const labSettings = board.lab ? state.labs.find(item => item.id === board.lab!.id) : null
+  const [discovering, setDiscovering] = useState(false)
   return (
     <article className={`card ${mine ? 'card-mine' : ''} ${online ? 'card-console' : ''} ${vacant ? 'card-vacant' : ''} ${gone ? 'card-gone' : ''}`} data-board={board.name}
       title={online ? '点卡片打开串口' : undefined}
@@ -68,7 +70,7 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
         {board.lab.canConfirm && <button className="primary" onClick={() => props.onRun('已告诉实验室', () => api.confirm(board.name, board.lab!.attentionRequest ?? null))}>我已完成</button>}
       </div>}
       {board.lab?.progress && <p className="progress-line" aria-live="polite">启动中：{board.lab.progress}</p>}
-      {gone && <p className="warn small">这块板的槽位串口不见了（串口线拔掉或换了口）。最近重新布线过的话，到「扫描」里重建主机 {board.slotRef?.split('/')[0]}。</p>}
+      {gone && <p className="warn small">这块板的槽位串口不见了（串口线拔掉或换了口）。最近重新布线过的话，到「扫描」里重建主机 {board.slotRef?.split('/').length === 3 ? board.slotRef.split('/')[1] : board.slotRef?.split('/')[0]}。</p>}
       {board.lab?.mediaBoot && board.lab.mediaBoot.method !== 'reset' && <p className="muted small" title={board.lab.mediaBoot.why ?? undefined}>
         {board.lab.mediaBoot.available ? `下载模式是短接的：复位时经 ${board.lab.mediaBoot.method} 从板载介质启动` : '下载模式是短接的：复位后停在下载模式，只能从内存启动'}
       </p>}
@@ -104,13 +106,11 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
           ? <button disabled={props.busy} onClick={() => props.onRun('已退出排队', () => api.unqueue(board.name))}>退出排队 · 第 {place + 1} 位</button>
           : <button className="primary" disabled={props.busy} onClick={() => props.onPrompt({ kind: 'queue', board })}>排队</button>)}
         <button disabled={!online} title={online ? undefined : '没有在线的串口'} onClick={() => props.onConsole(board)}>控制台</button>
-        {vacant && labSlot && state.labs.find(lab => lab.id === board.lab!.id)?.canDiscover && <button disabled={props.busy || !!state.labs.find(lab => lab.id === board.lab!.id)?.discovery?.running}
-          onClick={() => props.onPrompt({ kind: 'confirm', title: `发现 ${labSlot} 上的板子`, action: '开始发现', danger: true,
-            body: `逐个拉还没用过的复位线，看哪根让这个串口有反应、哪个下载口出现，找到就登记（以前用过的线先试）。会复位接在这些线上的板子。`,
-            run: () => { void api.discoverLab(board.lab!.id, { slots: [labSlot] }).catch(() => {}); return Promise.resolve() } })}>发现这块板</button>}
+        {vacant && labSlot && labSettings && (labSettings.canDiscover) && <button disabled={props.busy || !!labSettings.discovery?.running} onClick={() => setDiscovering(true)}>发现这块板</button>}
         {board.lease && !mine && <button className="link danger push" disabled={props.busy} onClick={() => props.onPrompt({ kind: 'steal', board })}>抢锁</button>}
         {!board.lease && board.lab && !vacant && state.labs.find(lab => lab.id === board.lab!.id)?.canRemove && <button className="link danger push" disabled={props.busy} onClick={() => props.onPrompt({ kind: 'confirm', title: `从实验室移除 ${board.name}`, body: `实验室 ${board.lab!.id} 会忘掉 ${board.lab!.device}，要再用得重新发现或登记。`, action: '移除', danger: true, run: () => api.removeBoard(board.name) })}>移除</button>}
       </footer>
+      {discovering && labSettings && labSlot && <DiscoverBoardDialog lab={labSettings.id} host={labSlot.split('/')[0]} slot={labSlot} onClose={() => setDiscovering(false)} onRun={props.onRun} />}
     </article>
   )
 }
@@ -144,18 +144,20 @@ export function BoardsTab(props: { state: PageState, busy: boolean, onPrompt: (p
           ...(local ? [{ key: 'boards', label: <>本机槽位<span className="num">{boards.length}</span></> }] : []),
           ...labs.flatMap(lab => [
             { key: `lab:${lab.id}`, label: <>实验室 {lab.id}<span className="num">{state.boards.filter(board => board.lab?.id === lab.id).length}</span></> },
-            ...(lab.canBind && lab.enabled ? [{ key: `ports:${lab.id}`, label: <>{lab.id} 空闲端口</> }] : []),
+            ...(lab.canListPorts && lab.enabled ? [{ key: `ports:${lab.id}`, label: <>{lab.id} 空闲端口</> }] : []),
           ]),
           ...(local ? [{ key: 'empty', label: <>空槽位<span className="num">{empty.length}</span></> }] : []),
         ]} />
         <div className="summary">
           <span><b>{using}</b> 块你在使用</span>
           <span><b>{queued}</b> 块你在排队</span>
+          {state.labs.filter(lab => lab.discovery?.running).map(lab => <span key={lab.id} className="warn">正在发现 {lab.id}
+            <button className="link danger" onClick={() => void props.onRun('取消发现', () => api.cancelDiscovery(lab.id))}>取消发现</button></span>)}
           {state.proposals.length > 0 && <button className="link" onClick={() => props.onTab('scan')}>{state.proposals.length} 条扫描建议待确认</button>}
         </div>
       </div>
       <div className="view" key={view}>
-        {view.startsWith('ports:') && <LabPorts lab={view.slice(6)} onRun={props.onRun} />}
+        {view.startsWith('ports:') && <LabPorts lab={view.slice(6)} />}
         {view !== 'empty' && !view.startsWith('ports:') && (shown.length
           ? <div className="grid">{shown.map(board => <BoardCard key={board.name} board={board} state={state} busy={props.busy} onPrompt={props.onPrompt} onRun={props.onRun} onConsole={board => props.onConsole(board.name)} />)}</div>
           : view === 'boards'

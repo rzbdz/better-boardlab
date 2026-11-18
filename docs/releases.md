@@ -40,11 +40,17 @@ The tarball also contains `VERSION`, `REVISION`, `CORE_VERSION`, and `CORE_REVIS
 
 The build outputs are release artifacts, not files to commit to the source repository.
 
-## Publishing and provenance
+## Architecture review
 
-`scripts/publish.mjs git <repository>` publishes the generated files on a replaceable release branch, including the
-changelog. Stable publication requires an existing signed `v<version>` source tag that identifies the full revision in
-`release.json`; publication never creates, moves, or deletes that tag.
+`scripts/release.mjs` builds through `pnpm run build`, which runs the architecture scan
+(`core/scripts/check-architecture.mjs`), the generated-registry check, and the core version/tag check; a release cannot be
+built while any of them fails. The scan is necessary but not sufficient: before cutting an RC or a stable release, run the
+per-concept full-chain review described in [`docs/philosophy.md`](philosophy.md) — discovery, registration and ports,
+boot/flash/SDK, locks/leases/slots, modules and the UI contract, release identity, consoles — from the backend contract
+through the API, CLI, both frontends and tests. Record what it found in the release notes: what was fixed, and what
+remains as a known boundary with an owner. A rule may not be loosened to let a release through.
+
+## Publishing and provenance
 
 `scripts/publish.mjs github <owner/repo>` creates a GitHub release named `v<version>` with the tarball, `release.json`,
 and `install.sh`; the generated changelog becomes its release notes. Only stable versions can be published. Build and
@@ -55,7 +61,6 @@ validate RCs on a test installation without publishing them as stable releases.
 GitHub publishing keeps the newest three non-draft releases by creation time by default and deletes older releases
 and their assets without deleting their source tags. `--keep <number>` changes that count for a publication run.
 
-A git release branch is force-replaced by each publication; its old branch commits are not a retention mechanism.
 Service installation and updates retain the three newest directories under the installation's `releases/` directory,
 selected by directory modification time. This local cache is independent of the GitHub release history; CLI-only setup
 does not perform that service-installation pruning step.

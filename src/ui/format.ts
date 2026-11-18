@@ -27,10 +27,11 @@ export const ACTIONS: Record<string, string> = {
   'proposal-apply': '应用建议', 'proposal-reject': '拒绝建议', 'ha-config': '配置 HA', 'ha-test': '验证 HA', 'slots-confirm': '确认槽位',
   'slots-sync': '同步槽位', 'slot-save': '保存自定义槽位', 'slot-remove': '删除自定义槽位', add: '登记板子', remove: '移除板子', edit: '编辑板子',
   'lab-config': '配置实验室', 'lab-test': '验证实验室', 'lab-sync': '实验室板子变动', 'lab-lease': '实验室租约', 'lab-discover': '发现板子',
-  'lab-rebuild': '重建主机', 'lab-bind': '用空闲端口登记', 'lab-ports': '接线变化', confirm: '确认人工操作', 'console-input': '串口交互',
+  'lab-rebuild': '重建主机', 'lab-ports': '接线变化', confirm: '确认人工操作', 'console-input': '串口交互',
   flash: '刷机', sdk: 'SDK 操作', relay: '继电器', refresh: '重新读取', 'lab-slot': '槽位换板',
   yield: '让给 AI', 'yield-request': 'AI 请求让出', cancel: '取消操作', 'lab-install': '装板卡主机', 'lab-remove': '删板卡主机',
-  'bsp-board': '改 bsp 登记', update: '升级 boardlab', catalog: 'SDK 目录', bsp: 'bsp 命令', 'lab-sync-host': '同步站点',
+  'bsp-board': '改板子登记', update: '升级 boardlab', catalog: 'SDK 目录', bsp: '主机命令', 'lab-sync-host': '同步站点',
+  'lab-compose': '手工登记板子',
   'flash-package': '刷机包', configure: '改操作',
 }
 /** One-click purposes when taking or queueing for a lock. */

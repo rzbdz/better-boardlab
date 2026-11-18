@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, identity, type PageState } from '../../src/ui/api.ts'
+import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { registerModuleUis, ViewPanel, viewsFor } from './render.tsx'
 import { Dialog, TABS, Tabs, who, type Prompt, type Run, type Tab } from './kit.tsx'
@@ -63,38 +64,47 @@ function App() {
 
   useEffect(() => {
     void refresh()
-    const source = new EventSource('api/events')
+    // The stream keeps itself open (a proxy dropping it, boardd restarting): every event is heard here, and the state is
+    // read again as soon as the stream is back, so a page left open comes back without being reloaded.
     let timer: number | undefined
     const soon = () => { window.clearTimeout(timer); timer = window.setTimeout(refresh, 150) }
-    source.addEventListener('changed', soon)
-    // Views that show a lab's free ports listen for news of them.
-    source.addEventListener('lab-ports', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { lab: string, host?: string, added?: string[], removed?: string[] }
-      window.dispatchEvent(new CustomEvent('boardlab:lab-ports', { detail: data }))
-      // A cable plugged into a lab host is news for whoever is setting up a board.
-      if (data.host && data.added?.length) show(`${data.host} 新接上 ${data.added.join('、')}（实验室 ${data.lab} 空闲端口）`)
-      else if (data.host && data.removed?.length) show(`${data.host} 拔掉了 ${data.removed.join('、')}`)
+    const parse = (data: unknown) => data as Record<string, string | undefined>
+    const stop = events().listen({
+      names: CORE_EVENTS,
+      event: (name, data) => {
+        if (name === 'changed' || name === 'scan') return soon()
+        if (name === 'lab-ports') {
+          const news = parse(data) as { lab?: string, host?: string, added?: string[], removed?: string[] }
+          window.dispatchEvent(new CustomEvent('boardlab:lab-ports', { detail: news }))
+          // A cable plugged into a lab host is news for whoever is setting up a board.
+          if (news.host && news.added?.length) show(`${news.host} 新接上 ${news.added.join('、')}（实验室 ${news.lab} 空闲端口）`)
+          else if (news.host && news.removed?.length) show(`${news.host} 拔掉了 ${news.removed.join('、')}`)
+          return
+        }
+        if (name === 'lease-stolen') {
+          const news = parse(data) as { board: string, from?: string, by: string, reason: string }
+          if (news.from === you.current) show(`${news.board} 的锁被 ${who(news.by)} 抢走：${news.reason}`, true)
+          return soon()
+        }
+        if (name === 'lease-granted') {
+          const news = parse(data) as { board: string, holder?: string }
+          if (news.holder === you.current) show(`轮到你了：已拿到 ${news.board} 的锁`)
+          return soon()
+        }
+        if (name === 'attention') {
+          const news = parse(data) as { board: string, message?: string | null }
+          if (news.message) alertPerson(news.board, news.message)
+          return soon()
+        }
+        soon()
+      },
+      // A lost stream is not a lost boardd: read the state, and only a failed read shows the page as disconnected.
+      lost: soon,
+      // boardd answers again: the page is connected, and whatever changed while the stream was out is read now.
+      back: () => { setConnected(true); soon() },
     })
-    source.addEventListener('scan', soon)
-    source.addEventListener('lease-stolen', event => {
-      const data = JSON.parse((event as MessageEvent).data)
-      if (data.from === you.current) show(`${data.board} 的锁被 ${who(data.by)} 抢走：${data.reason}`, true)
-      soon()
-    })
-    source.addEventListener('attention', event => {
-      const data = JSON.parse((event as MessageEvent).data) as { board: string, message: string | null }
-      if (data.message) alertPerson(data.board, data.message)
-      soon()
-    })
-    source.addEventListener('lease-granted', event => {
-      const data = JSON.parse((event as MessageEvent).data)
-      if (data.holder === you.current) show(`轮到你了：已拿到 ${data.board} 的锁`)
-      soon()
-    })
-    source.onopen = () => setConnected(true)
-    source.onerror = () => setConnected(false)
     const tick = window.setInterval(refresh, 30_000)
-    return () => { source.close(); window.clearInterval(tick) }
+    return () => { stop(); window.clearInterval(tick) }
   }, [refresh, show])
 
   useEffect(() => { history.replaceState(null, '', `#${tab}`) }, [tab])

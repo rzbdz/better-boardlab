@@ -5,7 +5,7 @@
  * agent, so whoever looks at the host directly sees it too. Boards held on the host by someone else show as held.
  */
 import { BoardsClient, transportFor, type Transport } from 'boardlab-core/shared/client.ts'
-import type { Board, LockResult, State } from 'boardlab-core/shared/types.ts'
+import type { Board, DiscoveryContext, DiscoveryMethod, DiscoveryValues, LockResult, State } from 'boardlab-core/shared/types.ts'
 import type { Backend, BoardTarget, LabConfig, LabDevice, LabNews, LabSlots } from 'boardlab-core/core/backend.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
@@ -185,20 +185,32 @@ export function hostLab(options: HostOptions = {}): Backend {
       },
     },
     discovery: {
-      // The host's boardd finds and registers its boards itself; here they show up at the next listing.
-      async discover(config, input, progress) {
+      // The host's boardd finds and registers its boards itself; here they show up at the next listing. Its lab's
+      // methods, titles and fields are passed through untouched: this backend adds no idea of its own.
+      async methods(config, context): Promise<DiscoveryMethod[]> {
+        const state = await call(as(config).state()), labOn = lab(state)
+        if (!labOn) return []
+        return call(as(config).discoverMethods(labOn.id, context))
+      },
+      async run(config, method: string, values: DiscoveryValues, context: DiscoveryContext, progress, registered, signal) {
         const state = await call(as(config).state()), labOn = lab(state)
         if (!labOn) throw new BoardError('invalid', '这台主机没有能发现板子的实验室')
         progress(`主机的实验室 ${labOn.id} 在找板子`)
-        const out = await call(as(config).discoverLab(labOn.id, { human: input.human, host: input.host ?? undefined, slots: input.slots }))
-        return { message: out.message, found: [] }
+        // The host runs it on its own; a cancel here tells the host's lab to stop it too.
+        const stop = () => { void as(config).cancelDiscovery(labOn.id).catch(() => {}) }
+        signal?.addEventListener('abort', stop, { once: true })
+        try {
+          const out = await call(as(config).discoverLab(labOn.id, { method, values, host: context.host ?? undefined, slot: context.slot ?? undefined }, signal))
+          for (const name of out.registered ?? []) registered?.(name)
+          return { message: out.message, found: [] }
+        } finally { signal?.removeEventListener('abort', stop) }
       },
       async register() { throw new BoardError('invalid', '主机的 boardd 自己登记板子') },
-      async rebuild(config, host, progress, _registered, input) {
+      async rebuild(config, host, progress, _registered, input, signal) {
         const state = await call(as(config).state()), labOn = lab(state)
         if (!labOn) throw new BoardError('invalid', '这台主机没有能重建的实验室')
         progress(`主机的实验室 ${labOn.id} ${input?.keepInUse ? '重新发现' : '重建'} ${host}`)
-        const out = await call(as(config).rebuildLab(labOn.id, host, !!input?.keepInUse))
+        const out = await call(as(config).rebuildLab(labOn.id, host, !!input?.keepInUse, signal))
         return { message: out.message, found: [] }
       },
       keepsInUse: true,
@@ -206,12 +218,7 @@ export function hostLab(options: HostOptions = {}): Backend {
     ports: {
       async list(config): Promise<LabSlots[]> {
         const state = await call(as(config).state()), labOn = lab(state)
-        return labOn?.canBind ? (await call(as(config).labSlots(labOn.id))).hosts : []
-      },
-      async bind(config, host, ports, name) {
-        const state = await call(as(config).state()), labOn = lab(state)
-        if (!labOn) throw new BoardError('invalid', '这台主机没有能登记空闲端口的实验室')
-        await call(as(config).bindLab(labOn.id, { host, console: ports.console, usb: ports.usb, name: name || undefined }))
+        return labOn?.canListPorts ? (await call(as(config).labSlots(labOn.id))).hosts : []
       },
     },
     news: {

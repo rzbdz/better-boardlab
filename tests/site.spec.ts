@@ -23,7 +23,7 @@ import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 
-const EXAMPLE = join(import.meta.dirname, '..', 'externals', 'bsp', 'examples', 'site')
+const EXAMPLE = join(import.meta.dirname, '..', 'externals', 'bsp', 'tests', 'fixtures', 'site')
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=tester', '-c', 'user.email=t@example.test', ...args], { cwd, encoding: 'utf8' }).trim()
 
 function memory(): Settings & { values: Map<string, string> } {
@@ -31,7 +31,7 @@ function memory(): Settings & { values: Map<string, string> } {
   return { values, get: key => values.get(key) ?? null, set: (key, value) => { if (value === null) values.delete(key); else values.set(key, value) }, flag: key => values.has(key) ? values.get(key) === '1' : null }
 }
 
-/** A bare repository holding the example site's SDK catalog and SoC profiles. */
+/** A bare repository holding the example site's SDK catalog and SoC facts. */
 function remoteSite() {
   const seed = join(dir, 'seed'), remote = join(dir, 'remote.git')
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
@@ -138,6 +138,35 @@ describe('the bsp site', () => {
     expect(await site.setSource('user:alice', { source: 'git', url: elsewhere, branch: 'dev' })).toMatch(/还没有分支 dev/)
   })
 
+  it('checks out the site\'s submodules — a provider\'s vendored code — and refuses to bundle a provider without them', async () => {
+    // The site vendors a kit as a submodule; a plain clone leaves it an empty directory.
+    const kit = join(dir, 'kit'), kitRemote = join(dir, 'kit.git')
+    mkdirSync(kit); writeFileSync(join(kit, 'module.py'), 'KIT = 1\n')
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', kitRemote])
+    git(dir, 'init', '-q', '-b', 'main', kit); git(kit, 'add', '-A'); git(kit, 'commit', '-qm', 'kit'); git(kit, 'push', '-q', kitRemote, 'main')
+    const { remote } = remoteSite()
+    const seed = join(dir, 'vendor-seed')
+    git(dir, 'clone', '-q', remote, seed)
+    mkdirSync(join(seed, 'providers/plug'), { recursive: true })
+    writeFileSync(join(seed, 'providers/plug/provider.py'), 'def setup(ctx, api, config):\n    pass\n')
+    git(seed, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', kitRemote, 'providers/plug/vendor/kit')
+    git(seed, 'add', '-A'); git(seed, 'commit', '-qm', 'provider with a vendored kit'); git(seed, 'push', '-q', 'origin', 'main')
+
+    // A copy that has the provider's submodule empty will not be bundled: a host would get code that cannot import.
+    const settings = memory()
+    const site = new Site(join(dir, 'site'), settings)
+    git(dir, 'clone', '-q', remote, site.dir)
+    mkdirSync(join(site.dir, 'providers/plug/vendor/kit'), { recursive: true })
+    settings.set('source', 'git'); settings.set('url', remote); settings.set('branch', 'main')
+    await expect(site.bundle(join(dir, 'x.tgz'))).rejects.toThrow(/providers\/plug\/vendor\/kit.*submodule update/)
+    // Pulling the source checks it out: then it ships, with the vendored file.
+    await site.pull('user:alice')
+    expect(readFileSync(join(site.dir, 'providers/plug/vendor/kit/module.py'), 'utf8')).toBe('KIT = 1\n')
+    const out = join(dir, 'ok.tgz')
+    await site.bundle(out)
+    expect(execFileSync('tar', ['-tzf', out], { encoding: 'utf8' })).toContain('providers/plug/vendor/kit/module.py')
+  }, 30_000)
+
   it('keeps a site edited here when a git source is chosen that lacks it, unless told to', async () => {
     const { remote } = remoteSite()
     const fresh = new Site(join(dir, 'fresh'), memory())
@@ -154,10 +183,10 @@ describe('the bsp site', () => {
     expect(site.source).toBe('git')
   })
 
-  it('never writes over another document\'s file, and lets a pack\'s document take over from the site\'s', async () => {
+  it('never writes over another document\'s file, and lets a platform\'s document take over from the site\'s', async () => {
     const tree = join(dir, 'tree')
-    mkdirSync(join(tree, 'packs/base/sdk/servers'), { recursive: true })
-    writeFileSync(join(tree, 'packs/base/sdk/servers/build-p.yaml'), 'id: build-p\nhost: build-p.example.test\nuser: dev\n')
+    mkdirSync(join(tree, 'platforms/base/sdk/servers'), { recursive: true })
+    writeFileSync(join(tree, 'platforms/base/sdk/servers/build-p.yaml'), 'id: build-p\nhost: build-p.example.test\nuser: dev\n')
     const site = new Site(join(dir, 'site'), memory(), { tree })
     await site.putDoc('user:bob', 'families', 'make-bsp', readFileSync(join(EXAMPLE, 'sdk/families/make-bsp.yaml'), 'utf8'))
     await site.putServer('user:bob', { id: 'build-a', host: 'build-a.example.test', user: 'dev' })
@@ -169,11 +198,11 @@ describe('the bsp site', () => {
     expect(readFileSync(join(site.dir, 'sdk/servers/build-b.yaml'), 'utf8')).toContain('id: lab-b')
     expect(existsSync(join(site.dir, 'sdk/servers/build-a.yaml'))).toBe(true)
 
-    // The site's own build-p over the pack's, used by an SDK: taking it out leaves the pack's in its place.
+    // The site's own build-p over the platform's, used by an SDK: taking it out leaves the platform's in its place.
     await site.putServer('user:bob', { id: 'build-p', host: 'build-p.lab.example.test', user: 'builder' })
     await site.putSdk('user:bob', { id: 'vendor-p', family: 'make-bsp', server: 'build-p', path: '/p' })
     await expect(site.remove('user:bob', 'servers', 'build-a')).resolves.toMatch(/删掉了 build-a/)
-    expect(await site.remove('user:bob', 'servers', 'build-p')).toMatch(/删掉了 build-p.*packs\/base/)
+    expect(await site.remove('user:bob', 'servers', 'build-p')).toMatch(/删掉了 build-p.*platforms\/base/)
     const status = await site.status()
     expect(status.docs.find(doc => doc.id === 'build-p')).toMatchObject({ layer: 'base', fields: { host: 'build-p.example.test' } })
     expect(status.problems).toEqual([])
@@ -181,14 +210,14 @@ describe('the bsp site', () => {
     await expect(site.remove('user:bob', 'families', 'make-bsp')).rejects.toThrow(/还在用：vendor-p/)
   })
 
-  it('keeps SDK skills as Markdown, a pack\'s overridden by the site\'s, and writes them as commits', async () => {
+  it('keeps SDK skills as Markdown, a platform\'s overridden by the site\'s, and writes them as commits', async () => {
     const tree = join(dir, 'tree')
-    mkdirSync(join(tree, 'packs/base/skills'), { recursive: true })
-    writeFileSync(join(tree, 'packs/base/skills/sdk-p.md'), '# Pack skill\nfrom the pack\n')
+    mkdirSync(join(tree, 'platforms/base/skills'), { recursive: true })
+    writeFileSync(join(tree, 'platforms/base/skills/sdk-p.md'), '# Platform skill\nfrom the shipped platform\n')
     const site = new Site(join(dir, 'site'), memory(), { tree })
-    // Listing and reading come from the pack until the site has its own.
-    expect(await site.skills()).toEqual([{ id: 'sdk-p', layer: 'base', file: 'packs/base/skills/sdk-p.md', title: 'Pack skill' }])
-    expect(site.skill('sdk-p')).toEqual({ id: 'sdk-p', layer: 'base', text: '# Pack skill\nfrom the pack\n' })
+    // Listing and reading come from the platform until the site has its own.
+    expect(await site.skills()).toEqual([{ id: 'sdk-p', layer: 'base', file: 'platforms/base/skills/sdk-p.md', title: 'Platform skill' }])
+    expect(site.skill('sdk-p')).toEqual({ id: 'sdk-p', layer: 'base', text: '# Platform skill\nfrom the shipped platform\n' })
     await site.putSkill('user:bob', 'sdk-p', '# Site skill\nwritten here\n')
     expect(await site.skills()).toEqual([{ id: 'sdk-p', layer: 'site', file: 'skills/sdk-p.md', title: 'Site skill' }])
     expect(site.skill('sdk-p')).toEqual({ id: 'sdk-p', layer: 'site', text: '# Site skill\nwritten here\n' })
@@ -202,17 +231,22 @@ describe('the bsp site', () => {
     await expect(site.putSkill('user:bob', 'bad id', '# x\n')).rejects.toThrow(/不合法的名字/)
     await expect(site.removeSkill('user:bob', 'nope')).rejects.toThrow(/没有 skill nope/)
     expect(site.skill('sdk-p').layer).toBe('site')
-    // Taken out, the pack's takes over; each change is a commit by whoever made it.
-    expect(await site.removeSkill('user:bob', 'sdk-p')).toBe('删掉了 sdk-p：用回 packs/base/skills/sdk-p.md 里的')
+    // Taken out, the platform's takes over; each change is a commit by whoever made it.
+    expect(await site.removeSkill('user:bob', 'sdk-p')).toBe('删掉了 sdk-p：用回 platforms/base/skills/sdk-p.md 里的')
     expect(site.skill('sdk-p')).toMatchObject({ layer: 'base' })
     expect(git(site.dir, 'log', '-1', '--format=%an|%s')).toBe('user:bob|Remove skill sdk-p')
   })
 
-  it('takes a whole site repository: what it does not use is left alone, and only socs, sdk and hooks are shipped', async () => {
+  it('takes a whole site repository: what it does not use is left alone, and a provider and its boards travel with the site', async () => {
     // A repository that also holds the hosts' own files, deploy scripts, docs and notes.
     const seed = join(dir, 'catalog'), remote = join(dir, 'catalog.git')
     cpSync(EXAMPLE, seed, { recursive: true })
-    for (const [path, text] of [['docs/index.md', '# lab\n'], ['notes/todo.txt', 'later\n'], ['deploy/run.sh', 'echo deploy\n'], ['hosts/broken.yaml', 'not: [valid\n'], ['sdk/README.md', 'the catalog\n']])
+    for (const [path, text] of [['docs/index.md', '# lab\n'], ['notes/todo.txt', 'later\n'], ['deploy/run.sh', 'echo deploy\n'], ['hosts/broken.yaml', 'not: [valid\n'], ['sdk/README.md', 'the catalog\n'],
+      // Provider code and the boards a site declares go to the hosts; a provider's build litter does not.
+      ['providers/plug/provider.py', 'def setup(ctx, api, config):\n    pass\n'],
+      ['providers/plug/__pycache__/provider.cpython-313.pyc', 'binary\n'], ['providers/plug/.pytest_cache/v/x', 'x\n'],
+      ['providers/plug/conftest.py', 'import sys\n'],
+      ['duts/board-9.yaml', 'id: board-9\nhost: lab-1\nservices: {debug: {provider: plug}}\n']])
       mkdirSync(dirname(join(seed, path)), { recursive: true }), writeFileSync(join(seed, path), text)
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
     git(dir, 'init', '-q', '-b', 'main', seed); git(seed, 'add', '-A'); git(seed, 'commit', '-qm', 'lab site'); git(seed, 'push', '-q', remote, 'main')
@@ -225,8 +259,11 @@ describe('the bsp site', () => {
     expect(status.commit?.subject).toBe('lab site')
     const bundle = join(dir, 'site.tgz')
     await site.bundle(bundle)
-    const tops = new Set(execFileSync('tar', ['-tzf', bundle], { encoding: 'utf8' }).trim().split('\n').map(path => path.split('/')[0]))
-    expect([...tops].sort()).toEqual(['hooks', 'sdk', 'socs'])
+    const members = execFileSync('tar', ['-tzf', bundle], { encoding: 'utf8' }).trim().split('\n')
+    const tops = new Set(members.map(path => path.split('/')[0]))
+    expect([...tops].sort()).toEqual(['duts', 'hooks', 'providers', 'sdk', 'socs'])
+    expect(members).toContain('providers/plug/provider.py')
+    expect(members.some(path => path.includes('__pycache__') || path.includes('.pytest_cache') || path.endsWith('.pyc'))).toBe(false)
     // An edit here touches only its own file.
     await site.putServer('user:alice', { id: 'build-c', host: 'build-c.example.test', user: 'dev' })
     expect(git(site.dir, 'show', '--name-only', '--format=', 'HEAD')).toBe('sdk/servers/build-c.yaml')
@@ -324,9 +361,11 @@ describe('the bsp site', () => {
 
 /**
  * A board host: ssh and scp run commands here with /tmp and /etc mapped into `remote`; sudo runs the command; systemctl
- * logs what it is asked. Its site has a hosts/ file of its own, an SDK the new site no longer has, and an image.
+ * logs what it is asked and says which unit it has (the new one; `old`: `bsp-hostd` instead). Its site has a hosts/
+ * file of its own, an SDK the new site no longer has, and an image; `old` keeps it where hosts installed before the
+ * names changed do, under /etc/bsp.
  */
-function fakeHost() {
+function fakeHost(layout: 'new' | 'old' = 'new') {
   const remote = join(dir, 'host'), bin = join(dir, 'bin'), log = join(dir, 'host.log')
   mkdirSync(bin, { recursive: true })
   const map = (variable: string) => `${variable}=\${${variable}//\\/tmp\\//${remote}/tmp/}; ${variable}=\${${variable}//\\/etc\\//${remote}/etc/}`
@@ -342,18 +381,23 @@ args=(); while [[ $# -gt 0 ]]; do case $1 in -i|-o|-P|-J) shift 2;; -*) shift;; 
 dest=\${args[1]#*:}; ${map('dest')}; mkdir -p "$(dirname "$dest")"; cp "\${args[0]}" "$dest"
 `)
   writeFileSync(join(bin, 'sudo'), '#!/bin/bash\n[[ $1 == -n ]] && shift\nexec "$@"\n')
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/bash\necho "systemctl $*" >> ${log}\n`)
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/bash
+echo "systemctl $*" >> ${log}
+if [[ $1 == cat ]]; then [[ $2 == ${layout === 'old' ? 'bsp-hostd' : 'boardctrld'} ]]; fi
+`)
   for (const name of ['ssh', 'scp', 'sudo', 'systemctl']) chmodSync(join(bin, name), 0o755)
-  const s = join(remote, 'etc/bsp/site')
+  const s = join(remote, layout === 'old' ? 'etc/bsp/site' : 'etc/boardctrl/site')
   mkdirSync(join(s, 'hosts'), { recursive: true }); writeFileSync(join(s, 'hosts/lab1.yaml'), 'host: {id: lab1}\n')
   mkdirSync(join(s, 'sdk/instances'), { recursive: true }); writeFileSync(join(s, 'sdk/instances/gone.yaml'), 'id: gone\n')
   mkdirSync(join(s, '.blobs/0123'), { recursive: true }); writeFileSync(join(s, '.blobs/0123/kept.bin'), 'image')
-  writeFileSync(join(remote, 'etc/bsp/hostd.env'), 'BSP_TOKEN=host-token\n')
+  const env = layout === 'old' ? 'etc/bsp/hostd.env' : 'etc/boardctrl/boardctrld.env'
+  mkdirSync(join(remote, dirname(env)), { recursive: true })
+  writeFileSync(join(remote, env), layout === 'old' ? 'BSP_TOKEN=host-token\n' : 'BOARDCTRL_TOKEN=host-token\nBSP_TOKEN=host-token\n')
   process.env.PATH = `${bin}:${process.env.PATH}`
   return { site: s, log: () => existsSync(log) ? readFileSync(log, 'utf8') : '' }
 }
 
-type BspdMode = 'reload' | 'refuse' | 'busy' | 'job' | 'old' | 'old-leased' | 'old-broken'
+type BspdMode = 'reload' | 'refuse' | 'busy' | 'job' | 'leased' | 'old' | 'old-leased' | 'old-broken'
 
 /**
  * bspd on a local port: its tool list (`site_reload` only when new enough; `job_list` but for `old`), `site_reload`
@@ -374,7 +418,7 @@ async function fakeBspd(mode: BspdMode, site?: string) {
       if (now === 'refuse' && !state.refused++) return reply(404, { ok: false, error: { code: 'not_found', message: "no build server 'nowhere'" } })
       return reply(200, { ok: true, result: { site: '/etc/bsp/site', sdks: ['bsp-a', 'bsp-b'], socs: ['soc-a'] } })
     }
-    if (request.url === '/api/v1/tools/dut_list') return reply(200, { ok: true, result: [{ id: 'dut1', lease: now === 'old-leased' ? { holder: 'user:carol' } : null, busy: now === 'busy' ? 'boot load' : null }] })
+    if (request.url === '/api/v1/tools/dut_list') return reply(200, { ok: true, result: [{ id: 'dut1', lease: now === 'leased' || now === 'old-leased' ? { holder: 'user:carol' } : null, busy: now === 'busy' ? 'boot load' : null }] })
     if (request.url === '/api/v1/tools/job_list' && now !== 'old') return reply(200, { ok: true, result: [{ id: 'flash-1', title: 'flash dut2', status: now === 'job' ? 'running' : 'succeeded' }] })
     reply(404, { ok: false, error: { code: 'not_found', message: `unknown command '${request.url}'` } })
   })
@@ -382,7 +426,7 @@ async function fakeBspd(mode: BspdMode, site?: string) {
   return { port: (server.address() as AddressInfo).port, calls, state, close: () => new Promise(resolve => server.close(resolve)) }
 }
 
-/** A site with the example's SoC profiles and SDK catalog, a hook and an image. */
+/** A site with the example's SoC facts and SDK catalog, a hook, an image, a declared board and a site provider. */
 async function shippedSite(root: string) {
   const site = new Site(root, memory())
   await site.status()
@@ -391,6 +435,11 @@ async function shippedSite(root: string) {
   mkdirSync(join(root, 'hooks/boot'), { recursive: true }); writeFileSync(join(root, 'hooks/boot/say'), '#!/bin/sh\necho hi\n')
   mkdirSync(join(root, '.blobs/4567'), { recursive: true }); writeFileSync(join(root, '.blobs/4567/new.bin'), 'new image')
   mkdirSync(join(root, 'hosts'), { recursive: true }); writeFileSync(join(root, 'hosts/lab1.yaml'), 'host: {id: not-this}\n')
+  mkdirSync(join(root, 'duts'), { recursive: true }); writeFileSync(join(root, 'duts/board-9.yaml'), 'id: board-9\nhost: lab-1\nservices: {debug: {provider: plug}}\n')
+  // A site provider: the host loads its provider.py; its caches are the host's to make, not the site's to ship.
+  mkdirSync(join(root, 'providers/plug/__pycache__'), { recursive: true })
+  writeFileSync(join(root, 'providers/plug/provider.py'), 'def setup(ctx, api, config):\n    pass\n')
+  writeFileSync(join(root, 'providers/plug/__pycache__/provider.cpython-313.pyc'), 'binary')
   writeFileSync(join(root, 'socs/soc-a/notes.tmp'), 'scratch'); writeFileSync(join(root, '.bspignore'), '*.tmp\n')
   git(root, 'add', '-A'); git(root, 'commit', '-qm', 'site')
   return site
@@ -457,7 +506,7 @@ describe('the site\'s images', () => {
 })
 
 describe('syncing the site to board hosts', () => {
-  it('ships socs, sdk, hooks and images, leaves the host\'s hosts/ alone, and has bspd read it again', async () => {
+  it('ships socs, sdk, hooks, duts, provider code and images, leaves the host\'s hosts/ alone, and has bspd read it again', async () => {
     const host = fakeHost(), bspd = await fakeBspd('reload')
     try {
       const site = await shippedSite(join(dir, 'site'))
@@ -465,7 +514,9 @@ describe('syncing the site to board hosts', () => {
       await site.bundle(bundle)
       const lines: string[] = []
       const message = await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, line => lines.push(line))
-      expect(message).toBe('bspd 重新读了站点：2 个 SDK，1 个 SoC')
+      // The host had no provider code: providers are read at startup, so the data reload alone is not enough.
+      expect(message).toBe('bspd 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 bspd')
+      expect(lines).toContain('站点的 provider 代码变了：重启 bspd 让新代码生效…')
       expect(readFileSync(join(host.site, 'sdk/instances/bsp-a.yaml'), 'utf8')).toBe(readFileSync(join(EXAMPLE, 'sdk/instances/bsp-a.yaml'), 'utf8'))
       expect(existsSync(join(host.site, 'socs/soc-a/soc.yaml'))).toBe(true)
       expect(existsSync(join(host.site, 'socs/soc-a/notes.tmp'))).toBe(false)                // .bspignore
@@ -474,10 +525,63 @@ describe('syncing the site to board hosts', () => {
       expect(readFileSync(join(host.site, '.blobs/4567/new.bin'), 'utf8')).toBe('new image')
       expect(readFileSync(join(host.site, '.blobs/0123/kept.bin'), 'utf8')).toBe('image')   // images are added to
       expect(readFileSync(join(host.site, 'hosts/lab1.yaml'), 'utf8')).toBe('host: {id: lab1}\n')
+      // The site's provider code and the boards it declares reach the host; a provider's build litter does not.
+      expect(readFileSync(join(host.site, 'providers/plug/provider.py'), 'utf8')).toContain('def setup')
+      expect(existsSync(join(host.site, 'providers/plug/__pycache__')) || existsSync(join(host.site, 'providers/plug/.pytest_cache'))).toBe(false)
+      expect(readFileSync(join(host.site, 'duts/board-9.yaml'), 'utf8')).toContain('id: board-9')
       expect(existsSync(join(host.site, '.git')) || existsSync(`${host.site}.incoming`) || existsSync(`${host.site}.previous`)).toBe(false)
-      expect(bspd.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/tools/job_list', '/api/v1/tools/site_reload'])
+      expect(bspd.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/tools/job_list', '/api/v1/tools/site_reload', '/api/v1/health'])
       expect(bspd.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
-      expect(host.log()).not.toContain('systemctl')
+      expect(host.log().match(/^systemctl restart boardctrld$/gm)).toHaveLength(1)
+    } finally { await bspd.close() }
+  }, 30_000)
+
+  it('reloads the data and keeps running when the provider code did not change', async () => {
+    const host = fakeHost()
+    // The host already runs this provider code: only the data around it moved.
+    mkdirSync(join(host.site, 'providers/plug'), { recursive: true })
+    writeFileSync(join(host.site, 'providers/plug/provider.py'), 'def setup(ctx, api, config):\n    pass\n')
+    const bspd = await fakeBspd('reload')
+    try {
+      const site = await shippedSite(join(dir, 'site'))
+      const bundle = join(dir, 'site.tgz')
+      await site.bundle(bundle)
+      const lines: string[] = []
+      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, line => lines.push(line)))
+        .toBe('bspd 重新读了站点：2 个 SDK，1 个 SoC')
+      expect(lines).not.toContain('站点的 provider 代码变了：重启 bspd 让新代码生效…')
+      expect(host.log()).not.toContain('systemctl restart')
+    } finally { await bspd.close() }
+  }, 30_000)
+
+  it('asks a host taken over from bspd with the token it runs on now, not one left in the old place', async () => {
+    const host = fakeHost()
+    // The takeover left the old install's env file behind, with the token of the bspd that is gone: the current
+    // installer's file is what the daemon reads, and what a sync has to ask with.
+    mkdirSync(join(dir, 'host/etc/bsp'), { recursive: true })
+    writeFileSync(join(dir, 'host/etc/bsp/hostd.env'), 'BSP_TOKEN=token-of-the-old-install\n')
+    const bspd = await fakeBspd('reload')
+    try {
+      const site = await shippedSite(join(dir, 'site'))
+      const bundle = join(dir, 'site.tgz')
+      await site.bundle(bundle)
+      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, () => {}))
+        .toBe('bspd 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 bspd')
+      expect(bspd.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
+    } finally { await bspd.close() }
+  }, 30_000)
+
+  it('syncs a host installed before the names changed where it still keeps its site, and restarts its own unit', async () => {
+    const host = fakeHost('old'), bspd = await fakeBspd('old')
+    try {
+      const site = await shippedSite(join(dir, 'site'))
+      const bundle = join(dir, 'site.tgz')
+      await site.bundle(bundle)
+      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
+      expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
+      expect(existsSync(join(host.site, 'hosts/lab1.yaml'))).toBe(true)
+      expect(existsSync(join(dir, 'host/etc/boardctrl'))).toBe(false)        // nothing made in the new place
+      expect(host.log().match(/^systemctl restart bsp-hostd/gm)).toHaveLength(1)
     } finally { await bspd.close() }
   }, 30_000)
 
@@ -510,33 +614,45 @@ describe('syncing the site to board hosts', () => {
         expect(busy.calls.map(call => call.path)).not.toContain('/api/v1/tools/site_reload')
       } finally { await busy.close() }
     }
-    expect(execFileSync('ls', [join(host.site, '..')], { encoding: 'utf8' }).trim().split('\n')).toEqual(['hostd.env', 'site'])
+    // New provider code, on a bspd that reloads data in place: applying it restarts bspd. A leased board does not stop
+    // that (its lock and console outlive the restart); nothing is busy here, so the restart goes ahead.
+    const leased = await fakeBspd('leased')
+    try {
+      expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toContain('provider 代码变了，重启')
+    } finally { await leased.close() }
+    expect(execFileSync('ls', [join(host.site, '..')], { encoding: 'utf8' }).trim().split('\n')).toEqual(['boardctrld.env', 'site'])
   }, 30_000)
 
-  it('restarts a bspd too old to reload only when no board on it is leased, and puts the old site back when it does not come up', async () => {
+  it('restarts a bspd too old to reload even while a board is leased, and puts the old site back when it does not come up', async () => {
     const host = fakeHost()
     const site = await shippedSite(join(dir, 'site'))
     const bundle = join(dir, 'site.tgz')
     await site.bundle(bundle)
     const hosts = new Hosts(join(dir, 'state'))
+    // A leased board is not work the daemon is doing: its lock (state directory) and its console (its own systemd
+    // unit) outlive the restart, so an upgrade goes ahead while someone holds a board.
     const leased = await fakeBspd('old-leased')
     try {
-      await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${leased.port}`, bundle, () => {})).rejects.toThrow(/dut1：user:carol.*没重启 bspd，也没换站点/)
-      expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(true)
+      expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
+      expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
     } finally { await leased.close() }
     // It does not start on the new site: the old one goes back, and it is started again on that.
     const broken = await fakeBspd('old-broken', host.site)
     try {
-      await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${broken.port}`, bundle, () => {}, 1)).rejects.toThrow(/1 秒内没起来；主机上放回了原来的站点，bspd 又起来了$/)
-      expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(true)
+      await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${broken.port}`, bundle, () => {}, 1)).rejects.toThrow(/1 秒内没起来；主机上放回了原来的站点，bspd 还是没起来/)
+      // What goes back is what the sync before this one left (it succeeded): the new site, not the host's first one.
+      expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
+      expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(false)
       expect(existsSync(`${host.site}.previous`)).toBe(false)
-      expect(host.log().match(/^systemctl restart bsp-hostd/gm)).toHaveLength(2)
+      // The leased restart above, this sync's restart, and the one on the old site: a host that does not come up is
+      // started again on what it had.
+      expect(host.log().match(/^systemctl restart boardctrld/gm)).toHaveLength(3)
     } finally { await broken.close() }
     const old = await fakeBspd('old')
     try {
       expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${old.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
       expect(old.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/health'])
-      expect(host.log().match(/^systemctl restart bsp-hostd/gm)).toHaveLength(3)
+      expect(host.log().match(/^systemctl restart boardctrld/gm)).toHaveLength(4)
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
       expect(existsSync(`${host.site}.previous`)).toBe(false)
     } finally { await old.close() }
@@ -627,4 +743,75 @@ describe('syncing the site to board hosts', () => {
       expect((await call('GET', '/api/bsp/site')).hosts.lab1).toMatchObject({ revision, ok: false })
     } finally { await bspd.close() }
   }, 30_000)
+
+  it('refuses to install a host again while a board on it is in use: an install restarts its bspd', async () => {
+    const host = fakeHost(), bspd = await fakeBspd('reload')
+    try {
+      const stateDir = join(dir, 'state')
+      // The tree it would install is checked before anything else, so it has to be there to reach the board's lock.
+      mkdirSync(join(dir, 'bsp', 'deploy'), { recursive: true })
+      writeFileSync(join(dir, 'bsp', 'deploy/bspd-install.sh'), '#!/bin/sh\n')
+      const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ stateDir, bin: fakeBsp().bin, tree: join(dir, 'bsp'), sdk: { run: async () => 0 } as never })] })
+      const call = async (method: 'GET' | 'POST', path: string, body: Record<string, unknown> = {}) => {
+        const found = lab.api.match(method, path.split('?')[0]!)
+        if (!found) throw new Error(`no ${method} ${path}`)
+        return found.endpoint.handle({ query: new URLSearchParams(), params: found.params, body, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null }) as Promise<any>
+      }
+      await lab.backends.add('user:alice', 'lab1', 'bsp')
+      await lab.backends.configure('user:alice', 'lab1', { enabled: true, url: `bspd+ssh://root@lab-1:${bspd.port}` })
+      // The host lists its board; the person holding it holds it. (The record is boardd's own; the lock check reads it.)
+      lab.kernel.db.prepare("INSERT INTO boards(name, slot, product, soc, source, lab) VALUES('lab1-dut1', 's1', '', 'soc-a', 'lab', 'lab1')").run()
+      const board = lab.boards.list().find(item => item.lab?.id === 'lab1')
+      expect(board).toBeDefined()
+      // The lock itself, as a holder's would be: the install must not restart bspd under it.
+      lab.locks.grant(board!.name, 'user:bob', '调试')
+      const reply = await call('POST', '/api/bsp/install', { id: 'lab1', address: 'lab-1', user: 'root' }) as { start: (emit: (event: string, data: any) => void, end: () => void, signal: AbortSignal) => Promise<void> }
+      const out: Array<[string, any]> = []
+      await new Promise<void>(resolve => { void reply.start((event, data) => out.push([event, data]), resolve, new AbortController().signal) })
+      expect(out.find(([event]) => event === 'exit')?.[1]).toMatchObject({ ok: false, message: expect.stringMatching(/正被 user:bob 使用，重装会重启那台主机的 bspd/) })
+      expect(host.log()).not.toContain('bspd-install.sh')              // nothing was installed over the holder's board
+    } finally { await bspd.close() }
+  }, 30_000)
+})
+
+describe('guidance by level', () => {
+  it('answers the general hints, a SoC\'s notes and an SDK\'s skill, the site over a shipped platform', async () => {
+    const { remote } = remoteSite()
+    const other = join(dir, 'elsewhere')
+    git(dir, 'clone', '-q', remote, other)
+    mkdirSync(join(other, 'socs', 'soc-a'), { recursive: true })
+    mkdirSync(join(other, 'skills'), { recursive: true })
+    mkdirSync(join(other, 'hints'), { recursive: true })
+    writeFileSync(join(other, 'socs', 'soc-a', 'notes.md'), 'soc-a: reset holds 100 ms\n')
+    writeFileSync(join(other, 'skills', 'bsp-a.md'), '# bsp-a\nbuild with `make a`\n')
+    writeFileSync(join(other, 'hints', 'general.md'), 'general: use the lock\n')
+    git(other, 'add', '.'); git(other, 'commit', '-qm', 'notes'); git(other, 'push', '-q', 'origin', 'main')
+
+    const site = new Site(join(dir, 'state', 'bsp', 'site'), memory())
+    await site.setSource('user:alice', { source: 'git', url: remote, branch: 'main' })
+
+    const listing = site.guidance()
+    expect(listing.socs).toContain('soc-a')
+    expect(listing.skills).toContain('bsp-a')
+    expect(listing.hints).toContain('hints/general.md')
+    expect(listing.blocks.map(block => block.name)).toContain('hints/general.md')
+
+    const soc = site.guidance({ soc: 'soc-a' })
+    expect(soc.blocks.map(block => block.name)).toEqual(['soc-a/notes.md', 'soc-a/soc.yaml'])
+    expect(soc.blocks[0]!.text).toContain('reset holds 100 ms')
+    expect(soc.blocks[1]!.text).toMatch(/^profile: .*soc-a\/soc.yaml$/)
+
+    const sdk = site.guidance({ sdk: 'bsp-a' })
+    expect(sdk.blocks).toEqual([{ name: 'bsp-a', layer: 'site', text: '# bsp-a\nbuild with `make a`' }])
+
+    // Asking for a level nothing carries is an answer of nothing, not an error: the page says so.
+    expect(site.guidance({ soc: 'nope' }).blocks).toEqual([])
+    expect(site.guidance({ sdk: 'nope' }).blocks).toEqual([])
+
+    // The site's own file wins over a platform's with the same name.
+    writeFileSync(join(other, 'socs', 'soc-a', 'notes.md'), 'soc-a: site says 200 ms\n')
+    git(other, 'commit', '-qam', 'edit notes'); git(other, 'push', '-q', 'origin', 'main')
+    await site.pull('user:alice')
+    expect(site.guidance({ soc: 'soc-a' }).blocks[0]!.text).toContain('site says 200 ms')
+  })
 })

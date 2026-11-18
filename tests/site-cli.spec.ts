@@ -12,7 +12,7 @@ import { commands } from '../src/modules/bsp/cli.ts'
 
 const doc = (kind: string, id: string, fields: Record<string, string>, layer = 'site') =>
   ({ kind, id, file: `${kind}/${id}.yaml`, layer, text: `id: ${id}\n`, fields })
-const skillText: Record<string, string> = { 'sdk-a': '# SDK A\nrun this\n', 'packed-skill': '# Packed\nfrom a pack\n' }
+const skillText: Record<string, string> = { 'sdk-a': '# SDK A\nrun this\n', 'packed-skill': '# Packed\nfrom a platform\n' }
 const site = {
   source: 'git', url: 'git@git.example:lab/site.git', branch: 'main', ready: true, revision: 'abc1234',
   commit: { subject: 'add sdk-a', at: '2026-11-12T08:00:00Z' }, ahead: 1,
@@ -22,11 +22,11 @@ const site = {
     doc('workspaces', 'tree-1', { server: 'build-1' }),
     doc('instances', 'sdk-b', { workspace: 'tree-1' }),
     doc('instances', 'sdk-c', { server: 'elsewhere' }),
-    doc('instances', 'packed', { server: 'build-1' }, 'pack'),
+    doc('instances', 'packed', { server: 'build-1' }, 'base'),
   ],
   skills: [
     { id: 'sdk-a', layer: 'site', file: 'skills/sdk-a.md', title: 'SDK A' },
-    { id: 'packed-skill', layer: 'pack', file: 'packs/pack/skills/packed-skill.md', title: 'Packed' },
+    { id: 'packed-skill', layer: 'base', file: 'platforms/base/skills/packed-skill.md', title: 'Packed' },
   ],
   socs: [], problems: ['servers/old.yaml: no host'], hosts: { 'host-a': { revision: 'abc1234', at: '', ok: true, message: '' } },
   syncing: false, images: { ok: true, message: '', missing: [], optional: ['probe.bin'] },
@@ -50,6 +50,14 @@ function answer(req: IncomingMessage, res: ServerResponse) {
       return found ? json(200, { id, layer: found.layer, text: skillText[id] ?? '' }) : json(404, { error: `站点里没有 SDK 的 skill：${id}` })
     }
     if (req.url === '/api/bsp/site/pull') return json(200, { message: '拉取了 2 个提交' })
+    if (req.method === 'GET' && req.url?.startsWith('/api/bsp/site/guidance')) {
+      const query = new URL(req.url, 'http://x').searchParams
+      const soc = query.get('soc'), sdk = query.get('sdk')
+      const blocks = soc ? [{ name: `${soc}/notes.md`, layer: 'site', text: `${soc}: reset holds 100 ms` }]
+        : sdk ? [{ name: sdk, layer: 'site', text: `# ${sdk}\nbuild with make` }]
+          : [{ name: 'hints/general.md', layer: 'site', text: 'general: use the lock' }]
+      return json(200, { blocks, text: blocks.map(block => `## ${block.name} (${block.layer})\n${block.text}`).join('\n\n'), socs: ['soc-a'], skills: ['sdk-a'], hints: ['hints/general.md'] })
+    }
     if (req.url === '/api/bsp/site/doc') return json(200, { file: `${body.kind}/${body.id}.yaml` })
     if (req.url === '/api/bsp/site/skill') return json(200, { file: `skills/${body.id}.md` })
     if (req.url === '/api/bsp/site/skill/remove') return json(200, { message: `删掉了 ${body.id}` })
@@ -92,6 +100,29 @@ async function runCommand(name: string, words: string[], flags: Record<string, s
 }
 const run = (words: string[], flags: Record<string, string> = {}, json = false) => runCommand('site', words, flags, json)
 
+describe('boardlab guidance', () => {
+  const runG = (words: string[], flags: Record<string, string> = {}, json = false) => runCommand('guidance', words, flags, json)
+
+  it('lists what there is to ask for', async () => {
+    await runG(['--list'], { list: 'true' })
+    const text = lines.join('\n')
+    expect(text).toContain('通用提示：hints/general.md')
+    expect(text).toContain('有笔记的 SoC：soc-a')
+    expect(text).toContain('有 skill 的 SDK：sdk-a')
+  })
+
+  it('answers a level as Markdown, and asks the SoC and SDK levels together', async () => {
+    lines.length = 0
+    await runG([], { soc: 'soc-a' })
+    expect(lines.join('')).toContain('soc-a: reset holds 100 ms')
+    expect(requests.at(-1)!.url).toContain('soc=soc-a')
+    lines.length = 0
+    await runG([], { soc: 'soc-a', sdk: 'sdk-a' })
+    const asked = new URL(requests.at(-1)!.url!, 'http://x').searchParams
+    expect([asked.get('soc'), asked.get('sdk')]).toEqual(['soc-a', 'sdk-a'])
+  })
+})
+
 describe('boardlab site', () => {
   it('shows the site by build server', async () => {
     await run(['show'])
@@ -113,7 +144,7 @@ describe('boardlab site', () => {
     await expect(run(['show', 'sdk', 'nope'])).rejects.toThrow(/站点里没有 sdk nope/)
   })
 
-  it('edits the site\'s own document and takes over a pack\'s', async () => {
+  it('edits the site\'s own document and takes over a platform\'s', async () => {
     const file = join(dir, 'sdk.yaml')
     writeFileSync(file, 'id: sdk-a\nserver: build-1\n')
     await run(['set', 'sdk', 'sdk-a'], { file })
@@ -134,7 +165,7 @@ describe('boardlab site', () => {
     await expect(run(['remove', 'sdk', 'sdk-a'])).rejects.toThrow('sdk-a 还在用')
   })
 
-  it('shows, writes and removes an SDK skill, taking over a pack\'s', async () => {
+  it('shows, writes and removes an SDK skill, taking over a platform\'s', async () => {
     await run(['show', 'skill', 'sdk-a'])
     expect(lines).toEqual(['# SDK A\nrun this\n'])
     await expect(run(['show', 'skill'])).rejects.toThrow(/要给 skill 的 id/)
@@ -172,7 +203,7 @@ describe('boardlab sdk skill', () => {
     expect(values).toEqual([site.skills])
     await runCommand('sdk', ['skill', 'list'])
     expect(lines.join('\n')).toMatch(/sdk-a {2}SDK A/)
-    expect(lines.join('\n')).toMatch(/packed-skill {2}（pack） {2}Packed/)
+    expect(lines.join('\n')).toMatch(/packed-skill {2}（base） {2}Packed/)
     lines.length = 0
     await runCommand('sdk', ['skill', 'sdk-a'])
     expect(lines).toEqual(['# SDK A\nrun this\n'])

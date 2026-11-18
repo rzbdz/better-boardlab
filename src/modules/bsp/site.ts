@@ -1,10 +1,12 @@
 /**
  * The bsp site boardd keeps: one working copy, at `<state>/bsp/site`, of what every bsp board host reads from
- * /etc/bsp/site besides its own `hosts/` file: SoC profiles (`socs/`), the SDK catalog (`sdk/`), hooks and the images
- * the profiles stage (`.blobs/`). Its source is a git repository (cloned, pulled and pushed with boardd's key, then this
+ * /etc/boardctrl/site besides its own `hosts/` file: SoC facts (`socs/`), the SDK catalog (`sdk/`), hooks, the
+ * images the platforms stage (`.blobs/`), DUT records (`duts/`) and site providers (`providers/`, a `provider.py` per
+ * one the host loads; `modules/` is the name sites used before providers). Its source is a git repository (cloned,
+ * pulled and pushed with boardd's key, then this
  * machine's ssh setup) or boardd itself ("managed here"); the copy is a git repository either way, and every edit made
  * through boardd is a commit by whoever made it. Edits are checked the way bsp loads its SDK catalog, so a site that
- * reaches a host loads there. Images the SoC profiles list but the site keeps out of git are fetched into `.blobs/` by
+ * reaches a host loads there. Images the SoC facts list but the site keeps out of git are fetched into `.blobs/` by
  * the bsp CLI (`bsp images sync`) after each pull and before each sync, so the hosts get them with the site.
  */
 import { execFile } from 'node:child_process'
@@ -13,12 +15,15 @@ import { dirname, join, relative } from 'node:path'
 import { Document, isMap, parse, parseDocument } from 'yaml'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Settings } from 'boardlab-core/core/kernel.ts'
+import { fetchImages as fetchSiteImages, type ImagesSite, type ImagesState } from './images.ts'
+import { checkoutSubmodules, emptyVendors } from './submodules.ts'
 
 /** The kinds of SDK catalog documents, each a directory of `<id>.yaml` under `sdk/`. */
 export const KINDS = ['instances', 'servers', 'workspaces', 'families'] as const
 export type Kind = typeof KINDS[number]
-/** What goes to the hosts; their `hosts/` stays theirs. */
-export const SHIPPED = ['socs', 'sdk', 'hooks', '.blobs'] as const
+/** What goes to the hosts; their `hosts/` stays theirs. `providers/` is provider code (`modules/` its old name,
+ * still shipped) and `duts/` the boards the site declares: a host loads both from its site, so they travel with it. */
+export const SHIPPED = ['socs', 'sdk', 'hooks', 'duts', 'providers', 'modules', '.blobs'] as const
 const BOOT_METHODS = ['load', 'download'] as const
 const STEP_KINDS = new Set(['enter-fdl', 'reset', 'wait', 'stage', 'continue', 'oem', 'flash', 'getvar', 'settle', 'hook', 'check', 'boot-media'])
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
@@ -29,22 +34,11 @@ interface Loaded { kind: Kind, id: string, file: string, rel: string, text: stri
 type Docs = Record<Kind, Map<string, Loaded>>
 
 export interface SiteDoc { kind: Kind, id: string, file: string, layer: string, text: string, fields: Record<string, string> }
-/** An SDK's own instructions, `skills/<id>.md` in the site or a pack. */
+/** An SDK's own instructions, `skills/<id>.md` in the site or a shipped platform. */
 export interface SiteSkill { id: string, layer: string, file: string, title: string }
 export interface HostSync { revision: string, at: string, ok: boolean, message: string }
 /** The last `bsp images sync` on the copy: which images are there, which could not be fetched, which nobody can fetch. */
-export interface ImagesState {
-  at: string, ok: boolean, message: string
-  /** `<soc>/<image>` */
-  fetched: string[], present: string[], failed: Array<{ image: string, error: string }>
-  /** Listed with no file in any layer and no source to fetch it from, and staged by an SDK's or SoC's boot steps. */
-  missing: string[]
-  /**
-   * Listed with no file and no source, and staged by nothing but discovery (a SoC's probe images): nothing fails
-   * without them, a board found is just not told apart by model.
-   */
-  optional?: string[]
-}
+export type { ImagesState } from './images.ts'
 export interface SiteStatus {
   source: 'managed' | 'git', url: string, branch: string
   /** The copy is there (a git source not fetched yet is not). */
@@ -56,7 +50,7 @@ export interface SiteStatus {
   /** Commits here the source does not have yet (git). */
   ahead: number
   docs: SiteDoc[]
-  /** The SDK skills the site and its packs carry, the site's own over a pack's same id. */
+  /** The SDK skills the site and its platforms carry, the site's own over a shipped platform's same id. */
   skills: SiteSkill[]
   socs: Array<{ soc: string, layer: string }>
   problems: string[]
@@ -152,7 +146,7 @@ export class Site {
   syncing = false
 
   /**
-   * `tree`: the bsp tree, whose packs the hosts layer under the site. `sshCommands`: the ways in for git over ssh.
+   * `tree`: the boardctrl tree, whose shipped platforms the hosts layer under the site. `sshCommands`: the ways in for git over ssh.
    * `bin`: the bsp CLI that fetches the site's images (none: images are not fetched).
    */
   constructor(readonly dir: string, private readonly settings: Settings, private readonly options: { tree?: string | null, sshCommands?: () => Promise<string[]>, bin?: string } = {}) {}
@@ -211,6 +205,11 @@ export class Site {
     if (!/^\/?\.blobs\/?$/m.test(now)) writeFileSync(file, `${now}${now && !now.endsWith('\n') ? '\n' : ''}.blobs/\n`)
   }
 
+  /** Check out the copy's submodules; null when it did, else what git said. */
+  private async submodules(): Promise<string | null> {
+    return checkoutSubmodules(this.dir, args => this.remote(args, this.dir))
+  }
+
   /**
    * Fetch the git source into the copy. A copy that is there becomes the source's branch in place (see `adopt`); with
    * none yet, a clone beside it is put in.
@@ -229,7 +228,12 @@ export class Site {
       this.exclude(this.dir)
       return `${this.url} 还没有分支 ${this.branch}：推送时用这里的站点建它`
     }
-    if (this.ready) return this.adopt(holder, discard)
+    if (this.ready) {
+      const message = await this.adopt(holder, discard)
+      // The branch's submodules may have moved with it.
+      const missed = await this.submodules()
+      return missed ? `${message}；子模块没取下来：${missed}` : message
+    }
     const fresh = `${this.dir}.new`
     const cloned = await this.remote(['clone', '-q', '-b', this.branch, '--', this.url, fresh], dirname(this.dir), () => rmSync(fresh, { recursive: true, force: true }))
     if (cloned.code !== 0) { rmSync(fresh, { recursive: true, force: true }); throw new BoardError('invalid', `克隆 ${this.url} 失败：${last(cloned)}`) }
@@ -241,7 +245,8 @@ export class Site {
       else rmSync(this.dir, { recursive: true, force: true })
     }
     renameSync(fresh, this.dir)
-    return `取下了 ${this.url} 的 ${this.branch}${aside ? `（原来目录里的东西留在 ${aside}）` : ''}`
+    const missed = await this.submodules()
+    return `取下了 ${this.url} 的 ${this.branch}${aside ? `（原来目录里的东西留在 ${aside}）` : ''}${missed ? `；子模块没取下来：${missed}` : ''}`
   }
 
   /**
@@ -325,7 +330,7 @@ export class Site {
       let message: string
       try { message = await this.fetchSource(holder, input.discard === true) }
       catch (error) { for (const [key, value] of Object.entries(before)) this.settings.set(key, value); throw error }
-      const images = await this.fetchImages()
+      const images = await this.images()
       return images ? `${message}；${images.message}` : message
     })
   }
@@ -335,7 +340,7 @@ export class Site {
     return this.serial(async () => {
       if (this.source !== 'git') throw new BoardError('invalid', '站点就在这里管，没有来源可拉')
       if (!this.ready || !(await this.git(['remote', 'get-url', 'origin'])).stdout.trim()) {
-        const message = await this.fetchSource(holder), images = await this.fetchImages()
+        const message = await this.fetchSource(holder), images = await this.images()
         return { message: images ? `${message}；${images.message}` : message, revision: await this.revision() }
       }
       const was = await this.revision()
@@ -347,8 +352,10 @@ export class Site {
         await this.git(['rebase', '--abort'])
         throw new BoardError('conflict', `拉下来的改动和这里的改动冲突，什么都没变：${last(moved)}`)
       }
-      const now = await this.revision(), images = await this.fetchImages()
-      const message = now === was ? '已经是最新' : `${was ?? '空'} → ${now}`
+      const now = await this.revision(), images = await this.images()
+      // A provider's vendored code moves with its submodule: the copy needs it before it can be bundled for a host.
+      const missed = await this.submodules()
+      const message = (now === was ? '已经是最新' : `${was ?? '空'} → ${now}`) + (missed ? `；子模块没取下来：${missed}` : '')
       return { message: images ? `${message}；${images.message}` : message, revision: now }
     })
   }
@@ -391,16 +398,14 @@ export class Site {
     return count.code === 0 ? Number(count.stdout.trim()) || 0 : 0
   }
 
-  /** The layers the hosts read, lowest first: the bsp tree's packs (those the site's bsp.yaml picks), then the site. */
+  /** Every layer the hosts read, lowest first: the platforms shipped in the boardctrl tree, then the site,
+   * which overrides a file of theirs by name. */
   private layers(): Array<{ name: string, root: string }> {
-    const packs = this.options.tree ? join(this.options.tree, 'packs') : null
+    const shipped = this.options.tree ? join(this.options.tree, 'platforms') : null
     const out: Array<{ name: string, root: string }> = []
-    if (packs && existsSync(packs)) {
-      let wanted: unknown = null
-      try { wanted = (parse(readFileSync(join(this.dir, 'bsp.yaml'), 'utf8')) as Data | null)?.packs ?? null } catch {}
-      for (const name of readdirSync(packs).sort())
-        if (statSync(join(packs, name)).isDirectory() && (!Array.isArray(wanted) || wanted.includes(name))) out.push({ name, root: join(packs, name) })
-    }
+    if (shipped && existsSync(shipped))
+      for (const name of readdirSync(shipped).sort())
+        if (statSync(join(shipped, name)).isDirectory()) out.push({ name, root: join(shipped, name) })
     out.push({ name: 'site', root: this.dir })
     return out
   }
@@ -414,7 +419,7 @@ export class Site {
       for (const name of readdirSync(at).filter(name => name.endsWith('.yaml')).sort()) {
         const file = join(at, name)
         if (file === skip) continue
-        const rel = layer.name === 'site' ? relative(this.dir, file) : `packs/${layer.name}/sdk/${kind}/${name}`
+        const rel = layer.name === 'site' ? relative(this.dir, file) : `platforms/${layer.name}/sdk/${kind}/${name}`
         const text = readFileSync(file, 'utf8')
         const parsed = parseDocument(text)
         if (parsed.errors.length) { problems.push(`${rel}：YAML 写错了：${parsed.errors[0]!.message.split('\n')[0]}`); continue }
@@ -434,7 +439,7 @@ export class Site {
   }
 
   /**
-   * The skills the site and its packs carry, lowest layer first (`skills/<id>.md`): the site's own over a pack's same
+   * The skills the site and its platforms carry, lowest layer first (`skills/<id>.md`): the site's own over a platform's same
    * id, as with documents. A skill's title is its first `# ` heading, or its id.
    */
   private loadSkills(): Map<string, { id: string, layer: string, file: string, rel: string, text: string }> {
@@ -446,10 +451,59 @@ export class Site {
         const id = name.slice(0, -'.md'.length)
         if (!ID.test(id)) continue
         const file = join(at, name)
-        skills.set(id, { id, layer: layer.name, file, rel: layer.name === 'site' ? `skills/${name}` : `packs/${layer.name}/skills/${name}`, text: readFileSync(file, 'utf8') })
+        skills.set(id, { id, layer: layer.name, file, rel: layer.name === 'site' ? `skills/${name}` : `platforms/${layer.name}/skills/${name}`, text: readFileSync(file, 'utf8') })
       }
     }
     return skills
+  }
+
+  /**
+   * Guidance by level, as `boardlab guidance` asks it: the general hints, one SoC's notes beside its profile, one
+   * SDK's skill. A later layer's file with the same name wins, as with every other kind of site data; only the
+   * configuration layers are read, so an agent can ask any time and gets the same answer every host has.
+   */
+  guidance(options: { soc?: string | null, sdk?: string | null } = {}): { blocks: Array<{ name: string, layer: string, text: string }>, socs: string[], skills: string[], hints: string[] } {
+    const blocks: Array<{ name: string, layer: string, text: string }> = []
+    const socs = new Set<string>(), skills = new Set<string>(), hints = new Set<string>()
+    for (const layer of this.layers()) {
+      const hintDir = join(layer.root, 'hints')
+      if (existsSync(hintDir)) for (const name of readdirSync(hintDir).filter(name => name.endsWith('.md')).sort()) hints.add(`hints/${name}`)
+      const socDir = join(layer.root, 'socs')
+      if (existsSync(socDir)) for (const soc of readdirSync(socDir).filter(name => existsSync(join(socDir, name, 'soc.yaml'))).sort()) socs.add(soc)
+      const skillDir = join(layer.root, 'skills')
+      if (existsSync(skillDir)) for (const name of readdirSync(skillDir).filter(name => name.endsWith('.md')).sort()) skills.add(name.slice(0, -3))
+    }
+    const wanted = options.soc || options.sdk
+    if (!wanted) {
+      const seen = new Map<string, { name: string, layer: string, text: string }>()
+      for (const layer of this.layers()) {
+        const hintDir = join(layer.root, 'hints')
+        if (!existsSync(hintDir)) continue
+        for (const name of readdirSync(hintDir).filter(name => name.endsWith('.md')).sort())
+          seen.set(name, { name: `hints/${name}`, layer: layer.name, text: readFileSync(join(hintDir, name), 'utf8').trim() })
+      }
+      return { blocks: [...seen.values()], socs: [...socs].sort(), skills: [...skills].sort(), hints: [...hints].sort() }
+    }
+    if (options.soc) {
+      const seen = new Map<string, { name: string, layer: string, text: string }>()
+      for (const layer of this.layers()) {
+        const at = join(layer.root, 'socs', options.soc)
+        if (!existsSync(at)) continue
+        for (const name of readdirSync(at).filter(name => name.endsWith('.md')).sort())
+          seen.set(name, { name: `${options.soc}/${name}`, layer: layer.name, text: readFileSync(join(at, name), 'utf8').trim() })
+        seen.set('soc.yaml', { name: `${options.soc}/soc.yaml`, layer: layer.name, text: `profile: ${join(at, 'soc.yaml')}` })
+      }
+      blocks.push(...seen.values())
+    }
+    if (options.sdk) {
+      let found: { name: string, layer: string, text: string } | null = null
+      for (const layer of this.layers()) {
+        const file = join(layer.root, 'skills', `${options.sdk}.md`)
+        if (existsSync(file)) found = { name: options.sdk, layer: layer.name, text: readFileSync(file, 'utf8').trim() }
+      }
+      if (found) blocks.push(found)
+    }
+    return { blocks, socs: [...socs].sort(), skills: [...skills].sort(), hints: [...hints].sort() }
   }
 
   /** The skills there are, with where each comes from and its title. Pack skills come first, the site's over them. */
@@ -489,7 +543,7 @@ export class Site {
     })
   }
 
-  /** Take the site's own skill out; a pack's with that id, if any, is what there is afterwards. */
+  /** Take the site's own skill out; a platform's with that id, if any, is what there is afterwards. */
   removeSkill(holder: string, id: string): Promise<string> {
     return this.serial(async () => {
       await this.ensure(holder)
@@ -615,7 +669,7 @@ export class Site {
   }
 
   /**
-   * Take a document out; refused while others use it, unless one under it (a pack's with that id) takes its place,
+   * Take a document out; refused while others use it, unless one under it (a platform's with that id) takes its place,
    * and when the catalog would not load without it.
    */
   remove(holder: string, kind: string, id: string): Promise<string> {
@@ -639,83 +693,31 @@ export class Site {
     })
   }
 
-  /**
-   * The images something stages besides discovery, as `<soc>/<image>` (`any/<image>` for an SDK with no SoC): an SDK's
-   * boot steps (`image:` of its SoC) and a SoC profile's media boot steps, in any layer.
-   */
-  private usedImages(): Set<string> {
-    const used = new Set<string>()
-    const steps = (value: unknown): Data[] => Array.isArray(value) ? value.filter(isData) : []
-    for (const doc of this.load().docs.instances.values()) {
-      const boot = isData(doc.data.boot) ? doc.data.boot : {}
-      for (const method of Object.values(boot)) for (const step of steps(isData(method) ? method.steps : null))
-        if (typeof step.image === 'string') used.add(`${typeof doc.data.soc === 'string' ? doc.data.soc : 'any'}/${step.image}`)
-    }
-    for (const layer of this.layers()) {
-      const at = join(layer.root, 'socs')
-      if (!existsSync(at)) continue
-      for (const soc of readdirSync(at)) {
-        let profile: unknown = null
-        try { profile = parse(readFileSync(join(at, soc, 'soc.yaml'), 'utf8')) } catch { continue }
-        const media = isData(profile) && isData(profile.media_boot) ? profile.media_boot : {}
-        for (const step of steps(media.steps)) if (typeof step.image === 'string') used.add(`${soc}/${step.image}`)
-      }
-    }
-    return used
+  /** Fetch the images the site's platforms list, through the bsp CLI; what is still missing, kept for the page. */
+  private images(say: (line: string) => void = () => {}): Promise<ImagesState | null> {
+    return fetchSiteImages(this.imagesSite(), say)
   }
 
+  /** What the images code reads from this site. */
+  private imagesSite(): ImagesSite {
+    return {
+      dir: this.dir, options: this.options, settings: this.settings,
+      layers: () => this.layers(),
+      documents: () => [...this.load().docs.instances.values()].map(doc => doc.data),
+      exec: (command, args, cwd, env) => exec(command, args, cwd, env),
+      sshCommands: () => this.options.sshCommands ? this.options.sshCommands() : Promise.resolve([]),
+    }
+  }
+
+  /** How the images were the last time they were fetched. */
   lastImages(): ImagesState | null {
     try { return JSON.parse(this.settings.get('images') ?? 'null') as ImagesState | null } catch { return null }
-  }
-
-  /**
-   * Fetch the images the SoC profiles list into the copy's `.blobs/` with the bsp CLI (each way into git over ssh in
-   * turn while some fail), and say what is still not there. Never throws: what went wrong is in the result, and kept.
-   */
-  private async fetchImages(say: (line: string) => void = () => {}): Promise<ImagesState | null> {
-    const bin = this.options.bin
-    if (!bin || !this.ready) return null
-    // This copy is the CLI's site; no user file of the CLI's, so no registry layer the hosts would not have.
-    const env = { BSP_SITE: this.dir, BSP_CONFIG: join(dirname(this.dir), 'no-remotes.json') }
-    const answer = (run: Run): { ok?: boolean, result?: unknown, error?: { message?: string } } | null => { try { return JSON.parse(run.stdout) } catch { return null } }
-    const ways = this.options.sshCommands ? await this.options.sshCommands() : []
-    const fetched = new Set<string>()
-    let got: { present: string[], failed: ImagesState['failed'] } | null = null, error = ''
-    for (const ssh of ways.length ? ways : [null]) {
-      const run = await exec(bin, ['--json', 'images', 'sync'], this.dir, { ...env, ...(ssh ? { GIT_SSH_COMMAND: ssh } : {}) })
-      const out = answer(run)
-      if (!out?.ok || !isData(out.result)) { error = out?.error?.message ?? last(run); break }
-      const result = out.result as { fetched?: string[], present?: string[], failed?: ImagesState['failed'] }
-      for (const name of result.fetched ?? []) { if (!fetched.has(name)) say(`取到了镜像 ${name}`); fetched.add(name) }
-      got = { present: (result.present ?? []).filter(name => !fetched.has(name)), failed: result.failed ?? [] }
-      if (!got.failed.length) break
-    }
-    // Images nobody can fetch: missing when a boot step stages them, optional when only discovery does.
-    const missing: string[] = [], optional: string[] = []
-    if (got) {
-      const listed = answer(await exec(bin, ['--json', 'images', 'list'], this.dir, env))
-      const used = this.usedImages()
-      if (listed?.ok && Array.isArray(listed.result)) for (const row of (listed.result as Data[]).filter(row => row.state === 'missing')) {
-        const name = `${str(row.soc)}/${str(row.image)}（${str(row.file)}）`
-        if (used.has(`${str(row.soc)}/${str(row.image)}`) || used.has(`any/${str(row.image)}`)) missing.push(name)
-        else optional.push(name)
-      }
-    }
-    const failed = got?.failed ?? [], have = fetched.size + (got?.present.length ?? 0)
-    for (const item of failed) say(`镜像 ${item.image} 没取到：${item.error}`)
-    for (const name of missing) say(`镜像 ${name} 有启动步骤要用，却哪儿都没有，也没写从哪取`)
-    const message = !got ? `没取成镜像：${error}`
-      : !have && !failed.length && !missing.length ? '没有要取的镜像'
-      : [`镜像 ${have} 个在${fetched.size ? `（新取到 ${fetched.size} 个）` : ''}`, failed.length ? `${failed.length} 个没取到` : '', missing.length ? `${missing.length} 个缺` : ''].filter(Boolean).join('，')
-    const state: ImagesState = { at: new Date().toISOString(), ok: !!got && !failed.length && !missing.length, message, fetched: [...fetched], present: got?.present ?? [], failed, missing, optional }
-    this.settings.set('images', JSON.stringify(state))
-    return state
   }
 
   /** Fetch the images, then bundle what the hosts get, as one step: the revision bundled, and how the images are. */
   ship(out: string, say: (line: string) => void = () => {}): Promise<{ revision: string, images: ImagesState | null }> {
     return this.serial(async () => {
-      const images = await this.fetchImages(say)
+      const images = await this.images(say)
       if (images) say(images.message)
       await this.bundle(out)
       return { revision: (await this.revision()) ?? '?', images }
@@ -726,15 +728,25 @@ export class Site {
   shippable(): boolean { return this.ready && SHIPPED.some(name => existsSync(join(this.dir, name))) && !this.problems().length }
 
   /**
-   * The parts the hosts get, as a gzipped tar (no .git; not what the site's .bspignore names). Only those: whatever else
-   * the site's repository holds (hosts/, docs, notes, deploy scripts) stays here. A site with none of them is an empty
-   * bundle, and a host synced with it has an empty site.
+   * The parts the hosts get, as a gzipped tar (no .git; not what the site's .bspignore names, nor a Python provider's
+   * build litter). Only those: whatever else the site's repository holds (hosts/, docs, notes, deploy scripts) stays
+   * here. A site with none of them is an empty bundle, and a host synced with it has an empty site.
+   *
+   * A provider that vendors code (`providers/<name>/vendor/<kit>`, as under its old `modules/` name) must have it: a
+   * submodule left empty would ship code whose imports fail on the host, so that is refused here, before anything
+   * reaches a board host.
    */
   async bundle(out: string): Promise<void> {
     if (!this.ready) throw new BoardError('invalid', '站点还没有：先选来源')
+    const empty = emptyVendors(this.dir)
+    if (empty.length) throw new BoardError('invalid', `站点的插件缺它带的代码（${empty.join('、')}）：先 \`git submodule update --init --recursive\``)
     const present = SHIPPED.filter(name => existsSync(join(this.dir, name)))
     const ignore = join(this.dir, '.bspignore')
-    const made = await exec('tar', ['-czf', out, '--exclude=.git', ...(existsSync(ignore) ? ['-X', ignore] : []), ...(present.length ? present : ['-T', '/dev/null'])], this.dir)
+    // A provider developed in place leaves a virtualenv, a test cache and bytecode in the site: none of them is
+    // the provider, and a virtualenv is large enough to matter on every host.
+    const made = await exec('tar', ['-czf', out, '--exclude=.git', '--exclude=__pycache__', '--exclude=.pytest_cache',
+      '--exclude=.mypy_cache', '--exclude=.ruff_cache', '--exclude=.venv', '--exclude=*.pyc',
+      ...(existsSync(ignore) ? ['-X', ignore] : []), ...(present.length ? present : ['-T', '/dev/null'])], this.dir)
     if (made.code !== 0) throw new Error(`打包站点失败：${last(made)}`)
   }
 }

@@ -13,12 +13,17 @@ import { viewsFor } from '../render.tsx'
  */
 export function FirstSteps({ state }: { state: PageState }) {
   const views = new Map(viewsFor(state, 'settings').map(view => [view.id, view]))
-  const hosts = state.labs.length > 0, boards = state.boards.some(b => !b.lab?.empty)
+  const boards = state.boards.some(b => !b.lab?.empty)
+  // The settings steps are the module views a setup needs, in the order those views put themselves in: this page
+  // learns no module's id or words.
+  const settings: Array<{ id: string, title: string, about: string, href: string, done: boolean, optional?: boolean }> =
+    [...views.values()].filter(view => view.order !== undefined).sort((a, b) => a.order! - b.order!).map(view => ({
+      id: view.id, title: view.title ?? view.id, about: view.summary ?? '', href: `#/settings/${view.id}`,
+      done: view.status?.tone === 'ok',
+    }))
   const steps: Array<{ id: string, title: string, about: string, href: string, done: boolean, optional?: boolean }> = [
-    ...(views.has('bsp-hosts') ? [{ id: 'hosts', title: '添加板卡主机', about: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。', href: '#/settings/bsp-hosts', done: hosts }] : []),
-    ...(views.has('bsp-site') ? [{ id: 'site', title: 'SDK 与站点', about: 'SDK 在哪、怎么刷，同步到每台板卡主机。', href: '#/settings/bsp-site', done: views.get('bsp-site')?.status?.tone === 'ok' }] : []),
-    { id: 'discover', title: '发现板子', about: '在每台主机上按复位线、看串口，认出接着的板子。', href: '#/discover', done: boards },
-    ...(views.has('cli-machines') ? [{ id: 'cli', title: '客户端配置', about: '编译服务器和笔记本装上 boardlab 命令行，连到这里。', href: '#/settings/cli-machines', done: views.get('cli-machines')?.status?.tone === 'ok', optional: true }] : []),
+    ...settings,
+    { id: 'discover', title: '发现板子', about: '在每台主机上按复位线、看串口，认出接着的板子；扫不到的在这里手工登记。', href: '#/discover', done: boards },
   ]
   const next = steps.find(step => !step.done && !step.optional)
   return (
@@ -88,10 +93,12 @@ function Actions({ board, m, watched, open }: { board: Board, m: Model, watched:
   const look = (icon = 'eye', title = '看串口') => <button className="pill icon" title={title} aria-label={title} onClick={() => open(board.name)}><Icon name={icon} /></button>
   const watch = <button className={`pill icon${on ? ' on' : ''}`} title={on ? '不再关注' : '空闲时通知我'} aria-label={on ? '不再关注' : '关注'} onClick={() => { prefs.watch(board.name, !on); ui.toast(on ? `不再关注 ${upper(board.name)}` : `关注了 ${upper(board.name)}`, on ? '' : '它空出来时通知你') }}><Icon name="bell" /></button>
   const confirm = m.flags.attn && m.canConfirm ? <button className="pill dark" disabled={act.has('confirm')} onClick={act.confirm}><Icon name="check" />我操作好了</button> : null
-  if (m.lock === 'empty') return <button className="pill" disabled={!!act.busy} onClick={act.discoverSlot}>{act.busy === 'discover' ? <span className="spin" /> : <Icon name="radar" />}发现这块板</button>
+  // A slot with nothing in it is the discover page's business: home only points there (a scan changes the inventory,
+  // and this page does not).
+  if (m.lock === 'empty') return <a className="pill" href="#/discover"><Icon name="radar" />去发现</a>
   if (m.lock === 'mine') return <>{confirm ?? <button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' && <span className="spin" />}释放</button>}<span className="sp" />
     {!m.flags.gone && <button className="pill icon" title="复位" aria-label="复位" disabled={!!act.busy} onClick={act.reset}>{act.busy === 'reset' ? <span className="spin" /> : <Icon name="power" />}</button>}{look('term', '串口')}</>
-  if (m.flags.gone) return <><button className="pill" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'} {slotOf(board).host}</button><span className="sp" />{look()}</>
+  if (m.flags.gone) return <><a className="pill" href="#/discover" title={`${slotOf(board).host} 需要重新发现或重建`}><Icon name="rebuild" />去发现修复 {slotOf(board).host}</a><span className="sp" />{look()}</>
   if (m.lock === 'free') return <>{confirm ?? <button className="pill dark" onClick={act.lock}><Icon name="lock" />拿锁</button>}<span className="sp" />{watch}{look()}</>
   const queue = m.queued
     ? <span className="queued">排队第 {m.queued} 位<button title="不排了" aria-label="不排了" onClick={act.unqueue}><Icon name="x" /></button></span>
@@ -152,16 +159,10 @@ function Lanes({ state, boards, m, watched, open }: { state: PageState, boards: 
       return (
         <section className="lane" key={host}>
           <h3><Icon name="server" />{host}<span className="sub">{list.length + props.length} 个槽位 · {list.filter(b => !b.lab?.empty).length} 块板子{held ? ` · ${held} 块有锁` : ''}</span></h3>
+          {/* Undecided changes are confirmed on the discover page, the one place an inventory change is made. */}
+          {props.length > 0 && <p className="sub small"><Icon name="radar" /> 这块主机有 {props.length} 个变化等待确认：<a href="#/discover">去发现</a></p>}
           <div className="wall">
             {list.map(b => <Card key={b.name} board={b} m={m(b)} you={state.you} watched={watched} open={open} />)}
-            {props.map(p => (
-              <article key={p.id} className="card proposal">
-                <div className="hd"><div><div className="nm">{`${host} / ${String(p.change.slot ?? p.slot ?? '')}`.toUpperCase()}</div><div className="wh">待确认</div></div></div>
-                <div className="mid"><div className="st">新板子</div><div className="ln"><span className="ell" title={p.summary}>{p.summary}</span></div><div className="ln" /></div>
-                <div className="ft"><button className="pill dark" onClick={() => void api.proposals([p.id], 'apply').then(() => ui.toast('登记了'), e => ui.fail('登记失败', e))}>登记</button>
-                  <button className="pill" onClick={() => void api.proposals([p.id], 'reject').catch(e => ui.fail('忽略失败', e))}>忽略</button></div>
-              </article>
-            ))}
           </div>
         </section>
       )

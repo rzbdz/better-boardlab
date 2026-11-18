@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const VERSION_PATTERN = /^0\.\d+\.\d+(?:rc[1-9]\d*)?$/
+export const CORE_VERSION_PATTERN = /^\d+\.\d+\.\d+$/
 export const REVISION_PATTERN = /^[0-9a-f]{40}$/
 
 export function releaseVersion(packageVersion, requested = packageVersion) {
@@ -24,7 +25,7 @@ export function releaseMetadata({ version, revision, file, sha256, core }) {
   if (file !== `boardlab-${version}.tar.gz` || !/^[0-9a-f]{64}$/.test(sha256)) {
     throw new Error('release metadata has an invalid artifact name or sha256')
   }
-  if (!core || !VERSION_PATTERN.test(core.version) || !REVISION_PATTERN.test(core.revision) || core.tag !== `v${core.version}`) {
+  if (!core || !CORE_VERSION_PATTERN.test(core.version) || !REVISION_PATTERN.test(core.revision) || core.tag !== `v${core.version}`) {
     throw new Error('release metadata needs the tagged core version and full revision')
   }
   return { version, revision, file, sha256, core: { version: core.version, revision: core.revision, tag: core.tag } }

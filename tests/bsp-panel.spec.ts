@@ -96,7 +96,7 @@ describe('host models', () => {
     const { hostBoards } = await import('../src/modules/bsp/index.ts')
     const boards = hostBoards(join(import.meta.dirname, '../externals/bsp'))
     expect(boards.length).toBeGreaterThanOrEqual(2)
-    expect(boards.find(item => item.id === 'spacemit-k1x-deb1')?.name).toBe('SpacemiT K1-x deb1')
+    expect(boards.find(item => item.id === 'spacemit-k1x-deb1')?.name).toBe('SpacemiT K1-x deb1 (Banana Pi BPI-F3)')
     expect(hostBoards(null)).toEqual([])
   })
 })

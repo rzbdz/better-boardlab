@@ -2,13 +2,14 @@
  * The `bsp` module, boardlab's wrapper of bsp: bsp board hosts become a backend (boards, leases, relay, download,
  * consoles, builds, discovery, free ports, news), and bsp's SDK work and its registry's catalog are offered to boardlab's
  * clients (`boardlab sdk`, `boardlab registry`, `boardlab bsp`), all through the bsp CLI on boardd's machine. The site
- * every host reads (SoC profiles, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
+ * every host reads (SoC facts, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
  */
 import { createReadStream, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { EventStream } from 'boardlab-core/core/api.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import { sha256File } from 'boardlab-core/core/files.ts'
+import type { BoardLab as Lab } from 'boardlab-core/core/lab.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import { bspLab, FDL_STRATEGIES, type BspBackend, type BspBoardChange } from './driver.ts'
 import { hostsFor } from '../hosts/ssh.ts'
@@ -16,7 +17,7 @@ import { installHost, uninstallHost } from './provision.ts'
 import { panelEndpoints } from './panel.ts'
 import { Site } from './site.ts'
 import { siteEndpoints } from './site-api.ts'
-import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkRunner, type SdkStream } from './sdk.ts'
+import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkReach, type SdkRunner, type SdkStream } from './sdk.ts'
 
 export interface BspApi {
   /**
@@ -43,7 +44,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
         if (!address) throw new BoardError('invalid', '要填主机地址：IP、域名或 ssh 配置里的名字')
         return { address, user: String(body.user ?? '').trim() || undefined, port: body.sshPort ? Number(body.sshPort) : undefined, password: typeof body.password === 'string' && body.password ? body.password : undefined, jump: String(body.jump ?? '').trim() || undefined }
       }
-      // The site every host gets (SoC profiles, the SDK catalog, hooks, images), kept here: see site.ts.
+      // The site every host gets (SoC facts, the SDK catalog, hooks, images), kept here: see site.ts.
       // Its images are fetched with the same bsp CLI as everything else.
       const site = options.stateDir ? new Site(join(options.stateDir, 'bsp', 'site'), lab.kernel.settings('bsp.site'), {
         tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BSP ?? 'bsp',
@@ -79,7 +80,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
             if (arg === '@download' && ['-o', '--output'].includes(args[index - 1] ?? '')) return (download = lab.files.scratch())
             return arg
           })
-          const code = await runner.run(mapped, { holder, ...run, group })
+          const code = await runner.run(mapped, { holder, ...run, group, reach: group === 'raw' ? reachOf(lab, args) : null })
           lab.kernel.record(holder, null, group === 'catalog' ? 'catalog' : group === 'raw' ? 'bsp' : 'sdk', args.filter(arg => !arg.startsWith('@')).join(' ').slice(0, 200), code === 0, code ? `退出码 ${code}` : null)
           let sha: string | null = null
           if (download) {
@@ -104,11 +105,19 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           const how = access(body)
           return new EventStream(async (emit, end) => {
             try {
+              // Installing starts this host's bspd again, which drops whatever runs on its boards: a board in use (a
+              // lease, a console, a boot) is the board's holder's, and the holder lets go of it, not an install. Told
+              // through the stream, as every other reason an install cannot start is.
+              const inUse = lab.boards.list().find(item => item.lab?.id === id && lab.locks.held(item.name))
+              if (inUse) throw new BoardError('locked', `${inUse.name} 正被 ${lab.locks.held(inUse.name)!.holder} 使用，重装会重启那台主机的 bspd；放锁以后再装`)
               // The lab shows it is being installed, with the latest line, to every page until it is done.
               const { done, tested } = await lab.kernel.doing([`lab:${id}`], 'install', '安装中', caller.holder, async line => {
                 const say = (text: string) => { emit('out', { text }); line(text) }
                 const shipped = siteFor(say)
-                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert') }, null, say, shipped.bundle)
+                // The site may carry this host's config with its providers' own sections (the EC's pins, say): installed
+                // with the machine, they reach it as part of the same repository as the provider.
+                const hostFile = site && existsSync(join(site.dir, 'hosts', `${id}.yaml`)) ? join(site.dir, 'hosts', `${id}.yaml`) : null
+                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert') }, null, say, shipped.bundle, undefined, hostFile ? { id, file: hostFile } : null)
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
@@ -132,6 +141,12 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           const id = String(body.id ?? '')
           const settings = lab.backends.labSettings().find(item => item.id === id)
           if (!settings) throw new BoardError('not-found', `没有实验室 ${id}`)
+          // What could make removing the lab fail is checked first: uninstalling the host and then refusing to
+          // forget the lab would leave a lab whose machine no longer answers.
+          const lab_ = lab.backends.get(id)
+          if (!lab_.kind) throw new BoardError('invalid', `实验室 ${id} 是在 boardd 的配置里写的，不能在这里删`)
+          const board = lab.boards.list().find(item => item.lab?.id === id && lab.locks.held(item.name))
+          if (board) throw new BoardError('locked', `${board.name} 正被 ${lab.locks.held(board.name)!.holder} 使用，放锁以后才能卸掉实验室`)
           const url = settings.url?.replace(/^bspd\+/, '') ?? ''
           await lab.kernel.doing([`lab:${id}`], 'remove', '删除中', caller.holder, async line => {
             if (url.startsWith('ssh://')) {
@@ -151,24 +166,39 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           if (!route.isBoard || !('change' in route.backend)) throw new BoardError('invalid', `${name} 不是 bsp 板子`)
           if (lab.boards.get(name).lab?.empty) throw new BoardError('invalid', `${name} 是空槽位，还没有板子可改`)
           const held = lab.locks.authorize(name, { holder: caller.holder, token: typeof body.token === 'string' ? body.token : null })
+          // The dialog submits the whole form; only what changed is validated and sent. An untouched field that is
+          // merely unavailable right now (the download port is enumerated in download mode only) must not fail a
+          // save that does not touch it.
+          const current = await (route.backend as BspBackend).boardConfig(route.config, route.target.device, true)
           const text = (key: string) => typeof body[key] === 'string' && body[key].trim() ? body[key].trim() as string : undefined
           const fdl = text('fdl')
           if (fdl && !(FDL_STRATEGIES as readonly string[]).includes(fdl)) throw new BoardError('invalid', `fdl 只能是 ${FDL_STRATEGIES.join('、')}`)
-          if (body.resetActor && body.resetActor !== 'human' && !text('resetPin')) throw new BoardError('invalid', 'GPIO reset 要选择复位线')
-          if (body.fdlActor === 'gpio-relay' && !text('fdlPin')) throw new BoardError('invalid', 'GPIO FDL 要选择 FDL 线')
-          const choices = await (route.backend as BspBackend).boardConfig(route.config, route.target.device, true)
-          for (const [field, pin] of [['resetPin', text('resetPin')], ['fdlPin', text('fdlPin')]] as const)
-            if (pin && !choices.gpios.some(item => item.value === pin)) throw new BoardError('invalid', `${field} 不是这块板所在主机的 GPIO：${pin}`)
-          const usb = text('usb')
-          if (usb && !choices.ports.some(item => item.value === usb)) throw new BoardError('invalid', `这个下载口不在主机当前检测到的列表里：${usb}`)
+          const different = <T>(value: T | undefined, before: T | null | undefined) => value !== undefined && value !== (before ?? undefined)
+          const resetPin = text('resetPin'), fdlPin = text('fdlPin'), usb = text('usb'), soc = text('soc')
+          const resetChanged = different(resetPin, current.control?.reset?.pin)
+          const fdlPinChanged = different(fdlPin, current.control?.fdl?.pin)
+          const usbChanged = different(usb, current.usb)
+          const socChanged = different(soc, current.soc)
+          for (const [field, pin, changed] of [['resetPin', resetPin, resetChanged], ['fdlPin', fdlPin, fdlPinChanged]] as const)
+            if (changed && pin && !current.gpios.some(item => item.value === pin))
+              throw new BoardError('invalid', `${field} 不是这块板所在主机的 GPIO：${pin}`)
+          // A download port is only enumerated in download mode: the registered one stays allowed while it is away.
+          if (usbChanged && usb && !current.ports.some(item => item.value === usb) && usb !== current.usb)
+            throw new BoardError('invalid', `这个下载口不在主机当前检测到的列表里：${usb}`)
+          if (socChanged && soc && !current.socs.some(item => item.value === soc))
+            throw new BoardError('invalid', `bsp 的 SDK 目录里没有这个 SoC：${soc}`)
           // `sdks`: an array, or the comma list the CLI passes; empty means every SDK of the SoC's board.
           const sdks = Array.isArray(body.sdks) ? body.sdks.map(String).filter(Boolean)
             : typeof body.sdks === 'string' ? String(body.sdks).split(',').map((item: string) => item.trim()).filter(Boolean) : undefined
+          const sdksChanged = sdks !== undefined && sdks.join(',') !== (current.sdks ?? []).join(',')
+          const unknown = (sdksChanged ? sdks ?? [] : []).filter((id: string) => !current.sdkOptions.some(item => item.value === id))
+          if (unknown.length) throw new BoardError('invalid', `bsp 的 SDK 目录里没有这些 SDK：${unknown.join('、')}`)
           const change: BspBoardChange = {
-            board: text('model'), soc: text('soc'), description: text('description'), usb: text('usb'), resetPin: text('resetPin'),
-            pulseMs: typeof body.pulseMs === 'number' && body.pulseMs > 0 ? body.pulseMs : undefined, fdl: fdl as BspBoardChange['fdl'], fdlPin: text('fdlPin'),
-            resetActor: body.resetActor === 'human' ? 'human' : undefined, fdlActor: body.fdlActor === 'human' ? 'human' : undefined,
-            ...(sdks ? { sdks } : {}),
+            board: text('model'), soc: socChanged ? soc : undefined, description: text('description'),
+            usb: usbChanged ? usb : undefined, resetPin: resetChanged ? resetPin : undefined,
+            pulseMs: typeof body.pulseMs === 'number' && body.pulseMs > 0 ? body.pulseMs : undefined,
+            fdl: fdl as BspBoardChange['fdl'], fdlPin: fdlPinChanged ? fdlPin : undefined,
+            ...(sdksChanged ? { sdks } : {}),
           }
           const changed = await lab.kernel.doing([name], 'configure', '修改中', caller.holder, () =>
             (route.backend as BspBackend).change(route.config, route.target.device, route.target.lease, change), { lease: held.id })
@@ -177,7 +207,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           return { message: `改了 ${changed.join('、')}` }
         },
       }, {
-        method: 'GET', path: '/api/bsp/board', about: '这块 bsp 板子的登记和改登记可选项：所在主机实际的 GPIO 和下载口',
+        method: 'GET', path: '/api/bsp/board', about: '这块 bsp 板子的登记和改登记可选项：SoC、SDK、所在主机实际的 GPIO 和下载口',
         handle: async ({ query }) => {
           const name = lab.boards.resolve(String(query.get('board') ?? ''))
           const route = lab.backends.route(name)
@@ -215,12 +245,51 @@ function boardChoice(value: unknown): string | undefined {
   return board
 }
 
-/** The host models bsp has a header map for (each pack's boards/<id>.yaml): its id, and its `name:`. */
+/** The host a raw bsp command names: `-r`/`--remote` (one name, or none for all of them), or `--url`. */
+function namedHost(args: string[]): { host: string | null, url: string | null } {
+  let host: string | null = null, url: string | null = null
+  for (let at = 0; at < args.length; at++) {
+    const arg = args[at]!
+    if (arg === '-r' || arg === '--remote') host = args[at + 1] ?? null
+    else if (arg.startsWith('--remote=')) host = arg.slice('--remote='.length)
+    else if (arg.startsWith('-r') && arg.length > 2) host = arg.slice(2)
+    else if (arg === '--url') url = args[at + 1] ?? null
+    else if (arg.startsWith('--url=')) url = arg.slice('--url='.length)
+  }
+  return { host, url }
+}
+
+/**
+ * How a raw bsp command reaches board hosts: every lab boardlab has, as the remotes bsp reads — narrowed to those the
+ * command names (`-r`/`--url`), which then keeps its own argument. `null` when there is no lab: `sdk` and `catalog`
+ * need none, and a name that is no lab is left to bsp's own remotes rather than refused here.
+ */
+function reachOf(lab: Lab, args: string[]): SdkReach | null {
+  const { host, url } = namedHost(args)
+  const labs = lab.backends.list().filter(instance => instance.kind === 'bsp' && instance.configurable)
+  const named = url
+    ? labs.filter(instance => { try { return lab.backends.config(instance.id).url.endsWith(url) } catch { return false } })
+    : host && host.trim().toLowerCase() !== 'all'
+      ? labs.filter(instance => [`lab-${instance.id}`, instance.id].includes(host) || (labs.filter(other => other.id.toLowerCase().startsWith(host.toLowerCase())).length === 1 && instance.id.toLowerCase().startsWith(host.toLowerCase())))
+      : labs
+  const hosts = named.flatMap(instance => {
+    // Names must not collide with the backend's own: it matches them case-blind and an exact hit wins, so a lab
+    // whose name differs only in case from a host it reaches would lose to that host. `lab-<id>` cannot collide,
+    // and `rewritten` below maps the name a person types onto it.
+    try { const config = lab.backends.config(instance.id); return [{ name: `lab-${instance.id}`, url: config.url, token: config.password }] }
+    catch { return [] }
+  })
+  // What the command's `-r` may say for each lab: the id a person reads on the page, and the remote's own name.
+  const names = Object.fromEntries(hosts.map(host => [host.name.replace(/^lab-/, ''), host.name]))
+  return hosts.length ? { hosts, names } : null
+}
+
+/** The host models boardctrl has a header map for (each shipped platform's boards/<id>.yaml): its id and `name:`. */
 export function hostBoards(tree: string | null): Array<{ id: string, name: string }> {
-  if (!tree || !existsSync(join(tree, 'packs'))) return []
+  if (!tree || !existsSync(join(tree, 'platforms'))) return []
   const found: Array<{ id: string, name: string }> = []
-  for (const pack of readdirSync(join(tree, 'packs'))) {
-    const dir = join(tree, 'packs', pack, 'boards')
+  for (const platform of readdirSync(join(tree, 'platforms'))) {
+    const dir = join(tree, 'platforms', platform, 'boards')
     if (!existsSync(dir)) continue
     for (const file of readdirSync(dir).filter(name => name.endsWith('.yaml')).sort()) {
       const id = file.slice(0, -'.yaml'.length)
