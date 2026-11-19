@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { age, clock, Icon, middle, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
+import { age, clock, holder, Icon, middle, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
 import { canRediscover, useBoardActions } from '../actions.tsx'
 import { viewsFor } from '../render.tsx'
 
@@ -122,8 +122,10 @@ function Card({ board, m, you, watched, open }: { board: Board, m: Model, you: s
   const { host, slot } = slotOf(board), [l1, l2] = lines(board, m, you)
   const name = m.lock === 'empty' ? `${host} / ${slot}`.toUpperCase() : upper(board.name)
   const product = board.product && !name.includes(board.product.toUpperCase().replace(/_/g, '-')) ? ` · ${board.product}` : ''
+  // A board an agent holds wears that agent's colour, so who is on it reads at a glance.
+  const by = m.holder && m.key === 'busy' ? holder(m.holder) : null
   return (
-    <article className={`card ${m.key}${m.mine ? ' is-mine' : ''}`} tabIndex={0} data-board={board.name} aria-label={`${name}，${m.word}`}
+    <article className={`card ${m.key}${m.mine ? ' is-mine' : ''}${by?.agent ? ` by-agent k-${by.kind}` : ''}`} tabIndex={0} data-board={board.name} aria-label={`${name}，${m.word}`}
       onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(board.name) }} onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(board.name) }}>
       <div className="hd"><div><div className={`nm${name.length > 18 ? ' long' : ''}`} title={name}>{middle(name, 22)}</div><div className="wh">{host} · {slot}{product}</div></div>
         {board.soc && <span className="soc">{board.soc.toUpperCase()}</span>}</div>

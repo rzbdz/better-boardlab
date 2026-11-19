@@ -51,7 +51,7 @@ dest=\${args[1]#*:}; dest=\${dest//\\/tmp\\//${remote}/tmp/}; mkdir -p "$(dirnam
 function fakeBspTree(steps = '', ready = 'BSPD-READY $id 8765 f61b6f8') {
   const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
   writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
-id=""; token=""; while [[ $# -gt 0 ]]; do case $1 in --id) id=$2; shift 2;; --token) token=$2; shift 2;; *) shift;; esac; done
+id=""; token=""; while [[ $# -gt 0 ]]; do case $1 in --id) id=$2; shift 2;; --token) token=$2; shift 2;; --no-token) echo "no-token"; shift;; *) shift;; esac; done
 echo "--> installing $id"; echo "token-len \${#token}"
 ${steps}
 echo "${ready}"
@@ -117,6 +117,17 @@ describe('setting up a bsp board host', () => {
       expect(readFileSync(join(remote, 'root/.ssh/authorized_keys'), 'utf8')).toContain(await hosts.publicKey())
       expect((await exec.run('echo hi')).stdout.trim()).toBe('hi')
     } finally { delete process.env.FAKE_SSH_INHERIT }
+  })
+
+  it('installs a host that takes every request when asked for no token', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    const lines: string[] = []
+    const done = await installHost(new Hosts(join(dir, 'state')), fakeBspTree(), { id: 'lab1', access: { address: 'lab-1', user: 'root', password: 'opensesame' }, noToken: true }, null, line => lines.push(line))
+    expect(done.token).toBe('')
+    expect(lines).toContain('no-token')
+    expect(lines).toContain('token-len 0')
   })
 
   it.skipIf(process.getuid?.() !== 0)('installs on this very machine without ssh, and reaches it on its loopback port', async () => {

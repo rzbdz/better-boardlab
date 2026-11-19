@@ -96,7 +96,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
         },
       }
       lab.api.add('bsp', [{
-        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board）：ssh 过去装 bspd，接入实验室，输出边装边推送',
+        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token）：ssh 过去装 bspd，接入实验室，输出边装边推送',
         handle: ({ body, caller }) => {
           if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 bsp，不能装主机')
           const id = String(body.id ?? '')
@@ -117,7 +117,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
                 // The site may carry this host's config with its providers' own sections (the EC's pins, say): installed
                 // with the machine, they reach it as part of the same repository as the provider.
                 const hostFile = site && existsSync(join(site.dir, 'hosts', `${id}.yaml`)) ? join(site.dir, 'hosts', `${id}.yaml`) : null
-                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert') }, null, say, shipped.bundle, undefined, hostFile ? { id, file: hostFile } : null)
+                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert'), noToken: body.noToken === true }, null, say, shipped.bundle, undefined, hostFile ? { id, file: hostFile } : null)
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)

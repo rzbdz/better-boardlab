@@ -29,13 +29,15 @@ function install(lab: LabSettings | null): Element[] {
         ...(lab ? [] : [{ kind: 'text' as const, id: 'id', label: '实验室名', placeholder: '例如 com260（字母、数字、横线）', required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_-]{0,31}' }]),
         ...ACCESS.map(field => field.id === 'address' ? { ...field, initial: address.replace(/:\d+$/, '') } : field.id === 'user' ? { ...field, initial: user || 'root' }
           : field.id === 'board' ? { ...field, options: modelOptions() } : field),
+        // A lab already running without a token keeps running without one when it is installed again.
+        { kind: 'switch' as const, id: 'noToken', label: '不要 token（主机接受所有请求，只在可信网络里用）', initial: lab ? !lab.hasPassword : false },
       ],
       submitLabel: lab ? '重新安装' : '添加并安装',
       submit: job('install', lab ? '重新安装' : '添加并安装', async (input, sink, signal) => {
         const id = lab?.id ?? String(input.id).trim()
         if (!lab) { sink.line(`添加实验室 ${id}…`); await call('POST', 'api/labs/add', { id, kind: 'bsp' }) }
         try {
-          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board }, sink, signal)
+          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board, noToken: input.noToken === true }, sink, signal)
           return done.message
         } catch (error) {
           // A lab added for this attempt and then not installed is not a lab: without this, the next try would be
@@ -48,12 +50,10 @@ function install(lab: LabSettings | null): Element[] {
   ]
 }
 
-/** Where a host's GPIO page is opened: directly at its bspd (`bspd+ssh://user@host:p`), or through boardd for a host
- * on boardd's own machine, which answers only on loopback. */
-function gpioLink(url: string | null, lab: string): string {
-  const match = /^bspd\+(http|ssh):\/\/(?:[^@/]*@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
-  if (!match || match[1] === 'http') return `api/bsp/hosts/${encodeURIComponent(lab)}/panel/`
-  return `http://${match[2]}:${match[3] ?? '8765'}/`
+/** Where a host's GPIO page is opened: always through boardd, which reaches the host the way it drives it and adds the
+ * host's token. Opened at the host's own address, the page has no token and every change it makes is refused. */
+function gpioLink(_url: string | null, lab: string): string {
+  return `api/bsp/hosts/${encodeURIComponent(lab)}/panel/`
 }
 
 interface BoardChoices {

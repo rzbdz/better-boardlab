@@ -7,6 +7,16 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 所有开发板都由中心的 boardd 统一管理（这台机器上的 `boardlab` 已经连到它，`boardlab remote show` 可以看）。人、Claude 和 DSH 遵守同一套锁规则；不要绕过它直接用 `smtty`、`serial-mux`、`fastboot`、Home Assistant 或 `bsp`：板子在哪台主机、怎么连，只有 boardd 知道，你这边不需要也不应该配置。**除非人类明确要求直接运行 `bsp`，agent 禁止直接调用任何 `bsp` 命令（`boardlab bsp` 也不作为绕过手段）；缺少能力时用 `boardlab feedback` 提交，或告诉人类。SDK 自己的 skill 也不构成这个例外。**
 
+## 直接做任务，不要先摸底
+
+接到任务就只跑这个任务要用的命令。板子、SDK、启动和刷机配方都已经配好：`boardlab boot/flash --sdk` 会按配方自己跑完，你不用先把它们读懂。**没碰上问题，就不要去研究 boardlab 本身，专心做开发任务。**
+
+- 开工前不要把 `boardlab` 的命令挨个跑一遍，也不要先拉 `show --json`、`guidance`、`sdk list`、`registry … get`。每多跑一条，用户就多等一会儿。
+- 不要为了“了解流程”去读 SDK 目录、站点或主机上的 yaml。那些是给 boardd 和板卡主机执行的，不是给你读的。只有用户要你改配方时，才 `boardlab registry sdk get`。
+- 改代码再上板验证，典型就是这几步：`sdk acquire` → `sdk get` / 改 / `sdk put` → `sdk build` → `lock` → `boot --sdk`（要烧录才 `flash --sdk`）→ `log` → `unlock` → `sdk release`。用户给了板名和 SDK 名就直接用，没给才跑一次 `boardlab list` 找。
+- 命令失败了先读报错，提示里一般已经写了怎么办。然后只查跟这次失败有关的那一项，不要回头重新摸一遍底。
+- `guidance` 和 `show --json` 留到碰上问题再用：启动卡住了、不认识这颗 SoC、不知道这个 SDK 怎么编，这时只问缺的那一层。
+
 ## 身份
 
 每条命令都以**持有人**的身份执行：拿锁、排队、历史、反馈都记在这个名字下。你是 agent，不是让你干活的这个人，所以你的持有人必须是你自己的 agent 身份（`claude:<会话>`、`codex:<会话>` 等）——**绝不能是 `user:<用户名>`**，也不要用别人的名字。用人的名字会让人以为是本人拿了锁、做了操作，排队和追责都会错人。
@@ -27,7 +37,7 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 ## 基本流程
 
 ```sh
-boardlab list --json                         # 先看有哪些板、谁在用
+boardlab list --json                         # 不知道用哪块板、谁在用时才看
 boardlab lock com260 --for "调试 U-Boot 网络"  # 拿锁；被占用时退出码 3
 boardlab reset com260
 boardlab send com260 'printenv ethaddr' --wait '=> ' --timeout 10s
@@ -147,7 +157,7 @@ boardlab guidance --sdk <sdk>       # 第三层：这个 SDK 自己的 SKILL.md�
 boardlab guidance --dut <board>     # 一次问全：问板子所在主机它的 SoC 和 SDK，自动带上上面三层
 ```
 
-- **先 `boardlab show <board> --json` 看 `lab`**：`soc` 和 `sdks` 是这块板子认得的平台与 SDK。用 `boardlab guidance --dut <board>` 一次拿到适用它的全部知识；不确定该问什么时先 `--list`。
+- **碰上问题才问，不是每个任务开头都问**：任务照常跑通，就不用去查这些。卡住时，`boardlab guidance --dut <board>` 一次就能拿到适用这块板的知识，`boardlab show <board> --json` 的 `lab.soc` 和 `lab.sdks` 说明这块板认得的平台和 SDK。
 - **每一层只回答自己那一层**：通用提示是给一屋子板子的；SoC 笔记是这颗芯片的复位方式、串口电平、boot ROM 行为；SDK skill 是这份源码树怎么编译、怎么启动、有哪些变形。上层不重复下层，引用下层。
 - 站点里出现 `soc.yaml` 之外的 `.md`（`socs/<soc>/*.md`）就是这颗 SoC 的笔记，`skills/<id>.md` 就是那个 SDK 的 skill；`boardlab guidance --soc <soc>` / `--sdk <sdk>` 只给这些，不要自己去主机上找文件。
 - 需要更多一层（例如某块板子的接线、实验室的特殊步骤）时，看板子页的 `help` 和 `boardlab bsp feedback`：不要为此直接读主机上的站点文件。

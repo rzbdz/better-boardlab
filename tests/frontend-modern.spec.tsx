@@ -44,6 +44,20 @@ describe('Modern frontend', () => {
     expect((await card('bsp-host-b-s6')).className).toContain('empty')
   })
 
+  it('colours a board an agent holds with that agent\'s colour, and a person\'s board not', async () => {
+    expect((await card('bsp-k3-cm1')).className).not.toContain('by-agent')
+    const board = state.boards.find(b => b.name === 'bsp-k3-cm1')!
+    const was = board.lease
+    board.lease = { ...was!, holder: 'codex:fix-usb' }
+    const source = await stateStream()
+    source.opened()
+    source.emit('lease-granted', { board: board.name, holder: 'codex:fix-usb' })
+    await waitFor(() => expect(document.querySelector('[data-board="bsp-k3-cm1"]')!.className).toMatch(/by-agent k-codex/), wait)
+    board.lease = was
+    source.emit('lease-granted', { board: board.name, holder: was!.holder })
+    await waitFor(() => expect(document.querySelector('[data-board="bsp-k3-cm1"]')!.className).not.toContain('by-agent'), wait)
+  })
+
   it('pins a banner for the board waiting for a person, with the place to go', async () => {
     await waitFor(() => expect(document.querySelector('.banner .b')).toBeTruthy(), wait)
     const banner = document.querySelector('.banner .b') as HTMLElement

@@ -16,7 +16,8 @@ import type { Access, Executor, Hosts } from '../hosts/ssh.ts'
 import { shipHostTools } from './host-tools.ts'
 
 /** `ca`: a certificate the host must trust (the network's own CA), installed before anything is downloaded there. */
-export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null }
+/** `noToken`: the host takes every request (no token anywhere), for a lab whose port only trusted machines reach. */
+export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null, noToken?: boolean }
 /** A host config the site carries (`<site>/hosts/<id>.yaml`): its provider sections are merged into the host's own file. */
 export interface SiteHostConfig { id: string, file: string }
 export interface Installed { target: string, port: number, token: string, version: string, url: string }
@@ -316,14 +317,14 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
       siteHostsArg = `--site-hosts ${remote}/site-hosts`
       progress('带上站点里这台主机的插件配置')
     }
-    const made = token ?? randomBytes(24).toString('hex')
+    const made = setup.noToken ? '' : token ?? randomBytes(24).toString('hex')
     const port = setup.port ?? 8765
     progress('在那台机器上装 bspd（第一次要建 Python 环境，几分钟）…')
     // The installer starts each stage with `--> [n/N] <what>`: passed on as `[n/N] <what>` (the page shows step n of N
     // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
     let stage: string | null = null
     const run = await exec.run(
-      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 --token '${made}' ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg}; cd /; rm -rf ${remote}`,
+      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg}; cd /; rm -rf ${remote}`,
       {
         timeoutMs: 1_800_000, onLine: line => {
           if (!line.trim()) return
