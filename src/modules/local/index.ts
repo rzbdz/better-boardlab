@@ -64,6 +64,8 @@ export function local(options: { mux: Mux, hardware: Hardware, scanTiming?: Scan
         { method: 'POST', path: '/api/scan', about: '扫描本机的槽位（会复位板子，要 confirmed）', handle: ({ body, caller }) => scanner.start(caller.holder, { slots: body.slots, boards: body.boards, confirmed: body.confirmed === true }) },
         { method: 'POST', path: '/api/scan/cancel', about: '取消扫描', handle: ({ body, caller }) => { scanner.cancel(caller.holder, required(body.id, 'id')) } },
       ])
+      // A scan holds its boards by their locks, not through `doing`: a cancel on one of them stops the scan.
+      lab.kernel.addCanceller((target, by) => scanner.cancelTarget(by, target))
       // Boards keep their consoles across reboots and scans boardd did not live to finish.
       lab.addService(() => { void scanner.restoreConsoles().catch(() => {}) })
       return { slots, scanner }

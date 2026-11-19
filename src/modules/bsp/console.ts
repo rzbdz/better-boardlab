@@ -13,9 +13,10 @@ export function rawSession(stream: Duplex, options: { alias: string, transport: 
   let closed = false, ended: string | null = null
   const end = (reason: string) => { if (closed) return; closed = true; ended = reason; closes.forEach(fn => fn(reason)) }
   stream.on('data', (chunk: Buffer) => outputs.forEach(fn => fn(chunk)))
-  stream.on('error', error => end(error.message))
-  stream.on('close', () => end('closed'))
-  stream.on('end', () => end('closed'))
+  // What a person reads on the console ("串口断开：<reason>"), so never a bare word of the stream's.
+  stream.on('error', error => end(`${options.alias} 的串口连接出错：${error.message}`))
+  stream.on('close', () => end(`${options.alias} 的串口连接关了`))
+  stream.on('end', () => end(`${options.alias} 的串口连接关了`))
   return {
     hello: { alias: options.alias, device: null, baud: 0, transport: options.transport },
     history: [],

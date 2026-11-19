@@ -1,5 +1,5 @@
 /** Local USB, tty and fastboot facts read from sysfs and the fastboot tool. */
-import { execFile, spawn } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -84,17 +84,46 @@ export function diffUsb(before: UsbDevice[], after: UsbDevice[]): { added: UsbDe
   return { added: after.filter(device => !old.has(key(device))), removed: before.filter(device => !now.has(key(device))) }
 }
 
-export interface FastbootRunner { run(args: string[], timeoutMs?: number): Promise<string> }
+/** `signal` stops it: the tool and whatever it started (a stuck USB transfer). */
+export interface FastbootRunner { run(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<string> }
+
+/** A program run in its own process group, so a timeout or `signal` stops all of it; resolves with its output. */
+export function runGroup(bin: string, args: string[], timeoutMs: number, signal?: AbortSignal): Promise<{ code: number | null, output: string, stopped: 'timeout' | 'signal' | null }> {
+  return new Promise(resolve => {
+    let output = '', stopped: 'timeout' | 'signal' | null = null, finished = false
+    const child = spawn(bin, args, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const kill = (why: 'timeout' | 'signal') => {
+      if (finished) return
+      stopped ??= why
+      try { process.kill(-child.pid!, 'SIGTERM') } catch {}
+      setTimeout(() => { if (!finished) try { process.kill(-child.pid!, 'SIGKILL') } catch {} }, 2000).unref()
+    }
+    const timer = setTimeout(() => kill('timeout'), timeoutMs)
+    const aborted = () => kill('signal')
+    signal?.addEventListener('abort', aborted, { once: true })
+    const collect = (chunk: Buffer) => { output = (output + chunk.toString('utf8')).slice(-SCRIPT_OUTPUT_LIMIT) }
+    child.stdout!.on('data', collect)
+    child.stderr!.on('data', collect)
+    const done = (code: number | null) => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', aborted)
+      resolve({ code, output: output.trim(), stopped })
+    }
+    child.on('error', error => { output += error.message; done(null) })
+    child.on('close', code => done(code))
+    if (signal?.aborted) aborted()
+  })
+}
 
 export const fastbootTool: FastbootRunner = {
-  run(args, timeoutMs = 30000) {
-    return new Promise((resolve, reject) => {
-      execFile('fastboot', args, { timeout: timeoutMs }, (error, stdout, stderr) => {
-        const output = `${stdout}${stderr}`.trim()
-        if (error) reject(new Error(`fastboot ${args.join(' ')} 失败：${output || error.message}`))
-        else resolve(output)
-      })
-    })
+  async run(args, timeoutMs = 30000, signal) {
+    const { code, output, stopped } = await runGroup('fastboot', args, timeoutMs, signal)
+    if (stopped === 'signal') throw signal?.reason instanceof Error ? signal.reason : new Error(`fastboot ${args.join(' ')} 停下了`)
+    if (stopped === 'timeout') throw new Error(`fastboot ${args.join(' ')} 失败：${timeoutMs / 1000} 秒没有完成${output ? `：${output}` : ''}`)
+    if (code !== 0) throw new Error(`fastboot ${args.join(' ')} 失败：${output || `退出码 ${code}`}`)
+    return output
   },
 }
 
@@ -137,10 +166,11 @@ export const scriptRunner: ScriptRunner = {
   },
 }
 
-/** Load an image into RAM through the boot ROM and let it run. Never flashes. */
-export async function stageAndContinue(runner: FastbootRunner, usbPath: string, image: string, timeoutMs?: number): Promise<string> {
+/** Load an image into RAM through the boot ROM and let it run. Never flashes. `signal` stops it at once. */
+export async function stageAndContinue(runner: FastbootRunner, usbPath: string, image: string, timeoutMs?: number, signal?: AbortSignal): Promise<string> {
   const selector = `usb:${usbPath}`
-  const staged = await runner.run(['-s', selector, 'stage', image], timeoutMs)
-  const resumed = await runner.run(['-s', selector, 'continue'])
+  const staged = await runner.run(['-s', selector, 'stage', image], timeoutMs, signal)
+  if (signal?.aborted) throw signal.reason
+  const resumed = await runner.run(['-s', selector, 'continue'], undefined, signal)
   return `${staged}\n${resumed}`
 }

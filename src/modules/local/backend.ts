@@ -3,6 +3,7 @@
  * serial-mux daemons named after the boards (gated by the lock), and its download path is the fastboot here.
  */
 import type { Backend } from 'boardlab-core/core/backend.ts'
+import { CancelledError } from 'boardlab-core/core/errors.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import { stageAndContinue, type FastbootRunner, type SerialAdapter, type UsbDevice } from './hardware.ts'
@@ -39,6 +40,8 @@ export function localBackend(slots: Slots, mux: Mux, hardware: Hardware): Backen
     const { slot, driver } = slots.of(target.board)
     return (await driver.press(slot, action, target.board.startsWith('slot:') ? null : target.board)) ?? undefined
   }
+  /** The fastboot loads under way here, by board: `cancel` stops one boardd does not run through `doing` too. */
+  const loading = new Map<string, Set<AbortController>>()
   return {
     kind: '本机',
     lockTarget: name => slots.lockTarget(name),
@@ -61,10 +64,23 @@ export function localBackend(slots: Slots, mux: Mux, hardware: Hardware): Backen
         return mux.open(target.port, target.gate)
       },
     },
+    // A load here is fastboot on this machine: a cancel stops it at once, and the next file is never sent. A slot's
+    // reset is quick and is not stopped halfway.
+    cancels: ['stage', 'boot'],
+    async cancel(_config, target) {
+      const stops = loading.get(target.board)
+      if (!stops?.size) throw new BoardError('conflict', `${target.board} 没有在加载，不用取消`)
+      for (const stop of stops) stop.abort(new CancelledError(`已取消：${target.board} 的加载`))
+      return `让 ${target.board} 的 fastboot 停下`
+    },
     download: {
-      stage: (_config, target, file, timeoutMs) => {
+      stage: async (_config, target, file, timeoutMs, signal) => {
         if (!target.usbPath) throw new BoardError('invalid', `${target.board} 没有登记下载口`)
-        return stageAndContinue(hardware.fastboot, target.usbPath, file.path, timeoutMs)
+        const stop = new AbortController()
+        const stops = loading.get(target.board) ?? new Set<AbortController>()
+        stops.add(stop); loading.set(target.board, stops)
+        try { return await stageAndContinue(hardware.fastboot, target.usbPath, file.path, timeoutMs, signal ? AbortSignal.any([signal, stop.signal]) : stop.signal) }
+        finally { stops.delete(stop); if (!stops.size) loading.delete(target.board) }
       },
       present: async (_config, target) => hardware.usb().some(device => device.path === target.usbPath),
     },

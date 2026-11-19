@@ -227,7 +227,9 @@ describe('bsp lab driver', () => {
       'dut flash k3-a --package /files/abc/pkg.zip --sha256 abc --flasher tool-b --lease T1 --timeout 3600',
     ])
     expect(progress).toEqual(['[  12.0s] flash rootfs 40%'])
-    expect(signals[0]).toBe(abort.signal)
+    // The runner gets the signal that kills it: the lock ending stops the CLI, a cancel first tells the host.
+    expect(signals[0]).toBeInstanceOf(AbortSignal)
+    expect(signals[1]).toBeUndefined()
   })
 
   it('registers boards as bsp finds them, on the slots asked for, and says why a slot found nothing', async () => {

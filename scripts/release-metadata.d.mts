@@ -6,6 +6,8 @@ export interface CoreReleaseMetadata {
   tag: string
 }
 
+export declare const SHIPPED: string[]
+export declare function uncommittedInputs(input: { root: string, run?: (...args: string[]) => string }): string[]
 export declare function releaseVersion(packageVersion: string, requested?: string): string
 export declare function releaseMetadata(input: {
   version: string

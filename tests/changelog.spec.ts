@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { previousRelease, subjectsSince } from '../scripts/changelog.mjs'
 import { dir, useTempDir } from './fakes.ts'
@@ -76,6 +76,27 @@ describe('a release changelog', () => {
     writeFileSync(join(out, 'release.json'), JSON.stringify({ version: '0.4.3', revision: later }))
     expect(previousRelease(dir, out)).toEqual({ revision: later, version: '0.4.3' })
     expect(git('rev-parse', 'v0.4.2^{commit}')).toBe(tag)
+  })
+
+  it('counts a stable release from the previous stable one, past its own release candidates', () => {
+    git('init', '-q', '-b', 'main')
+    const stable = commit('feature: in 0.4.48')
+    git('tag', '-a', 'v0.4.48', '-m', 'v0.4.48')
+    commit('feature: the first fix')
+    const rc5 = commit('release: 0.4.49rc5')
+    git('tag', '-a', 'v0.4.49rc5', '-m', 'v0.4.49rc5')
+    const rc6 = commit('feature: the second fix')
+    commit('feature: the third fix')
+    const out = join(dir, 'release')
+    mkdirSync(out, { recursive: true })
+    // The last rc made into this directory, and an rc tag: what an rc counts from, never a stable release.
+    writeFileSync(join(out, 'release.json'), JSON.stringify({ version: '0.4.49rc6', revision: rc6 }))
+    expect(previousRelease(dir, out, '0.4.49')).toEqual({ revision: stable, version: '0.4.48' })
+    expect(subjectsSince(stable, 'HEAD', dir)).toEqual(['feature: the first fix', 'feature: the second fix', 'feature: the third fix'])
+    expect(previousRelease(dir, out, '0.4.49rc7')).toEqual({ revision: rc6, version: '0.4.49rc6' })
+    rmSync(join(out, 'release.json'))
+    expect(previousRelease(dir, out, '0.4.49rc7')).toEqual({ revision: rc5, version: '0.4.49rc5' })
+    expect(previousRelease(dir, out, '0.4.49')).toEqual({ revision: stable, version: '0.4.48' })
   })
 
   it('leaves out a marker subject only when it is a version, not a change that starts the same way', () => {

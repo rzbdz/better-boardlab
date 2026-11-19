@@ -7,7 +7,7 @@
  * Browsers only allow notifications on a secure page (https, or localhost through an ssh tunnel): `support()` says
  * whether this page can have them, and why not.
  */
-import type { Board } from 'boardlab-core/shared/types.ts'
+import type { Board, DatabaseRestore } from 'boardlab-core/shared/types.ts'
 
 export type Topic = 'free' | 'granted' | 'stolen' | 'attention'
 export const TOPICS: Record<Topic, string> = {
@@ -84,4 +84,16 @@ export function show(note: Note, onClick?: () => void): boolean {
   const shown = new Notification(note.title, { body: note.body, tag: `boardlab-${note.topic}-${note.board}`, requireInteraction: note.topic === 'attention' || note.topic === 'granted' })
   shown.onclick = () => { window.focus(); onClick?.(); shown.close() }
   return true
+}
+
+/**
+ * What a frontend says, as a warning beside boardd's health, when boardd restored its database from a copy at a start:
+ * the changes after that copy are gone, until a person acknowledges it.
+ */
+export function restoreWarning(restored: DatabaseRestore | null | undefined): { title: string, body: string } | null {
+  if (!restored) return null
+  const at = restored.at.slice(0, 16).replace('T', ' ')
+  return restored.backup
+    ? { title: 'boardd 的数据库从备份恢复过', body: `${at} 启动时数据库损坏，用备份 ${restored.backup} 恢复了：这份备份之后的锁、历史和反馈丢了。损坏的文件在 ${restored.aside}。` }
+    : { title: 'boardd 的数据库损坏，用空数据库启动了', body: `${at} 启动时数据库损坏，没有可用的备份：之前的板子、锁、历史和反馈都不在了。损坏的文件在 ${restored.aside}。` }
 }

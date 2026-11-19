@@ -177,4 +177,15 @@ describe('scan', () => {
     expect(bench.calls.at(-1)).toBe('switch.ctrl_001_board_0_reset')
     expect(svc.boards.list().every(board => board.lease === null)).toBe(true)
   })
+
+  it('stops when a board it holds is cancelled through the one cancel endpoint', async () => {
+    const bench = new Bench(wiring)
+    const svc = service(bench)
+    const scan = await scanner(svc).start('user:dana', { confirmed: true })
+    while (!bench.calls.length) await new Promise(resolve => setTimeout(resolve, 1))
+    const cancel = svc.api.match('POST', '/api/cancel')!.endpoint
+    const said = await cancel.handle({ body: { target: 'com260' }, query: new URLSearchParams(), params: {}, caller: { holder: 'user:dana', local: true }, signal: new AbortController().signal, upload: null })
+    expect(said).toMatchObject({ cancelled: true, message: expect.stringContaining('扫描') })
+    expect((await finish(svc, scan.id)).status).toBe('cancelled')
+  })
 })

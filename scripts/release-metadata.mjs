@@ -31,6 +31,22 @@ export function releaseMetadata({ version, revision, file, sha256, core }) {
   return { version, revision, file, sha256, core: { version: core.version, revision: core.revision, tag: core.tag } }
 }
 
+/** What a release ships from the worktree as it is (an untracked file there would travel beside HEAD's version). */
+export const SHIPPED = ['src', 'core', 'frontends', 'scripts', 'externals', 'package.json', 'skills', 'docs/help', 'firmware', 'host-tools', 'ca', 'README.md', 'LICENSE']
+
+/**
+ * What stops a release being made from HEAD: any tracked file changed or staged, anywhere but `internal/` and the
+ * release output, since every input counts (the module list, the lockfile, the layering rules, the compiler settings,
+ * not only the shipped directories); and any untracked file under what ships. One line of `git status` each; none
+ * when the tree is clean.
+ */
+export function uncommittedInputs({ root, run }) {
+  const git = run ?? ((...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }))
+  const tracked = git('status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)internal', ':(exclude)release')
+  const untracked = git('status', '--porcelain', '--untracked-files=all', '--', ...SHIPPED).split('\n').filter(line => line.startsWith('??'))
+  return [...new Set([...tracked.split('\n'), ...untracked].map(line => line.trimEnd()).filter(Boolean))]
+}
+
 /** Stable publication never creates, replaces or deletes a source version tag. */
 export function verifyStablePublication({ root, release, git }) {
   if (!VERSION_PATTERN.test(release.version) || release.version.includes('rc')) {

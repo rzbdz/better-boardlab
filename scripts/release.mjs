@@ -17,7 +17,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { changelog, previousRelease, subjectsSince } from './changelog.mjs'
 import { checkCoreVersion } from './check-core-version.mjs'
-import { releaseMetadata, releaseVersion, verifyStagedRelease } from './release-metadata.mjs'
+import { releaseMetadata, releaseVersion, uncommittedInputs, verifyStagedRelease } from './release-metadata.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -43,9 +43,10 @@ if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/fr
 // The built CLI must start: a bundling problem only shows when it runs.
 try { execFileSync(process.execPath, [join(root, 'dist/cli.js'), 'help'], { stdio: 'pipe', env: { ...process.env, NODE_NO_WARNINGS: '1' } }) }
 catch (error) { throw new Error(`the built CLI does not start: ${String(error.stderr ?? error.message).trim().split('\n').slice(0, 6).join('\n')}`) }
-// Everything the tarball carries, not only source: a dirty manifest or skill would otherwise ship beside HEAD's version.
-if (git('status', '--porcelain', '--untracked-files=all', '--', 'src', 'core', 'frontends', 'scripts', 'externals', 'package.json',
-  'skills', 'docs/help', 'firmware', 'host-tools', 'ca', 'README.md', 'LICENSE')) throw new Error('uncommitted changes: a release is made from a commit')
+// Every input, not only what the tarball carries: a dirty manifest, lockfile or module list would otherwise build into
+// a release that names HEAD's version.
+const dirty = uncommittedInputs({ root })
+if (dirty.length) throw new Error(`uncommitted changes: a release is made from a commit\n${dirty.slice(0, 20).join('\n')}`)
 
 const stage = join(out, `boardlab-${version}`)
 rmSync(stage, { recursive: true, force: true })
@@ -85,8 +86,9 @@ rmSync(stage, { recursive: true, force: true })
 const sha256 = createHash('sha256').update(readFileSync(join(out, file))).digest('hex')
 // What changed since the previous release, for the release itself to publish (publish.mjs puts it in its notes and the
 // git release branch). The previous release is the newest version tag below this commit, or a release.json in `out`
-// naming something later than it; `--since` says otherwise, and then is what the header names too.
-const previous = previousRelease(root, out)
+// naming something later than it (for a stable release, the newest stable one of either); `--since` says otherwise,
+// and then is what the header names too.
+const previous = previousRelease(root, out, version)
 const given = option('since')
 const since = given ?? previous?.revision ?? ''
 writeFileSync(join(out, 'CHANGELOG.md'), changelog(version, revision, subjectsSince(since, 'HEAD', root), { since: given ?? previous?.version }))

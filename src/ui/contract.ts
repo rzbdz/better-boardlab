@@ -173,8 +173,12 @@ export type Operation =
   /**
    * Long: it reports progress through the sink while it runs, and the page stays usable. The page shows the lines and
    * fraction (in a drawer, on the card, wherever it fits) and the outcome at the end.
+   *
+   * `cancellable`: aborting `signal` really stops the work, on the server too, and the job then settles (it rejects,
+   * or returns what it got to). Only then does the page offer 取消. A job that is not cancellable may still see its
+   * signal abort (the page going away): it stops reporting, and must not undo what the server goes on doing.
    */
-  | (OperationBase & { kind: 'job', start(input: Values, sink: Sink, signal: AbortSignal): Promise<Outcome> })
+  | (OperationBase & { kind: 'job', cancellable?: boolean, start(input: Values, sink: Sink, signal: AbortSignal): Promise<Outcome> })
   /** Opens more of the page over it (a dialog, a drawer): elements whose operations close it when they succeed. */
   | (OperationBase & { kind: 'open', title: string, body(): Element[], load?(): Promise<Element[]> })
 
@@ -216,8 +220,8 @@ export function open(id: string, label: string, title: string, body: () => Eleme
   return { kind: 'open', id, label, title, body, ...extra }
 }
 
-/** A job whose start reports through the sink and returns the message to show at the end (or nothing). */
-export function job(id: string, label: string, start: (input: Values, sink: Sink, signal: AbortSignal) => Promise<string | Outcome | void>, extra: Omit<OperationBase, 'id' | 'label'> = {}): Operation {
+/** A job whose start reports through the sink and returns the message to show at the end (or nothing); see `cancellable`. */
+export function job(id: string, label: string, start: (input: Values, sink: Sink, signal: AbortSignal) => Promise<string | Outcome | void>, extra: Omit<OperationBase, 'id' | 'label'> & { cancellable?: boolean } = {}): Operation {
   return { kind: 'job', id, label, ...extra, async start(input, sink, signal) { const out = await start(input, sink, signal); return typeof out === 'string' ? { message: out } : out ?? {} } }
 }
 

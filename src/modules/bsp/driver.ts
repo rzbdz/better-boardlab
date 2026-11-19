@@ -4,10 +4,10 @@
  * is `bsp dut pipe`, which carries serial-mux's own protocol from the board host to boardd's serial-mux client. Which
  * hosts there are comes from bsp's own configuration (its site and host registry), so new hosts need nothing here.
  */
-import { execFile, spawn } from 'node:child_process'
 import { Duplex } from 'node:stream'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { CancelledError } from 'boardlab-core/core/errors.ts'
 import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews, type LabSlots, type Notice } from 'boardlab-core/core/backend.ts'
 import type { DiscoveryContext, DiscoveryMethod, DiscoveryValues } from 'boardlab-core/shared/types.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
@@ -15,6 +15,10 @@ import { muxSession } from '../serial-mux/client.ts'
 import { askedIn } from 'boardlab-core/core/relay.ts'
 import { bspDebug } from './debug.ts'
 import { openRaw } from './console.ts'
+import { cancellable, EXIT_CANCELLED, runCli, spawnPipe } from './process.ts'
+
+import type { BspResult } from './process.ts'
+export { EXIT_CANCELLED, jobIn, killGroup, runCli, type BspResult } from './process.ts'
 
 /** Holders boardd gives its bsp leases: `boardlab:<holder of the lock>`. */
 export const HOLDER_PREFIX = 'boardlab:'
@@ -31,14 +35,19 @@ export function cliName(): string {
   return found ? 'boardctrl' : 'bsp'
 }
 
-export interface BspResult { code: number | null, stdout: string, stderr: string }
-/** `onStderr` gets the progress lines bsp prints while it works; `signal` stops it (the lock it runs under ended). */
+/**
+ * `onStderr` gets the progress lines bsp prints while it works; `signal` kills it, and every process it started (the
+ * driver aborts it only when there is nothing on the host left to wait for).
+ */
 export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }) => Promise<BspResult>
 /** Starts `bsp … dut pipe`; its stdin and stdout are the pipe. */
 export type BspSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
-/** `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). */
-export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string, stateDir?: string }
+/**
+ * `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). `cancelGraceMs`: how long a cancelled
+ * job's CLI may take to follow the job to its end before it is killed.
+ */
+export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string, stateDir?: string, cancelGraceMs?: number }
 
 /** A DUT spec as bsp probe proposes it (`bsp dut add` takes it back). */
 interface BspSpec {
@@ -101,28 +110,9 @@ export interface BspBackend extends Backend {
 export function bspLab(options: BspOptions = {}): BspBackend {
   // The board controller CLI; `bsp` is its old name, still installed on machines set up before the rename.
   const bin = options.bin ?? process.env.BOARDS_BSP ?? cliName()
-  const run: BspRunner = options.run ?? ((args, { env, timeoutMs, onStderr, signal }) => new Promise(resolve => {
-    const child = execFile(bin, args, { env, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, signal }, (error, stdout, stderr) => {
-      resolve({ code: error ? (typeof error.code === 'number' ? error.code : null) : 0, stdout, stderr: stderr || (error && !stdout ? error.message : '') })
-    })
-    if (onStderr) {
-      let partial = ''
-      child.stderr?.on('data', chunk => {
-        const lines = (partial + chunk).split('\n')
-        partial = lines.pop() ?? ''
-        for (const line of lines) if (line.trim()) onStderr(line.trim())
-      })
-    }
-  }))
-  const start: BspSpawner = options.spawn ?? ((args, env) => {
-    const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] })
-    let stderr = ''
-    child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000) })
-    const stream = Duplex.from({ readable: child.stdout, writable: child.stdin })
-    child.on('error', error => stream.destroy(error))
-    stream.on('close', () => child.kill())
-    return { stream, stderr: () => stderr }
-  })
+  const run: BspRunner = options.run ?? ((args, options) => runCli(bin, args, options))
+  const cancelGraceMs = options.cancelGraceMs
+  const start: BspSpawner = options.spawn ?? ((args, env) => spawnPipe(bin, args, env))
 
   /**
    * `url` names a bsp host registry, `username` the hosts to use (`-r`), `password` the hosts' API token. Commands on a
@@ -143,11 +133,24 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
     ...(options.sshKey && bspdUrl(config).startsWith('ssh://') ? { BSP_SSH_OPTIONS: `-i ${options.sshKey} -o IdentitiesOnly=yes` } : {}),
   })
-  const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal): Promise<T> => {
-    const result = await run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr, signal })
-    if (signal?.aborted) throw new Error(`bsp ${args.slice(0, 2).join(' ')} 停下了：${(signal.reason as Error | undefined)?.message ?? '锁已经结束'}`)
+  /** Run a bsp command; `signal` stops it as `cancellable` says (`dut`/`job cancel` under the lease of `on`, the board). */
+  const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal, on?: { device: string, lease: string | null }): Promise<T> => {
+    const result = await cancellable(
+      (onLine, kill) => run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr: onLine, signal: kill }),
+      (what, at) => bsp(config, what, 60_000, undefined, at ?? host),
+      { onStderr, signal, stop: on ? ['dut', 'cancel', on.device, ...lease(on.lease)] : undefined, jobArgs: on ? lease(on.lease) : [], graceMs: cancelGraceMs })
     let envelope: { ok: boolean, result?: T, warnings?: string[], error?: { code?: string, message?: string, hint?: string } } | null = null
     try { envelope = JSON.parse(result.stdout) } catch {}
+    const what = `bsp ${args.slice(0, 2).join(' ')}`
+    const cancelling = !!signal?.aborted && signal.reason instanceof CancelledError && !signal.reason.refused
+    if (result.code === EXIT_CANCELLED || envelope?.error?.code === 'cancelled') {
+      throw cancelling ? signal!.reason : new CancelledError(`已取消：${what}：${envelope?.error?.message ?? '主机上的任务被取消了'}`)
+    }
+    if (signal?.aborted && !(signal.reason instanceof CancelledError && signal.reason.refused)) {
+      if (!cancelling) throw new Error(`${what} 停下了：${(signal.reason as Error | undefined)?.message ?? '锁已经结束'}`)
+      // Asked to stop, it finished anyway (it was past its last step): what it did stands.
+      if (!envelope?.ok) throw signal.reason
+    }
     // A host bsp could not reach leaves `ok: true` and the failure only in the warnings (and exit code 3): a stale token
     // then looks like a lab with no boards, and boardd drops every one of them. Any unreachable host is an error, so
     // the listing is never taken as complete and the boards already known stay.
@@ -373,7 +376,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async refresh(config, target, options, progress, signal) {
         const args = ['dut', 'refresh', target.device, ...lease(target.lease), '--timeout', String(RESET_TIMEOUT_MS / 1000),
           ...(options.name ? ['--name', options.name] : options.rename ? ['--rename'] : [])]
-        const job = await bsp<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress, undefined, signal)
+        const job = await bsp<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress, undefined, signal, target)
+        if (job.status === 'cancelled') throw new CancelledError(`已取消：${target.device} 的重新读取`)
         if (job.status && job.status !== 'succeeded') throw new Error(job.error?.message ?? `bsp dut refresh ${job.status}`)
         const r = job.result ?? { dut: target.device }
         return {
@@ -406,12 +410,12 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       reset: async (config, { device, lease: token }, notice, signal) => {
         const tell = once(notice)
         const watching = watchingHuman(config, device, tell, signal)
-        try { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal) } finally { watching() }
+        try { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, { device, lease: token }) } finally { watching() }
       },
       enterDownload: async (config, { device, lease: token }, notice, signal) => {
         const tell = once(notice)
         const watching = watchingHuman(config, device, tell, signal)
-        try { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal) } finally { watching() }
+        try { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, { device, lease: token }) } finally { watching() }
       },
       confirm: async (config, { device }, note, request) => {
         // The request id makes it idempotent: answered already (the board showed it on its own), bsp says so.
@@ -484,21 +488,22 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
     download: {
       backendFiles: true,
-      async stage(config, target, file, timeoutMs = 300_000) {
+      async stage(config, target, file, timeoutMs = 300_000, signal) {
+        // One call on the host, not a job: a cancel stops the upload, or waits for the load already under way.
         const result = await bsp<{ output: string, file: string, size: number }>(config,
-          ['dut', 'stage', target.device, file.path, ...lease(target.lease), '--timeout', String(Math.ceil(timeoutMs / 1000))], timeoutMs + 120_000)
+          ['dut', 'stage', target.device, file.path, ...lease(target.lease), '--timeout', String(Math.ceil(timeoutMs / 1000))], timeoutMs + 120_000, undefined, undefined, signal)
         return result.output
       },
       async present(config, target) {
         return (await bsp<{ present: boolean }>(config, ['dut', 'present', target.device])).present
       },
 
-      async boot(config, { device, lease: token }, files, timing) {
+      async boot(config, { device, lease: token }, files, timing, signal) {
         // `boardlab boot` starts with the board already in download mode, as boardd's own boot does.
         const refs = files.map(file => file.source === 'backend' && !/^https?:\/\//.test(file.path) ? `host:${file.path}` : file.path)
         const job = await bsp<{ lines?: string[], elapsed_s?: number }>(config, ['dut', 'boot', device, '--files', ...refs, '--no-reset',
           '--first-wait', String(timing.firstMs / 1000), '--later-wait', String(timing.laterMs / 1000), '--port-timeout', String(timing.waitMs / 1000),
-          ...lease(token), '--timeout', '1800'], BOOT_TIMEOUT_MS)
+          ...lease(token), '--timeout', '1800'], BOOT_TIMEOUT_MS, undefined, undefined, signal, { device, lease: token })
         return (job.lines ?? []).join('\n')
       },
     },
@@ -663,17 +668,19 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
     ports: { list: freePorts },
 
+    // What it stops by telling the host: the host's job ends before its next step, and boardd follows it to its end.
+    cancels: ['reset', 'download', 'stage', 'boot', 'build', 'flash', 'refresh', 'discover'],
     async cancel(config, { device, lease: token }) {
       const done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device, ...lease(token)], 60_000)
       return `让 ${done.cancelled?.join('、') ?? '它'} 停下`
     },
 
     builds: {
-      async boot(config, { device, lease: token }, sdk, progress) {
+      async boot(config, { device, lease: token }, sdk, progress, signal) {
         // The board host pulls the SDK's build from its build server and runs the SDK's boot recipe.
         const job = await bsp<{ lines?: string[] }>(config, ['dut', 'boot', device, '--sdk', sdk.sdk, '--method', sdk.method,
           ...(sdk.variant ? ['--variant', sdk.variant] : []), ...(sdk.brk ? ['--break', sdk.brk] : []),
-          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress)
+          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress, undefined, signal, { device, lease: token })
         return (job.lines ?? []).join('\n')
       },
       async breaks(config, sdk) {
@@ -698,7 +705,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.
         const job = await bsp<{ job?: string, lines?: string[], flasher?: string, elapsed_s?: number }>(config, ['dut', 'flash', device,
           '--package', pkg.url ?? pkg.path!, ...(pkg.sha256 ? ['--sha256', pkg.sha256] : []), ...(pkg.flasher ? ['--flasher', pkg.flasher] : []),
-          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress, undefined, signal)
+          ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, progress, undefined, signal, { device, lease: token })
         const lines = job.lines ?? []
         return [...lines, ...(job.flasher ? [`刷机工具：${job.flasher}${job.elapsed_s ? `，用时 ${Math.round(job.elapsed_s)} 秒` : ''}`] : [])].join('\n')
       },

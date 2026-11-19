@@ -87,3 +87,39 @@ describe('TroyMitchellDefault frontend', () => {
       id: 'bsp', confirmed: true, method: 'probe', host: 'host-b', slot: 'host-b/s6', values: { prefer: '12,13' } }), wait)
   })
 })
+
+describe('TroyMitchellDefault health', () => {
+  it('warns that boardd restored its database from a copy until a person says they saw it', async () => {
+    const { FakeEventSource, state } = await import('./frontend-setup.ts')
+    state.restored = { at: '2026-11-19T03:00:00.000Z', backup: '/state/backups/boards-2026-11-18T21-00-00-000Z.sqlite', aside: '/state/boards.sqlite.corrupt-2026-11-19T03-00-00-000Z', reason: 'database disk image is malformed' }
+    const source = await waitFor(() => { const found = FakeEventSource.instances.filter(item => /(^|\/)api\/events(\?|$)/.test(item.url)).at(-1); if (!found) throw new Error('no stream'); return found }, wait)
+    source.opened()
+    source.emit('changed', { board: null })
+    const alert = await screen.findByTestId('db-restored', {}, wait)
+    expect(alert.textContent).toContain('从备份恢复过')
+    fireEvent.click(within(alert).getByRole('button', { name: '知道了' }))
+    await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === 'api/database/acknowledge')).toBe(true), wait)
+    await waitFor(() => expect(screen.queryByTestId('db-restored')).toBeNull(), wait)
+  })
+})
+
+describe('TroyMitchellDefault console', () => {
+  it('says why the console dropped in its status, and that boardd restarted', async () => {
+    const { FakeEventSource } = await import('./frontend-setup.ts')
+    const streamsOf = () => FakeEventSource.instances.filter(item => item.url.startsWith('api/console?raw=1&board=bsp-k1-musecard'))
+    await tab('板子')
+    await tab('实验室 bsp')
+    const card = await waitFor(() => { const el = document.querySelector('[data-board="bsp-k1-musecard"]'); if (!el) throw new Error('no card'); return el as HTMLElement }, wait)
+    fireEvent.click(card)
+    const status = await screen.findByTestId('console-status', {}, wait)
+    const stream = streamsOf().at(-1)!
+    stream.emit('hello', { boot: 'b1' })
+    stream.emit('history', ['root@k1:~# '])
+    await waitFor(() => expect(status.textContent).toContain('实时'), wait)
+    stream.emit('closed', 'adapter unplugged')
+    await waitFor(() => expect(status.textContent).toContain('串口断开：adapter unplugged，重连中'), wait)
+    await waitFor(() => expect(streamsOf().at(-1)).not.toBe(stream), wait)
+    streamsOf().at(-1)!.emit('restart', { reason: '服务重启' })
+    await waitFor(() => expect(status.textContent).toContain('服务重启，重连中'), wait)
+  })
+})

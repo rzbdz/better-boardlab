@@ -82,6 +82,21 @@ describe('a board host\'s page through boardd', () => {
     expect(forwarded.every(item => item.auth === 'Bearer host-secret' && item.prefix === '/api/bsp/hosts/host1/panel')).toBe(true)
   })
 
+  it('only reads while someone else holds a board of the lab: its lines are theirs', async () => {
+    const bspd = await fakeBspd()
+    const { lab, call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
+    lab.kernel.db.prepare("INSERT INTO boards(name, slot, product, soc, source, lab, lab_device) VALUES('host1-dut1', 's1', '', 'soc-a', 'lab', 'host1', 'dut1')").run()
+    lab.locks.grant('host1-dut1', 'user:bob', '调试')
+    await expect(call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).rejects.toMatchObject({ code: 'forbidden', message: expect.stringMatching(/host1-dut1 正被 user:bob 使用/) })
+    expect(bspd.seen.some(item => item.url.includes('gpio_set'))).toBe(false)
+    // Looking is still allowed, and the holder may change what is theirs.
+    expect((await call('GET', '/api/bsp/hosts/host1/panel/')).status).toBe(200)
+    expect((await call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:bob', { line: 5 })).status).toBe(200)
+    // Once it is let go, anyone may.
+    lab.locks.end(lab.locks.held('host1-dut1')!, 'released', 'done')
+    expect((await call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).status).toBe(200)
+  })
+
   it('is for people only, and only for bsp labs', async () => {
     const bspd = await fakeBspd()
     const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)

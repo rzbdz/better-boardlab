@@ -10,7 +10,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ConsoleHello, ConsoleSession } from 'boardlab-core/core/console.ts'
 
-const MAX_MSG_SIZE = 1024 * 1024
+/** The protocol's own limit (serial-mux allows 16 MB): a console that printed a lot has a large history frame. */
+const MAX_MSG_SIZE = 16 * 1024 * 1024
 
 export interface MuxDaemon { alias: string, device: string | null, baud: number, pid: number, socket: string, usbPort: string | null }
 
@@ -23,9 +24,17 @@ export function encodeMessage(message: unknown): Buffer {
 
 /** Incremental decoder for the 4-byte big-endian framing. */
 export class FrameDecoder {
-  private buffer = Buffer.alloc(0)
+  private buffer: Buffer = Buffer.alloc(0)
+  /** Chunks of a frame still arriving, joined once it is whole (a large history comes in many pieces). */
+  private pending: Buffer[] = []
+  private pendingBytes = 0
   push(chunk: Buffer): Array<Record<string, unknown>> {
-    this.buffer = Buffer.concat([this.buffer, chunk])
+    if (this.buffer.length >= 4) {
+      const need = 4 + this.buffer.readUInt32BE(0)
+      if (this.buffer.length + this.pendingBytes + chunk.length < need) { this.pending.push(chunk); this.pendingBytes += chunk.length; return [] }
+    }
+    this.buffer = this.pending.length || this.buffer.length ? Buffer.concat([this.buffer, ...this.pending, chunk]) : chunk
+    this.pending = []; this.pendingBytes = 0
     const messages: Array<Record<string, unknown>> = []
     while (this.buffer.length >= 4) {
       const length = this.buffer.readUInt32BE(0)
@@ -132,8 +141,10 @@ export function muxSession(stream: Duplex, name: string, options: { token?: stri
     const fail = (error: Error) => { if (!settled) { settled = true; clearTimeout(timer); stream.destroy(); reject(error) } }
     const end = (reason: string) => { if (closed) return; closed = true; closes.forEach(fn => fn(reason)) }
     stream.write(encodeMessage({ type: 'hello', interactive: false, ...(options.token ? { token: options.token } : {}) }))
-    stream.on('error', error => { fail(new Error(`serial-mux ${name}：${error.message}`)); end(error.message) })
-    stream.on('close', () => { fail(new Error(`serial-mux ${name} 关闭了连接`)); end('closed') })
+    stream.on('error', error => { fail(new Error(`serial-mux ${name}：${error.message}`)); end(`serial-mux ${name}：${error.message}`) })
+    // The reasons a session ends are what a person reads on the console ("串口断开：<reason>"): in the words of the
+    // client's other messages, never a bare word of the protocol's.
+    stream.on('close', () => { fail(new Error(`serial-mux ${name} 关闭了连接`)); end(`serial-mux ${name} 关闭了连接`) })
     stream.on('data', (chunk: Buffer) => {
       let messages: Array<Record<string, unknown>>
       try { messages = decoder.push(chunk) } catch (error) { stream.destroy(); return fail(error as Error) }
@@ -154,7 +165,7 @@ export function muxSession(stream: Duplex, name: string, options: { token?: stri
           const data = Buffer.from(String(message.data), 'base64')
           outputs.forEach(fn => fn(data))
         } else if (message.type === 'error' && !settled) fail(new Error(`serial-mux ${name}：${message.message}`))
-        else if (message.type === 'serial_lost') end(`serial lost: ${message.reason}`)
+        else if (message.type === 'serial_lost') end(`serial-mux ${name} 丢了串口${message.reason ? `：${message.reason}` : ''}`)
       }
     })
   })

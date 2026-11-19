@@ -36,6 +36,10 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   const [lines, setLines] = useState<string[]>([])
   const [fraction, setFraction] = useState<number | null>(null)
   const [step, setStep] = useState<string | null>(null)
+  // The running job's controller: its 取消 aborts the signal the job was started with (the contract's `signal`). Only a
+  // cancellable job offers it, and only a 取消 pressed here is told as one.
+  const abort = useRef<AbortController | null>(null)
+  const cancelled = useRef<AbortController | null>(null)
   // A line `[n/N] …` says the job is at step n of N (Sink in src/ui/contract.ts).
   const line = (text: string) => {
     const at = /^\[(\d+)\/(\d+)\]/.exec(text)
@@ -46,16 +50,22 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   const go = async () => {
     if (op.kind === 'open') { ui.layer(close => <><h2>{op.title}</h2><div className="mv" style={{ marginTop: 12 }}><OpenBody op={op} ctx={ctx} onDone={close} /></div></>, 'wide'); return }
     setBusy(true)
+    const controller = new AbortController()
     try {
-      const out = op.kind === 'action' ? await op.run(input())
-        : (setLines([]), setFraction(null), setStep(null), await op.start(input(), { line, progress: setFraction }, new AbortController().signal))
+      let out
+      if (op.kind === 'action') out = await op.run(input())
+      else { abort.current = controller; setLines([]); setFraction(null); setStep(null); out = await op.start(input(), { line, progress: setFraction }, controller.signal) }
       ui.toast(out.message || `${op.label}：操作成功`); onDone?.()
-    } catch (error) { ui.fail(`${op.label}失败`, error) } finally { await refreshNow().catch(() => {}); setBusy(false) }
+    } catch (error) {
+      if (cancelled.current === controller) ui.toast(`${op.label}：已取消`)
+      else ui.fail(`${op.label}失败`, error)
+    } finally { if (abort.current === controller) abort.current = null; await refreshNow().catch(() => {}); setBusy(false) }
   }
+  const cancel = () => { if (!abort.current) return; cancelled.current = abort.current; abort.current.abort(new Error('已取消')) }
   const trigger = () => op.confirm
     ? ui.layer(close => <Confirm title={op.confirm!.title} ok={op.confirm!.action} danger={op.intent === 'danger'} close={close} onOk={() => void go()}>{plain(op.confirm!.body)}</Confirm>)
     : void go()
-  return { trigger, busy, lines, fraction, step }
+  return { trigger, busy, lines, fraction, step, cancel }
 }
 
 function OpenBody({ op, ctx, onDone }: { op: Extract<Operation, { kind: 'open' }>, ctx: Ctx, onDone: () => void }) {
@@ -75,6 +85,7 @@ function OpButton({ op, ctx, values = () => ({}), onDone }: { op: Operation, ctx
   return (
     <>
       <button className={`pill sm${op.intent === 'primary' ? ' dark' : op.intent === 'danger' ? ' danger-o' : ''}`} disabled={!!op.blocked || run.busy} title={op.blocked} onClick={run.trigger}>{run.busy && <span className="spin" />}{op.label}</button>
+      {op.kind === 'job' && op.cancellable && run.busy && <button className="pill sm" onClick={run.cancel}><Icon name="x" />取消</button>}
       {op.kind === 'job' && (run.busy || run.lines.length > 0) && (
         <div style={{ flexBasis: '100%', display: 'grid', gap: 6 }}>
           {run.step && <span className="sub small">步骤 {run.step}</span>}

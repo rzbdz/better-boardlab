@@ -121,7 +121,9 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
-                await lab.backends.configure(caller.holder, id, { enabled: true, url: done.url, username: '', password: done.token, devices: '' })
+                // A host installed without a token takes none: the old one is forgotten, so the lab (and the next
+                // reinstall's form) says so, rather than keeping a token the host no longer asks for.
+                await lab.backends.configure(caller.holder, id, { enabled: true, url: done.url, username: '', password: done.token || null, clearPassword: !done.token, devices: '' })
                 const tested = await lab.backends.test(caller.holder, id).catch(error => ({ verifyMessage: (error as Error).message, verifyOk: false }))
                 return { done, tested }
               })
@@ -153,7 +155,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
               const parsed = new URL(url)
               await uninstallHost(hosts, { address: parsed.hostname, user: decodeURIComponent(parsed.username) || undefined }, body.purge === true, line)
             } else if (url.startsWith('http://127.0.0.1')) await uninstallHost(hosts, { address: 'localhost' }, body.purge === true, line)
-            await lab.backends.removeLab(caller.holder, id)
+            await lab.backends.removeLab(caller.holder, id, { within: true })
           })
           site?.recordHost(id, null)
           return { ok: true }

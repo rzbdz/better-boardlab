@@ -3,7 +3,8 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
-import { adapterPortName, diffUsb, listSerialAdapters, type SerialAdapter } from '../src/modules/local/hardware.ts'
+import { CancelledError } from 'boardlab-core/core/errors.ts'
+import { adapterPortName, diffUsb, listSerialAdapters, runGroup, type SerialAdapter } from '../src/modules/local/hardware.ts'
 import { local } from '../src/modules/local/index.ts'
 import { scriptSlots } from '../src/modules/script-slots/index.ts'
 import { SerialMux, startAlias } from '../src/modules/serial-mux/client.ts'
@@ -113,6 +114,46 @@ describe('console and firmware', () => {
     await expect(svc.download.stage('com260', { holder: 'user:dana' }, { firmware: 'fsbl' })).rejects.toThrow(/没有自带 k3 的固件 fsbl/)
     writeFileSync(file, 'tampered')
     await expect(svc.download.stage('com260', { holder: 'user:dana' }, { firmware: 'minor-board-info' })).rejects.toThrow(/sha256 与 firmware.json 不符/)
+  })
+
+  it('stops a load when it is cancelled: fastboot gets the signal, and the next file is never sent', async () => {
+    const bench = new Bench([])
+    bench.usbPresent.push({ path: '3-2.3', usbId: '361c:1001', serial: '????????????', product: null })
+    const stages: string[] = []
+    const signals: Array<AbortSignal | undefined> = []
+    const svc = makeLab({ ...bench.options(openDatabase(join(dir, 'cancel.sqlite'))), sleep: async () => {}, bootTiming: { firstMs: 0, laterMs: 0, waitMs: 2, pollMs: 1 },
+      hardware: { ...bench.options().hardware, fastboot: { run: (args, _timeout, signal) => new Promise((resolve, reject) => {
+        signals.push(signal)
+        if (args[2] !== 'stage') return resolve('OKAY')
+        stages.push(args[3]!)
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }) } } })
+    svc.boards.add('user:dana', { name: 'com260', slot: 1, chips: [{ serialPath: '/dev/ttyUSB1', alias: 'com260', downloadUsbPath: '3-2.3' }] })
+    const files = ['FSBL.bin', 'Image.itb'].map(name => { const file = join(dir, name); writeFileSync(file, name); return file })
+    const { token } = await svc.locks.lock('com260', 'claude:s1', '内存启动')
+    const call = (path: string, body: Record<string, unknown>) => Promise.resolve().then(() => svc.api.match('POST', path)!.endpoint.handle({ body, query: new URLSearchParams(), params: {}, caller: { holder: 'claude:s1', local: true }, signal: new AbortController().signal, upload: null }))
+    const booting = call('/api/boot', { board: 'com260', token, files }).then(() => 'done', error => error)
+    while (!stages.length) await new Promise(resolve => setTimeout(resolve, 1))
+    expect(svc.boards.get('com260').busy).toMatchObject({ kind: 'boot', cancellable: true })
+    await call('/api/cancel', { target: 'com260', token })
+    expect(await booting).toBeInstanceOf(CancelledError)
+    expect(stages).toEqual([files[0]])
+    expect(signals[0]?.aborted).toBe(true)
+    expect(svc.boards.get('com260').busy).toBeNull()
+  })
+
+  it('runs fastboot in a process group of its own, so a cancel stops what it started', async () => {
+    const pid = join(dir, 'child.pid')
+    const stop = new AbortController()
+    const running = runGroup('sh', ['-c', `sleep 60 & echo $! > ${pid}; wait`], 60_000, stop.signal)
+    const { existsSync, readFileSync } = await import('node:fs')
+    while (!existsSync(pid) || !readFileSync(pid, 'utf8').trim()) await new Promise(resolve => setTimeout(resolve, 10))
+    const child = Number(readFileSync(pid, 'utf8'))
+    stop.abort()
+    expect((await running).stopped).toBe('signal')
+    const alive = () => { try { process.kill(child, 0); return true } catch { return false } }
+    for (let i = 0; i < 100 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 20))
+    expect(alive()).toBe(false)
   })
 
   it('boots from RAM by staging each file in order once the download port is back', async () => {

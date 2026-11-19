@@ -5,7 +5,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, identity, type PageState } from '../../src/ui/api.ts'
+import { api, identity, isCancelled, type PageState } from '../../src/ui/api.ts'
+import { restoreWarning } from '../../src/ui/notify.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { registerModuleUis, ViewPanel, viewsFor } from './render.tsx'
@@ -29,6 +30,15 @@ function useToasts() {
     window.setTimeout(() => setToasts(list => list.filter(item => item.id !== id)), error ? 6000 : 3000)
   }, [])
   return { toasts, show }
+}
+
+/**
+ * What an operation run from the page tells the person: its own message (or `label`) when it worked, boardd's reason as
+ * an error when it failed, and boardd's words, not as an error, when it was cancelled (neither done nor failed).
+ */
+export async function outcome(label: string, fn: () => Promise<unknown>): Promise<{ text: string, error: boolean }> {
+  try { const out = await fn(); return { text: typeof out === 'string' && out ? out : label, error: false } }
+  catch (error) { return { text: (error as Error).message, error: !isCancelled(error) } }
 }
 
 /** One-click purposes for taking or queueing for a lock. */
@@ -112,7 +122,7 @@ function App() {
   const run = useCallback<Run>(async (label, fn) => {
     setBusy(true)
     // A module's operation may say what it did; that message wins over the label.
-    try { const out = await fn(); show(typeof out === 'string' && out ? out : label) } catch (error) { show((error as Error).message, true) }
+    try { const told = await outcome(label, fn); show(told.text, told.error) }
     finally { setBusy(false); void refresh() }
   }, [refresh, show])
 
@@ -133,6 +143,8 @@ function App() {
         </button>
       </header>
       {!connected && <p className="banner">与 boardd 的连接中断，正在重试…</p>}
+      {state && restoreWarning(state.restored) && <p className="banner" role="alert" data-testid="db-restored"><b>{restoreWarning(state.restored)!.title}</b>：{restoreWarning(state.restored)!.body}
+        {' '}<button onClick={() => void api.acknowledgeRestore().then(() => refresh()).catch(() => {})}>知道了</button></p>}
       <main className={consoleOpen ? 'with-console' : ''}>
         <div className="view" key={tab}>
           {!state ? <p className="muted">加载中…</p>

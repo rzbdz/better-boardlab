@@ -31,25 +31,34 @@ function isAncestor(ref, cwd) {
  * directory holds that names a later ancestor than that tag — releasing twice into one directory with no tag in
  * between counts from the previous run. A release.json older than the newest tag is a stale file from an old run and
  * is ignored. Null when there is none.
+ *
+ * `version` is the release being made. A stable one counts from the previous stable release: its changelog covers the
+ * whole line since then, not just what changed since its last release candidate, so rc tags and an rc release.json are
+ * passed over. An rc (or no version) counts from the previous release of either kind.
  */
-export function previousRelease(cwd = root, out = join(cwd, 'release')) {
+export function previousRelease(cwd = root, out = join(cwd, 'release'), version = null) {
+  const stable = !!version && !isCandidate(version)
   const head = git(cwd, 'rev-parse', 'HEAD')
   const commitOf = ref => { try { return git(cwd, 'rev-parse', `${ref}^{commit}`) } catch { return null } }
   /** A commit a release may be counted from: one on HEAD, and not HEAD itself. */
   const usable = ref => { const commit = ref && commitOf(ref); return commit && commit !== head && isAncestor(commit, cwd) ? commit : null }
   let best = null
   try {
-    const tag = git(cwd, 'tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*').split('\n').filter(Boolean).find(usable)
+    const tag = git(cwd, 'tag', '--merged', 'HEAD', '--sort=-v:refname', '--list', 'v[0-9]*').split('\n').filter(Boolean)
+      .find(name => !(stable && isCandidate(name)) && usable(name))
     if (tag) best = { revision: commitOf(tag), version: tag.replace(/^v/, '') }
   } catch {}
   try {
     const previous = JSON.parse(readFileSync(join(out, 'release.json'), 'utf8'))
-    const commit = usable(previous.revision)
+    const commit = stable && isCandidate(String(previous.version ?? '')) ? null : usable(previous.revision)
     // Later than the tag, or nothing else: a run that stopped before tagging left this. Earlier: stale, keep the tag.
     if (commit && (!best || after(commit, best.revision, cwd))) best = { revision: commit, version: previous.version }
   } catch {}
   return best
 }
+
+/** Whether a version (or a `v<version>` tag) is a release candidate (`0.4.49rc6`) rather than a stable release. */
+export const isCandidate = version => /rc\d+$/.test(version)
 
 /** Whether revision `a` is `later` or comes after `b` (either may be anything git resolves, such as a short hash). */
 function after(a, later, cwd) {
@@ -88,7 +97,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2)
   const option = name => { const at = args.indexOf(`--${name}`); return at >= 0 ? args[at + 1] : undefined }
   const version = option('version') ?? JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-  const previous = previousRelease(root, option('out') ? dirname(resolve(option('out'))) : join(root, 'release'))
+  const previous = previousRelease(root, option('out') ? dirname(resolve(option('out'))) : join(root, 'release'), version)
   const given = option('since')
   const since = given ?? previous?.revision ?? ''
   const revision = option('revision') ?? git(root, 'rev-parse', '--short', 'HEAD')

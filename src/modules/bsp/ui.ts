@@ -41,8 +41,9 @@ function install(lab: LabSettings | null): Element[] {
           return done.message
         } catch (error) {
           // A lab added for this attempt and then not installed is not a lab: without this, the next try would be
-          // refused ("已经有实验室") and the form could never retry.
-          if (!lab) await call('POST', 'api/labs/remove', { id }).catch(() => {})
+          // refused ("已经有实验室") and the form could never retry. The page going away is not a failed install:
+          // boardd goes on installing, so the lab stays.
+          if (!lab && !signal.aborted) await call('POST', 'api/labs/remove', { id }).catch(() => {})
           throw error
         }
       }, { intent: 'primary' }),

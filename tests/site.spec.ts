@@ -774,6 +774,48 @@ describe('syncing the site to board hosts', () => {
   }, 30_000)
 })
 
+describe('installing a host without a token', () => {
+  it('forgets the lab\'s old token, so the lab and the next reinstall\'s form say the host takes none', async () => {
+    fakeHost()
+    const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
+    writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
+token=""; while [[ $# -gt 0 ]]; do case $1 in --token) token=$2; shift 2;; *) shift;; esac; done
+echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
+`)
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ stateDir: join(dir, 'state'), bin: fakeBsp().bin, tree, sdk: { run: async () => 0 } as never })] })
+    // boardd's ssh setup is one per process, made by the first test that asked for it: its key is made where it looks.
+    const { hostsFor } = await import('../src/modules/hosts/ssh.ts')
+    const key = hostsFor(join(dir, 'state')).keyFile
+    mkdirSync(dirname(key), { recursive: true }); writeFileSync(key, 'key\n'); writeFileSync(`${key}.pub`, 'ssh-ed25519 AAAA boardlab@test\n')
+    await lab.backends.add('user:alice', 'lab1', 'bsp')
+    await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: 'bspd+ssh://root@lab-1:8765', password: 'old-token' })
+    expect(lab.backends.labSettings().find(item => item.id === 'lab1')?.hasPassword).toBe(true)
+    const install = async (body: Record<string, unknown>) => {
+      const found = lab.api.match('POST', '/api/bsp/install')!
+      const reply = await found.endpoint.handle({ query: new URLSearchParams(), params: {}, body, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null }) as { start: (emit: (event: string, data: any) => void, end: () => void, signal: AbortSignal) => Promise<void> }
+      const out: Array<[string, any]> = []
+      await new Promise<void>(resolve => { void reply.start((event, data) => out.push([event, data]), resolve, new AbortController().signal) })
+      return { lines: out.filter(([event]) => event === 'out').map(([, data]) => String(data.text)), exit: out.find(([event]) => event === 'exit')?.[1] }
+    }
+    const done = await install({ id: 'lab1', address: 'lab-1', user: 'root', noToken: true })
+    expect(done.exit).toMatchObject({ ok: true })
+    expect(done.lines).toContain('token-len 0')
+    const settings = lab.backends.labSettings().find(item => item.id === 'lab1')!
+    expect(settings.hasPassword).toBe(false)
+    expect(lab.backends.config('lab1').password).toBe('')
+    // The reinstall form starts where the host is: without a token.
+    const { ui } = await import('../src/modules/bsp/ui.ts')
+    const view = ui.views({ boards: [], labs: [settings], modules: [] } as never, {}).find(item => item.id === 'bsp-hosts')!
+    const list = view.body.find(element => element.kind === 'list') as { items: Array<{ actions: Array<{ id: string, body?: () => Array<{ kind: string, fields?: Array<{ id: string, initial?: unknown }> }> }> }> }
+    const form = list.items[0]!.actions.find(item => item.id === 'reinstall')!.body!().find(element => element.kind === 'form')!
+    expect(form.fields!.find(field => field.id === 'noToken')?.initial).toBe(true)
+    // Installed again with a token, the lab keeps the new one.
+    expect((await install({ id: 'lab1', address: 'lab-1', user: 'root' })).exit).toMatchObject({ ok: true })
+    expect(lab.backends.labSettings().find(item => item.id === 'lab1')?.hasPassword).toBe(true)
+    expect(lab.backends.config('lab1').password).toMatch(/^[0-9a-f]{48}$/)
+  }, 30_000)
+})
+
 describe('guidance by level', () => {
   it('answers the general hints, a SoC\'s notes and an SDK\'s skill, the site over a shipped platform', async () => {
     const { remote } = remoteSite()

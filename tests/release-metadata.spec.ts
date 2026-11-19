@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dir, useTempDir } from './fakes.ts'
-import { releaseMetadata, releaseVersion, verifyStagedRelease, verifyStablePublication } from '../scripts/release-metadata.mjs'
+import { releaseMetadata, releaseVersion, uncommittedInputs, verifyStagedRelease, verifyStablePublication } from '../scripts/release-metadata.mjs'
 import { distributionIdentity } from '../src/release.ts'
 
 useTempDir()
@@ -78,5 +79,33 @@ describe('release metadata', () => {
     expect(() => verifyStagedRelease({ stage, version: '0.4.6rc1', revision, core, run: () => JSON.stringify({ cli: { version: '0.4.6rc1', revision: 'dev' } }) })).toThrow(/packaged CLI reports/)
     writeFileSync(join(stage, 'CORE_VERSION'), '0.1.0\n')
     expect(() => verifyStagedRelease({ stage, version: '0.4.6rc1', revision, core, run })).toThrow(/core provenance/)
+  })
+})
+
+describe('a release\'s clean tree', () => {
+  it('counts every tracked input, not only what ships, and leaves internal/ and the release output alone', () => {
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' })
+    git('init', '-q', '-b', 'main')
+    const inputs = ['modules.offered', 'pnpm-lock.yaml', 'architecture.json', 'tsconfig.json', 'src/a.ts', 'internal/notes.md']
+    for (const file of inputs) { mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), 'one\n') }
+    git('add', '-A'); git('commit', '-qm', 'tree')
+    expect(uncommittedInputs({ root: dir })).toEqual([])
+    // Files outside the shipped directories still decide what is built: a change to any of them is a dirty tree.
+    for (const file of ['modules.offered', 'pnpm-lock.yaml', 'architecture.json', 'tsconfig.json']) {
+      writeFileSync(join(dir, file), 'two\n')
+      expect(uncommittedInputs({ root: dir })).toEqual([` M ${file}`])
+      git('checkout', '--', file)
+    }
+    // Staged counts too.
+    writeFileSync(join(dir, 'tsconfig.json'), 'staged\n'); git('add', 'tsconfig.json')
+    expect(uncommittedInputs({ root: dir })).toEqual(['M  tsconfig.json'])
+    git('reset', '-q', '--hard')
+    // Local notes and the release output are not inputs; an untracked file only where it would ship.
+    writeFileSync(join(dir, 'internal/notes.md'), 'edited\n')
+    mkdirSync(join(dir, 'release')); writeFileSync(join(dir, 'release/release.json'), '{}')
+    writeFileSync(join(dir, 'scratch.txt'), 'untracked, not shipped')
+    expect(uncommittedInputs({ root: dir })).toEqual([])
+    writeFileSync(join(dir, 'src/key.pem.txt'), 'untracked, would ship')
+    expect(uncommittedInputs({ root: dir })).toEqual(['?? src/key.pem.txt'])
   })
 })

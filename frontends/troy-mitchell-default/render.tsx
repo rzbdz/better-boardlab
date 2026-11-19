@@ -3,7 +3,7 @@
  * own pieces (panels, pills, forms, lists), and every operation run the way this frontend runs things (confirm in a
  * dialog, a toast when done, a job's lines under its button).
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { plain, type Badge, type Element, type Field, type Inline, type ModuleUi, type Operation, type PageState, type Rich, type Values, type View, type ViewContext } from '../../src/ui/contract.ts'
 import { Dialog, Pill, Section, time, type Prompt, type Run } from './kit.tsx'
 
@@ -36,21 +36,28 @@ function useOperation(op: Operation, ctx: Ctx, values: () => Values, onDone?: ()
   const [fraction, setFraction] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
   const [opened, setOpened] = useState(false)
+  // The running job's controller: its 取消 aborts the signal the job was started with (the contract's `signal`). Only a
+  // cancellable job offers it, and only a 取消 pressed here is told as one.
+  const abort = useRef<AbortController | null>(null)
+  const cancelled = useRef<AbortController | null>(null)
   const input = () => ({ ...values(), ...Object.fromEntries((op.using ?? []).map(id => [id, ctx.selections[id] ?? ctx.defaults[id] ?? []])) })
   const go = async () => {
     if (op.kind === 'open') { setOpened(true); return }
     if (op.kind === 'action') return ctx.onRun(op.label, async () => { const out = await op.run(input()); onDone?.(); return out.message }).then(() => {})
     setRunning(true); setLines([]); setFraction(null)
-    const abort = new AbortController()
+    const controller = new AbortController()
+    abort.current = controller
     await ctx.onRun(op.label, async () => {
-      try { const out = await op.start(input(), { line: text => setLines(list => [...list.slice(-200), text]), progress: setFraction }, abort.signal); onDone?.(); return out.message }
-      finally { setRunning(false) }
+      try { const out = await op.start(input(), { line: text => setLines(list => [...list.slice(-200), text]), progress: setFraction }, controller.signal); onDone?.(); return out.message }
+      catch (error) { if (cancelled.current === controller) return '已取消'; throw error }
+      finally { if (abort.current === controller) abort.current = null; setRunning(false) }
     })
   }
+  const cancel = () => { if (!abort.current) return; cancelled.current = abort.current; abort.current.abort(new Error('已取消')) }
   const trigger = () => op.confirm
     ? ctx.onPrompt({ kind: 'confirm', title: op.confirm.title, body: plain(op.confirm.body), action: op.confirm.action, danger: op.intent === 'danger', run: go })
     : void go()
-  return { trigger, lines, fraction, running, opened, close: () => setOpened(false) }
+  return { trigger, lines, fraction, running, opened, cancel, close: () => setOpened(false) }
 }
 
 function OpenBody({ op, ctx, onDone }: { op: Extract<Operation, { kind: 'open' }>, ctx: Ctx, onDone: () => void }) {
@@ -72,6 +79,7 @@ function OperationButton({ op, ctx, values = () => ({}), onDone, submit }: { op:
     <>
       <button type={submit ? 'submit' : 'button'} className={cls} disabled={!!op.blocked || run.running} title={op.blocked}
         onClick={submit ? undefined : run.trigger}>{run.running ? `${op.label}…` : op.label}</button>
+      {run.running && op.kind === 'job' && op.cancellable && <button type="button" className="link danger" onClick={run.cancel}>取消</button>}
       {(run.running || run.lines.length > 0) && op.kind === 'job' && (
         <div className="span job-log">
           {run.fraction !== null && <progress value={run.fraction} max={1} />}

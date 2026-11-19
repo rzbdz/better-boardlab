@@ -70,6 +70,8 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
         {board.lab.canConfirm && <button className="primary" onClick={() => props.onRun('已告诉实验室', () => api.confirm(board.name, board.lab!.attentionRequest ?? null))}>我已完成</button>}
       </div>}
       {board.lab?.progress && <p className="progress-line" aria-live="polite">启动中：{board.lab.progress}</p>}
+      {board.busy && <p className="progress-line" aria-live="polite">{board.busy.label}{board.busy.line ? `：${board.busy.line}` : ''}
+        {board.busy.cancellable && (mine || !board.lease) && <button className="link danger" onClick={() => props.onRun(`${board.name} 正在停下`, async () => (await api.cancel(board.name)).message)}>停止</button>}</p>}
       {gone && <p className="warn small">这块板的槽位串口不见了（串口线拔掉或换了口）。最近重新布线过的话，到「扫描」里重建主机 {board.slotRef?.split('/').length === 3 ? board.slotRef.split('/')[1] : board.slotRef?.split('/')[0]}。</p>}
       {board.lab?.mediaBoot && board.lab.mediaBoot.method !== 'reset' && <p className="muted small" title={board.lab.mediaBoot.why ?? undefined}>
         {board.lab.mediaBoot.available ? `下载模式是短接的：复位时经 ${board.lab.mediaBoot.method} 从板载介质启动` : '下载模式是短接的：复位后停在下载模式，只能从内存启动'}

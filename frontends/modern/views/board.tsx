@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import { clearConsole, reconnectConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
+import { consoleStatusText } from '../../../src/ui/console-session.ts'
 import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
@@ -47,6 +48,7 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
   const board = state.boards.find(b => b.name === name)
   const [tab, setTab] = useState<'tty' | 'log'>('tty')
   const [status, setStatus] = useState<ConsoleStatus>('connecting')
+  const [reason, setReason] = useState<string | null>(null)
   const [die, setDie] = useState<string | undefined>()
   const ui = useUI()
   if (!board) return <div className="page"><section className="hero"><h1>没有这块板子</h1><p>可能被移除了。<a href="#/">回到板子</a></p></section></div>
@@ -65,7 +67,7 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
           <button className={`tab${tab === 'log' ? ' on' : ''}`} onClick={() => setTab('log')}>日志</button>
           {full && <span className="cname">{upper(board.name)}</span>}
           <span className="gap" />
-          <span className="st"><span className={`dot ${m.flags.gone || m.flags.offline ? 'bad' : status === 'live' ? 'live' : status === 'retry' || status === 'closed' ? 'warn' : ''}`} />{m.flags.gone ? '串口离线' : STATUS_TEXT[status]}</span>
+          <span className="st"><span className={`dot ${m.flags.gone || m.flags.offline ? 'bad' : status === 'live' ? 'live' : status === 'retry' || status === 'closed' ? 'warn' : ''}`} />{m.flags.gone ? '串口离线' : consoleStatusText(status, reason, STATUS_TEXT)}</span>
           {tab === 'tty' && <button className="ib" title="清屏（保留连接）" aria-label="清屏" onClick={() => clearConsole(board.name, chosen)}>清屏</button>}
           {tab === 'tty' && status !== 'live' && <button className="ib" title="现在重连串口" aria-label="重连" onClick={() => reconnectConsole(board.name, chosen)}>重连</button>}
           {dies.length > 1 && <span className="seg2">{dies.map(d => <button key={d} className={d === chosen ? 'on' : ''} onClick={() => setDie(d)}>{d}</button>)}</span>}
@@ -73,7 +75,7 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
         </div>
         {tab === 'log' ? <LogPanel board={board.name} die={chosen} />
           : dies.length || board.lab ? <>
-            <SerialConsole key={`${board.name}:${chosen ?? ''}`} board={board.name} die={chosen} dark={dark} onStatus={setStatus} className="terminal" />
+            <SerialConsole key={`${board.name}:${chosen ?? ''}`} board={board.name} die={chosen} dark={dark} onStatus={(next, why) => { setStatus(next); setReason(why) }} className="terminal" jumpClassName="jump" />
             {!m.mine && <div className="ro"><Icon name="eye" />{m.holder ? `${holder(m.holder).name} 拿着锁，你的输入会和他们的混在一起` : '没拿锁也能输入；长时间用请拿锁'}</div>}
           </> : <div className="term-empty">这块板子没有在线的串口</div>}
       </section>
@@ -177,12 +179,18 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   </>
 }
 
+/**
+ * Whatever boardd is doing to the board can be stopped when it says so (`busy.cancellable`), by the lock's holder, or
+ * by anyone while nobody holds the board (a lab's search, a load whose lock was given back).
+ */
+export const canStop = (board: Board, m: Model) => !!m.flags.busy?.cancellable && (m.mine || !board.lease)
+
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
   return <>
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div>
-      {m.mine && m.flags.busy && (m.flags.busy.kind === 'boot' || m.flags.busy.kind === 'stage') && <button className="pill sm" disabled={act.busy === 'cancel'} onClick={act.cancel}>{act.busy === 'cancel' ? <span className="spin" /> : <Icon name="x" />}取消</button>}</div>}
+      {canStop(board, m) && <button className="pill sm" disabled={act.has('cancel')} onClick={act.cancel}>{act.has('cancel') ? <span className="spin" /> : <Icon name="x" />}取消</button>}</div>}
     {m.flags.offline && <div className="flag"><Icon name="plug" /><div><b>串口不在线</b><span>板子可能没上电，或者串口线松了。</span></div></div>}
     {m.flags.error && <div className="flag bad"><Icon name="warn" /><div><b>锁和实验室对不上</b><span>{m.flags.error}</span></div></div>}
   </>

@@ -94,6 +94,8 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   }
   if (path === '/api/flash/package' && method === 'POST') return reply({ output: 'job flash-1 succeeded' })
   if (path === '/api/logs') return reply({ lines: ['[2026-11-10 08:59:58] U-Boot SPL 2022.10', '[2026-11-10 09:00:00] ERROR: mmc0 timeout'], matched: 2, truncated: false, source: 'backend' })
+  // A person acknowledging boardd's database restore: the state stops reporting it.
+  if (path === '/api/database/acknowledge' && method === 'POST') { const acknowledged = state.restored ?? null; state.restored = null; return reply({ acknowledged }) }
   if (path === '/api/lock' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
     board.lease = { id: 'new', board: board.name, holder: state.you, purpose: body.purpose, startedAt: state.now, status: 'held', endedAt: null, endReason: null }

@@ -4,7 +4,7 @@
  * will happen.
  */
 import { useState, type ReactNode } from 'react'
-import { api } from '../../src/ui/api.ts'
+import { api, isCancelled } from '../../src/ui/api.ts'
 import { PURPOSES } from '../../src/ui/format.ts'
 import type { Board, LabSettings } from 'boardlab-core/shared/types.ts'
 import { Confirm, Icon, holder, refreshNow, setAsked, slotOf, upper, useAsked, useUI, Who } from './kit.tsx'
@@ -49,7 +49,8 @@ export function useBoardActions(board: Board) {
   const run = async (key: string, label: string, fn: () => Promise<unknown>, done?: string) => {
     setAsked(board.name, key, true)
     try { const out = await fn() as { message?: string } | undefined; ui.toast(done ?? `${name} · ${label}好了`, out && typeof out === 'object' && out.message ? out.message : undefined) }
-    catch (error) { ui.fail(`${name} · ${label}失败`, error) }
+    // A cancelled operation is neither done nor failed: boardd says it was stopped.
+    catch (error) { if (isCancelled(error)) ui.toast(`${name} · ${label}已取消`, (error as Error).message); else ui.fail(`${name} · ${label}失败`, error) }
     finally { await refreshNow().catch(() => {}); setAsked(board.name, key, false) }
   }
   const ask = (title: string, body: ReactNode, ok: string, go: (reason: string) => void, opts: { danger?: boolean, reason?: string } = {}) =>
@@ -76,7 +77,7 @@ export function useBoardActions(board: Board) {
     // The lab's id for this ask goes with it: a click after it already saw the board arrive is answered, not an error.
     confirm: () => void run('confirm', '确认', () => api.confirm(board.name, board.lab?.attentionRequest ?? null), `${name} 继续了`),
     boot: (sdk: string, method: 'load' | 'download', brk?: string) => run('boot', method === 'load' ? '内存启动' : '刷机', () => api.bootSdk(board.name, sdk, method, brk)),
-    cancel: () => run('cancel', '取消', () => api.cancelBoard(board.name), `${name} 停下了`),
+    cancel: () => run('cancel', '取消', () => api.cancel(board.name), `${name} 正在停下`),
     flashPackage: (pkg: FlashPackage) => run('boot', '刷机', () => api.flashPackage(board.name, { url: pkg.url, flasher: pkg.flasher || undefined })),
     refresh: () => ask(`重新读取 ${name}`, '复位板子，从 EEPROM 读型号；换了板子时用。', '读取', () => void run('refresh', '重新读取', () => api.refresh(board.name, {}))),
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),

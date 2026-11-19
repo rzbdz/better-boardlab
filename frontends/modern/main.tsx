@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client'
 import { api, onFetched, type PageState } from '../../src/ui/api.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
-import { changes, onPrefs, prefs, show, type Note } from '../../src/ui/notify.ts'
+import { changes, onPrefs, prefs, restoreWarning, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
 import { hhmm, holder, Icon, model, setBoards, setRefresher, UIProvider, upper, useUI, where } from './kit.tsx'
 import { registerModuleUis, ViewPage, viewsFor } from './render.tsx'
@@ -181,6 +181,8 @@ function Shell() {
         {me && <button className="me" title={state!.you} onClick={() => go('#/settings')}><i>{me.name[0]?.toUpperCase()}</i><span className="nmx">{me.name}</span></button>}
       </div>
     </div></header>
+    {state && restoreWarning(state.restored) && <div className="banner"><div className="b restored"><Icon name="warn" /><div className="msg"><b>{restoreWarning(state.restored)!.title}</b> <span className="sub">{restoreWarning(state.restored)!.body}</span></div>
+      <span className="acts"><button className="pill sm dark" onClick={() => void api.acknowledgeRestore().then(() => refresh()).catch(e => ui.fail('确认失败', e))}>知道了</button></span></div></div>}
     {state && attn.length > 0 && page !== 'board' && <div className="banner">{attn.map(b => <Banner key={b.name} board={b} you={state.you} fresh={!seen.current.has(b.name)} />)}</div>}
     {state && ((state as unknown as { human?: { open: number, items: Array<{ title: string }> } }).human?.open ?? 0) > 0 && !(page === 'p' && where_.arg === 'human') && (
       <div className="banner"><div className="b"><Icon name="hand" /><div className="msg"><b>人工操作请求</b> {(state as unknown as { human?: { items: Array<{ title: string }> } }).human?.items[0]?.title} <span className="sub">· 共 {(state as unknown as { human?: { open: number } }).human!.open} 件待处理</span></div>

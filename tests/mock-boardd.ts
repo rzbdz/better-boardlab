@@ -35,8 +35,8 @@ export function mockState(you = 'user:alice'): State {
       board('bsp-k1-pico', { product: 'k1-x_pico', soc: 'k1', slotRef: 'bsp/host-a/s2', lab: inLab('k1-pico', { attention: '请按一下 k1-pico 的 RESET 键，然后点「我已完成」' }) }),
       board('bsp-k3-gone', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s1', chips: [chip('bsp-k3-gone', false)], lab: inLab('k3-gone', { slotGone: true }) }),
       board('bsp-host-b-s6', { slotRef: 'bsp/host-b/s6', lab: inLab('host-b-s6', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
-      board('bsp-host-a-s7', { slotRef: 'bsp/host-a/s7', busy: { kind: 'discover', label: '发现中', by: 'user:bob', since: now, line: 'P13：没有串口反应' }, lab: inLab('host-a-s7', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
-      board('bsp-k1-flash', { product: 'k1-x_deb1', soc: 'k1', slotRef: 'bsp/host-a/s3', lease: lease('bsp-k1-flash', you, '刷机'), busy: { kind: 'boot', label: '刷机中', by: you, since: now, line: 'flash rootfs' }, lab: inLab('k1-flash') }),
+      board('bsp-host-a-s7', { slotRef: 'bsp/host-a/s7', busy: { kind: 'discover', label: '发现中', by: 'user:bob', since: now, line: 'P13：没有串口反应', cancellable: true }, lab: inLab('host-a-s7', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
+      board('bsp-k1-flash', { product: 'k1-x_deb1', soc: 'k1', slotRef: 'bsp/host-a/s3', lease: lease('bsp-k1-flash', you, '刷机'), busy: { kind: 'boot', label: '刷机中', by: you, since: now, line: 'flash rootfs', cancellable: true }, lab: inLab('k1-flash') }),
       board('desk-k1', { product: 'k1-x_deb1', soc: 'k1', slot: 1, backend: 'local', source: 'scan', lab: null }),
     ],
     labs: [{

@@ -20,7 +20,14 @@ export const frontends = {
   choose: async (name: string) => { await call('POST', `api/frontends?name=${encodeURIComponent(name)}`); location.reload() },
 }
 
-export class ApiError extends Error { constructor(readonly status: number, message: string) { super(message) } }
+/** What boardd answered when it refused: its HTTP status, its message, and its code (`cancelled`, `locked`, …) when it gave one. */
+export class ApiError extends Error { constructor(readonly status: number, message: string, readonly code: string | null = null) { super(message) } }
+/** Whether `error` is boardd saying the operation was cancelled: not a failure to show as one. */
+export const isCancelled = (error: unknown) => error instanceof ApiError && error.code === 'cancelled'
+/** boardd's error body: its message and its code. */
+function refusal(status: number, text: string): ApiError {
+  try { const body = JSON.parse(text); return new ApiError(status, body.error ?? text, typeof body.code === 'string' ? body.code : null) } catch { return new ApiError(status, text) }
+}
 
 const USER_KEY = 'boards.user'
 /** The name this browser acts under; empty means boardd's local user. */
@@ -42,11 +49,7 @@ export async function call<T>(method: 'GET' | 'POST', path: string, body?: unkno
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await response.text()
-  if (!response.ok) {
-    let message = text
-    try { message = JSON.parse(text).error ?? text } catch {}
-    throw new ApiError(response.status, message)
-  }
+  if (!response.ok) throw refusal(response.status, text)
   const value = (response.headers.get('content-type') ?? '').includes('json') ? JSON.parse(text) as T : text as T
   tellFetched()
   return value
@@ -59,7 +62,7 @@ export async function call<T>(method: 'GET' | 'POST', path: string, body?: unkno
 export async function stream(path: string, body: unknown, sink: { line(text: string): void }, signal?: AbortSignal): Promise<{ ok: boolean, message: string }> {
   const user = identity.get()
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(user ? { 'X-Boards-User': user } : {}) }, body: JSON.stringify(body), signal })
-  if (!response.ok || !response.body) { let message = await response.text(); try { message = JSON.parse(message).error ?? message } catch {} throw new ApiError(response.status, message) }
+  if (!response.ok || !response.body) throw refusal(response.status, await response.text())
   const reader = response.body.getReader(), decoder = new TextDecoder()
   let buffer = '', result: { ok: boolean, message: string } | null = null
   for (;;) {
@@ -121,6 +124,9 @@ export const api = {
   confirm: (board: string, request?: string | null) => call<{ message: string }>('POST', 'api/confirm', { board, request: request ?? undefined }),
   /** Answer an agent waiting for a board a person holds: let it have the board, or keep it. */
   answerYield: (board: string, action: 'yield' | 'deny') => call<{ message: string }>('POST', 'api/yields', { board, action }),
+  /** Stop what boardd is doing to a board or a lab (`lab:<id>`): whatever `busy.cancellable` says can be stopped. */
+  /** It says it stops once the current step ends: `message` says so in boardd's words. */
+  cancel: (target: string) => call<{ message: string, cancelled: true }>('POST', 'api/cancel', { target }),
   cancelBoard: (board: string) => call<{ message: string }>('POST', 'api/board/cancel', { board }),
   bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
   /** Where an SDK's recipe can stop early (empty when it has none). */
@@ -134,6 +140,8 @@ export const api = {
   // Fire and forget: the console stream already shows the output, so the request does not wait for any.
   send: (board: string, die: string | undefined, text: string) => call<SendResult>('POST', 'api/send', { board, die, text, newline: true, timeoutMs: 0 }),
   proposals: (ids: string[], decision: 'apply' | 'reject', names?: Record<string, string>) => call('POST', 'api/proposals', { ids, decision, names }),
+  /** A person saw that boardd restored its database from a copy: the state stops reporting it. */
+  acknowledgeRestore: () => call('POST', 'api/database/acknowledge', {}),
   // The password goes only when typed; leaving it empty keeps the stored one.
   configureLab: (input: { id: string, enabled: boolean, url: string, username: string, password?: string, jump: string, devices: string }) => call<LabSettings>('POST', 'api/labs', { ...input, password: input.password || undefined }),
   testLab: (id: string) => call<LabSettings>('POST', 'api/labs/test', { id }),

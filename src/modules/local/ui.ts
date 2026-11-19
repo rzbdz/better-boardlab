@@ -65,7 +65,11 @@ function follow(id: string, scope: number[], sink: { line(text: string): void, p
     const stop = events().listen({ names: ['scan', 'changed'], event: name => { if (name === 'scan' || name === 'changed') void check() }, back: () => void check() })
     const tick = window.setInterval(() => void check(), 5_000)
     const ending = () => { if (ended) return; ended = true; stop(); window.clearInterval(tick) }
-    signal.addEventListener('abort', () => { ending(); void scanApi.cancel(id).catch(() => {}) })
+    // Cancelled: boardd is asked to stop the scan, and the job settles with what it says, not left waiting forever.
+    signal.addEventListener('abort', () => {
+      ending()
+      scanApi.cancel(id).then(() => reject(new Error('已取消扫描：正在做的那个槽位做完就停')), reject)
+    }, { once: true })
     void check()
   })
 }
@@ -106,7 +110,7 @@ export const ui: ModuleUi = {
                 if (end.status !== 'done') throw new Error(end.message ?? `扫描${STATUS[end.status]}`)
                 return { message: `扫描完成：${found} 个槽位有板子，改动建议见下方`, data: end }
               }, {
-                intent: 'primary', using: ['slots'], blocked: held.length ? '有板子被拿着锁' : undefined,
+                intent: 'primary', using: ['slots'], blocked: held.length ? '有板子被拿着锁' : undefined, cancellable: true,
                 confirm: { title: '开始扫描', action: '开始扫描', body: '会锁住选中的槽位，停掉所有 serial-mux 守护进程，逐个切换到 fastboot、加载诊断镜像，结束后复位。扫描期间别人不能使用这些板子。' },
               }),
             ],

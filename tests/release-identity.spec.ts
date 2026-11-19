@@ -37,6 +37,8 @@ describe('distribution release identity', () => {
       expect(version.boardd).toMatchObject({ version: packageVersion, revision })
       expect(version.api).toMatchObject({ version: packageVersion, revision })
       expect(status.version).toMatchObject({ version: packageVersion, revision })
+      // A boardd that started on a healthy database has no restore to warn of.
+      expect(status.restored).toBeNull()
     } finally {
       await boardd.close()
     }

@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import type { Board } from 'boardlab-core/shared/types.ts'
 import type { PageState } from '../../../src/ui/api.ts'
-import { consoleErrorText, createConsoleSession, type ConsoleSession, type ConsoleStatus } from '../../../src/ui/console-session.ts'
+import { CONSOLE_WORDS, consoleErrorText, consoleStatusText, createConsoleSession, type ConsoleSession, type ConsoleStatus } from '../../../src/ui/console-session.ts'
 import { who } from '../kit.tsx'
 
 /**
@@ -15,10 +15,11 @@ import { who } from '../kit.tsx'
 interface LiveConsole {
   key: string
   status: ConsoleStatus
+  reason: string | null
   mine: boolean
   lastShown: number
   attached: boolean
-  attach(host: HTMLElement, onStatus: (status: ConsoleStatus) => void, onError: (text: string) => void): void
+  attach(host: HTMLElement, onStatus: (status: ConsoleStatus, reason: string | null) => void, onError: (text: string) => void): void
   detach(): void
   dispose(): void
 }
@@ -35,11 +36,11 @@ function liveConsole(board: string, die: string | undefined): LiveConsole {
   const term = new Terminal({ convertEol: false, cursorBlink: true, fontSize: 13, scrollback: 20_000, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', theme: { background: '#11151c' } })
   const fit = new FitAddon()
   term.loadAddon(fit)
-  let opened = false, onStatus: (status: ConsoleStatus) => void = () => {}, onError: (text: string) => void = () => {}
+  let opened = false, onStatus: (status: ConsoleStatus, reason: string | null) => void = () => {}, onError: (text: string) => void = () => {}
   const observer = new ResizeObserver(() => { try { fit.fit() } catch {} })
   let session!: ConsoleSession
   const live: LiveConsole = {
-    key, status: 'connecting', mine: false, lastShown: Date.now(), attached: false,
+    key, status: 'connecting', reason: null, mine: false, lastShown: Date.now(), attached: false,
     attach(host, status, error) {
       onStatus = status
       onError = error
@@ -49,7 +50,7 @@ function liveConsole(board: string, die: string | undefined): LiveConsole {
       live.attached = true
       live.lastShown = Date.now()
       requestAnimationFrame(() => { try { fit.fit() } catch {} ; term.focus() })
-      status(live.status)
+      status(live.status, live.reason)
     },
     detach() {
       observer.disconnect()
@@ -69,7 +70,7 @@ function liveConsole(board: string, die: string | undefined): LiveConsole {
   session = createConsoleSession({
     board, die,
     onOutput: data => term.write(data),
-    onStatus: status => { live.status = status; onStatus(status) },
+    onStatus: (status, reason) => { live.status = status; live.reason = reason; onStatus(status, reason) },
     onError: error => onError(consoleErrorText(error)),
   })
   term.onData(session.input)
@@ -92,6 +93,7 @@ export function Console({ board, state, onClose, onError }: { board: Board, stat
   const dies = board.chips.filter(chip => chip.online || board.lab)
   const [die, setDie] = useState(dies[0]?.die)
   const [status, setStatus] = useState<ConsoleStatus>('connecting')
+  const [reason, setReason] = useState<string | null>(null)
   const host = useRef<HTMLDivElement>(null)
   const mine = board.lease?.holder === state.you
   const current = useRef<LiveConsole | null>(null)
@@ -102,11 +104,11 @@ export function Console({ board, state, onClose, onError }: { board: Board, stat
     const live = liveConsole(board.name, die)
     current.current = live
     live.mine = mine
-    live.attach(host.current!, setStatus, text => onErrorRef.current(text))
+    live.attach(host.current!, (next, why) => { setStatus(next); setReason(why) }, text => onErrorRef.current(text))
     return () => live.detach()
   }, [board.name, die])
   useEffect(() => { if (current.current) current.current.mine = mine }, [mine])
-  const label = { connecting: '连接中…', live: '实时', closed: '串口已关闭', retry: '连接中断，重试中…' }[status]
+  const label = consoleStatusText(status, reason, CONSOLE_WORDS)
   const close = () => { current.current?.dispose(); onClose() }
   return (
     <aside className="console" aria-label="串口控制台">

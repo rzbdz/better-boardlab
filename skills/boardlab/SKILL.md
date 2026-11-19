@@ -140,7 +140,7 @@ boardlab unlock bsp-board-1
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
 - SDK 配方拿不到的本机自定义文件（例如自己打的 FIT）才让 CLI 用 scp 送过去：`boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`。URL 或板端已有路径用 `boardlab boot <board> https://…/Image.itb`、`boardlab boot <board> host:/绝对路径`，由板端自己取并计算 sha256，不上传。网页和 HTTP 上传已禁用。
 - 只在调 U-Boot、edk2 或它们加载的内核时：`boardlab boot <board> --sdk <sdk> --break <名字>` 停在 recipe 的 `breaker:` 那一步（常见 `uboot`、`edk2`；页面启动对话框的「停在哪」列出的就是可用的名字，没有列出来的不要猜）。edk2 的流程停在 UEFI Shell / ACPI 阶段，U-Boot 的停在自己的命令行，之后在串口里自己操作。
-- 启动或刷机卡住了用 `boardlab cancel <board>`：任务在这一步之后停，板子回到你手里。
+- 启动或刷机卡住了用 `boardlab cancel <board>`：正在跑的这一步会被停下（连同它起的进程），锁还在你手里。被取消的命令以**退出码 4** 结束（3 是被占用或连不上，0 才是成功）：不要把 4 当成功，也不要自动重跑。
 - 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先由 CLI scp 到 boardd、再到板卡主机。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
 
 ## 分层知识：先问平台，再问 SDK，不要问用户
@@ -160,7 +160,7 @@ boardlab guidance --dut <board>     # 一次问全：问板子所在主机它的
 - **碰上问题才问，不是每个任务开头都问**：任务照常跑通，就不用去查这些。卡住时，`boardlab guidance --dut <board>` 一次就能拿到适用这块板的知识，`boardlab show <board> --json` 的 `lab.soc` 和 `lab.sdks` 说明这块板认得的平台和 SDK。
 - **每一层只回答自己那一层**：通用提示是给一屋子板子的；SoC 笔记是这颗芯片的复位方式、串口电平、boot ROM 行为；SDK skill 是这份源码树怎么编译、怎么启动、有哪些变形。上层不重复下层，引用下层。
 - 站点里出现 `soc.yaml` 之外的 `.md`（`socs/<soc>/*.md`）就是这颗 SoC 的笔记，`skills/<id>.md` 就是那个 SDK 的 skill；`boardlab guidance --soc <soc>` / `--sdk <sdk>` 只给这些，不要自己去主机上找文件。
-- 需要更多一层（例如某块板子的接线、实验室的特殊步骤）时，看板子页的 `help` 和 `boardlab bsp feedback`：不要为此直接读主机上的站点文件。
+- 需要更多一层（例如某块板子的接线、实验室的特殊步骤）时，看板子页的 `help`。没有的话，在回答里说明缺什么，再用 `boardlab feedback` 报一条：不要为此直接读主机上的站点文件。
 - **知识不在这一层时**：`--list` 里没有你要的 SoC/SDK，说明站点还没提供；那就在回答里说明缺什么，用
   `boardlab feedback --kind design` 提交，不要反复问用户同一个问题。
 - **SKILL.md 的来源**：有的 SDK 带自己的说明，`boardlab sdk skill list` / `boardlab sdk skill <sdk>` 取来看；
@@ -180,7 +180,8 @@ boardlab registry sdk history sdk-a                 # 谁改的、为什么；ro
 boardlab registry hosts                             # 每台主机拿到的目录版本
 ```
 
-- 板卡主机上的 site 文件（/opt/bsp-dev-loop/site/…）改了不生效：`boardlab registry hosts` 会把它列成 NOT IN EFFECT。要生效就 put 进目录。怀疑主机拿的不是最新版本，`boardlab registry refresh`。
+- 板卡主机上的 site 文件（`/etc/boardctrl/site/…`，旧的安装是 `/etc/bsp/site/…`）改了不生效：`boardlab registry hosts` 会把它列成 NOT IN EFFECT。要生效就 put 进目录。怀疑主机拿的不是最新版本，就运行 `boardlab registry refresh`。
+- put 会说这次改动送到了哪些主机（reaches），没送到的是哪些（NOT REACHED：那台主机没在向目录报到）。refresh 列出每台主机拿到的版本和没送到的主机；一台在报到的主机都没有时，refresh 直接报错。看到没送到的主机，不要自己去改那台主机上的文件：告诉用户，再用 `boardlab feedback` 报一条。
 - 别人在你之后改过同一个文档，put 会报冲突：重新 get、把你的改动做在新版本上再 put，不要 `--force` 盖掉别人的。
 - 校验不过（引用了不存在的服务器、产物或步骤）什么都不会写，按报错改。
 - 新流程没在硬件上验证过，`-m` 里写明；第一次用它刷机前告诉用户。
@@ -197,9 +198,24 @@ boardlab registry hosts                             # 每台主机拿到的目�
 
 要看 boardd 提供的全部接口：网页上的「API」页按模块列出来，机器可读的是 `GET /api/openapi.json`（OpenAPI 3.1，和 `GET /api` 的列表一致）。CLI 没覆盖到的接口，可以先在这里找，再用 `boardlab` 自己的命令或 HTTP 调（地址见 `boardlab remote show`）。
 
-## boardlab 本身不够用时
+## boardlab 本身不够用时：一定提 feedback
 
-用的时候发现 boardlab 的架构、某个接口或设计做不到你要做的事（少了字段、要绕很多步、行为和文档不符），不要只在回答里说一句：
+**只要碰到框架不合理或者有漏洞，就提一条 feedback，哪怕你已经自己绕过去、任务也做完了。** 你绕过去了，下一个 agent 还会再踩一遍；只有提了，维护的人才会知道、才会修。
+
+下面这些情况都要提：
+
+- 命令报“成功”，结果没生效。例如改了目录，主机还在用旧的；说刷完了，板子没变。
+- 输出和事实对不上。例如 `--json` 说 ok，文字输出却说失败；状态显示的和串口看到的不一样。
+- 为了做完任务，你做了 skill 明确说不要做的事（直接改主机上的 yaml、直接调 `bsp`、ssh 到主机），或者绕了很多步。
+- 少了接口或字段，只能猜，或者只能从别的地方拼出来。
+- 文档、帮助和实际行为不一致。
+- 报错没说清原因，或者提示的办法不管用。
+
+什么时候提：**一发现就提，不要等任务做完**，免得忘了。用户的任务照常往下做，提 feedback 不用停下来问用户。最后汇报时，一句话说明提了哪一条（`#编号`）。
+
+写什么：哪里不对，你怎么绕过去的，希望框架提供什么。
+
+用法如下：
 `boardlab feedback "<哪里不够用、现在只能怎么绕开、希望提供什么>" [--kind bug|api|design|feature|other] [--subject "<标题>"] [--context '<JSON>']`
 boardd 把它存在数据库里，维护 boardlab 的人下次会看到并修复。先 `boardlab feedback list` 看看有没有人提过，不要重复提同一条；这条是给维护者的，用户要的结果仍然要在回答里给。
 不在 `boardlab` 手边（比如从脚本里）也可以直接走 HTTP：`GET /api/feedback?status=open` 看已经有了什么，`POST /api/feedback`（`kind`、`subject`、`body`、`context`）提一条，维护者用 `POST /api/feedback/resolve`（`id`、`status`、`note`）关掉。地址和 CLI 连的是同一个 boardd（`boardlab remote show`），网页上的「反馈」页也能看到待处理的。

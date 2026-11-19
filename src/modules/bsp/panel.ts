@@ -3,6 +3,10 @@
  * loopback, so boardd reaches it the way it drives it: a `bspd+http://` lab directly, a `bspd+ssh://` lab through one
  * ssh tunnel per lab, opened on first use with boardd's key and kept while it is used. boardd adds the lab's token to
  * every request, so the browser never holds it, and only people may open it.
+ *
+ * The host's GPIO service does not check leases, and the token boardd adds gets past everything on the host: a change
+ * made from the page while someone else holds one of the host's boards would work their board's lines under them. So
+ * changes (POST) are refused while a board of the lab is locked by anyone but the caller; reading (GET) stays open.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
@@ -75,11 +79,25 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
     return tunnel.port
   }
 
+  /** Someone other than `holder` using a board of the lab: its lock in boardd, or a lease taken on the host itself. */
+  const otherHolder = (id: string, holder: string): { board: string, holder: string } | null => {
+    for (const board of lab.boards.list()) {
+      if (board.lab?.id !== id) continue
+      const held = lab.locks.held(board.name)?.holder ?? board.lab.heldBy
+      if (held && held !== holder) return { board: board.name, holder: held }
+    }
+    return null
+  }
+
   const pass = async ({ params, query, headers, caller, signal, body }: Parameters<Endpoint['handle']>[0], method: 'GET' | 'POST') => {
     if (!isHuman(caller.holder)) throw new BoardError('forbidden', '主机的 GPIO 面板只给人用；程序请用 boardlab 的命令和接口')
     const id = String(params.lab ?? '')
     const settings = lab.backends.labSettings().find(item => item.id === id)
     if (!settings || settings.addedAs !== 'bsp') throw new BoardError('not-found', `没有 bsp 实验室 ${id}`)
+    if (method === 'POST') {
+      const other = otherHolder(id, caller.holder)
+      if (other) throw new BoardError('forbidden', `${other.board} 正被 ${other.holder} 使用：它放锁之前，GPIO 面板只能看，不能改这台主机的线`)
+    }
     const token = lab.backends.config(id).password
     const port = await local(id, settings.url)
     const rest = params['*'] || '/'

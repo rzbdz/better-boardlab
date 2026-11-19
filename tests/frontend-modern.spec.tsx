@@ -58,6 +58,20 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(document.querySelector('[data-board="bsp-k3-cm1"]')!.className).not.toContain('by-agent'), wait)
   })
 
+  it('warns that boardd restored its database from a copy until a person says they saw it', async () => {
+    state.restored = { at: '2026-11-19T03:00:00.000Z', backup: '/state/backups/boards-2026-11-18T21-00-00-000Z.sqlite', aside: '/state/boards.sqlite.corrupt-2026-11-19T03-00-00-000Z', reason: 'database disk image is malformed' }
+    const source = await stateStream()
+    source.opened()
+    source.emit('changed', { board: null })
+    await waitFor(() => expect(document.querySelector('.banner .restored')).toBeTruthy(), wait)
+    const banner = document.querySelector('.banner .restored') as HTMLElement
+    expect(banner.textContent).toContain('从备份恢复过')
+    expect(banner.textContent).toContain('boards-2026-11-18T21-00-00-000Z.sqlite')
+    fireEvent.click(await button('知道了', banner))
+    await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === 'api/database/acknowledge')).toBe(true), wait)
+    await waitFor(() => expect(document.querySelector('.banner .restored')).toBeNull(), wait)
+  })
+
   it('pins a banner for the board waiting for a person, with the place to go', async () => {
     await waitFor(() => expect(document.querySelector('.banner .b')).toBeTruthy(), wait)
     const banner = document.querySelector('.banner .b') as HTMLElement

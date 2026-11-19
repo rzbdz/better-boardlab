@@ -21,7 +21,7 @@ const boardName = (product: string, slot: number) => `${product}-slot${slot}`
 const PLACEHOLDER = /^board-slot\d+(-\d+)?$/
 
 export class Scanner {
-  private running: { id: string, cancelled: boolean } | null = null
+  private running: { id: string, cancelled: boolean, targets: string[] } | null = null
 
   constructor(private readonly lab: BoardLab, private readonly slots: Slots, private readonly mux: Mux, private readonly hardware: Hardware, private readonly timing?: ScanTiming) {
     lab.kernel.db.prepare(`UPDATE scans SET status='failed', finished_at=?, message='boardd 重启，扫描中断' WHERE status='running'`).run(lab.kernel.iso())
@@ -89,11 +89,21 @@ export class Scanner {
       db.prepare('INSERT INTO scans(id, holder, scope, status, started_at) VALUES(?,?,?,?,?)').run(id, holder, JSON.stringify(scope), 'running', this.lab.kernel.iso())
       return targets.map(({ target }) => ({ target, token: this.lab.locks.grant(target, holder, `扫描 ${id.slice(0, 8)}`).token }))
     })
-    this.running = { id, cancelled: false }
+    this.running = { id, cancelled: false, targets: targets.map(item => item.target) }
     this.lab.kernel.record(holder, null, 'scan', `槽位 ${scope.join(', ')}`, true)
     this.lab.kernel.changed(null)
     void this.execute(id, holder, targets, tokens)
     return this.get(id)
+  }
+
+  /**
+   * `POST /api/cancel` on a board (or slot) the running scan holds: the scan stops before its next step. Null when no
+   * scan holds it.
+   */
+  cancelTarget(holder: string, target: string): string | null {
+    if (!this.running?.targets.includes(target)) return null
+    this.cancel(holder, this.running.id)
+    return `让扫描 ${this.running.id.slice(0, 8)} 停下：它在下一步之前结束，板子的串口会恢复`
   }
 
   cancel(holder: string, id: string) {

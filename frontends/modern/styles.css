@@ -290,6 +290,15 @@ body.console-full .detail{height:100vh}
 .terminal{flex:1;min-height:0;padding:8px 4px 6px 18px}
 .terminal .xterm{height:100%}
 .terminal .xterm-viewport{background:transparent!important}
+/* the floating "to the newest output" button: the console toolbar's dark pill, draggable, shown only when scrolled up */
+.terminal .jump{height:36px;min-width:36px;padding:0 11px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:#1d1e22;color:#e5e5e7;font:600 12px var(--font);white-space:nowrap;box-shadow:0 0 0 1px #2a2c31,0 8px 24px rgba(0,0,0,.45);cursor:grab;user-select:none;animation:jump-in .18s cubic-bezier(.2,.8,.2,1)}
+.terminal .jump svg{width:15px;height:15px;flex:none}
+.terminal .jump:hover{background:#2a2c31;color:#fff}
+.terminal .jump:active{cursor:grabbing}
+.terminal .jump:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.terminal .jump.has-new{background:#f2f2f3;color:#111;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.terminal .jump.has-new:hover{background:#fff}
+@keyframes jump-in{from{opacity:0;scale:.85}}
 .ro{align-self:flex-end;margin:8px 14px 10px;max-width:calc(100% - 28px);display:flex;align-items:center;gap:8px;padding:6px 6px 6px 12px;border-radius:999px;background:#1d1e22;color:#c9cacd;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .ro .pill{height:26px;font-size:12px;padding:0 11px;background:#f2f2f3;color:#111;box-shadow:none}
 .term-empty{flex:1;display:grid;place-items:center;color:#6e7076;font-size:13px}

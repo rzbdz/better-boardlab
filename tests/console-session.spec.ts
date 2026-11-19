@@ -1,7 +1,9 @@
 /** The shared browser console lifecycle, with every stream, timer and input request under test control. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../src/ui/api.ts'
-import { consoleErrorText, createConsoleSession, type ConsoleStatus } from '../src/ui/console-session.ts'
+import { CONSOLE_WORDS, consoleErrorText, consoleStatusText, createConsoleSession, type ConsoleStatus } from '../src/ui/console-session.ts'
+
+const STATUS_TEXT: Record<ConsoleStatus, string> = CONSOLE_WORDS
 
 vi.mock('../src/ui/api.ts', () => ({ api: { input: vi.fn() } }))
 
@@ -21,7 +23,7 @@ class FakeEventSource {
     listeners.push(listener)
     this.listeners.set(name, listeners)
   }
-  emit(name: 'history' | 'output' | 'closed', data: unknown, encoded = false) {
+  emit(name: 'history' | 'output' | 'closed' | 'ping' | 'hello' | 'restart', data: unknown, encoded = false) {
     const event = { data: encoded || name === 'output' || typeof data !== 'string' ? JSON.stringify(data) : data } as MessageEvent
     for (const listener of this.listeners.get(name) ?? []) listener(event)
   }
@@ -32,13 +34,14 @@ const streams = FakeEventSource.instances
 const input = vi.mocked(api.input)
 let output: string[]
 let statuses: ConsoleStatus[]
+let reasons: Array<string | null>
 let errors: unknown[]
 
 function open() {
   return createConsoleSession({
     board: 'a board', die: 'die/0',
     onOutput: text => output.push(text),
-    onStatus: status => statuses.push(status),
+    onStatus: (status, reason) => { statuses.push(status); reasons.push(reason) },
     onError: error => errors.push(error),
   })
 }
@@ -49,7 +52,10 @@ beforeEach(() => {
   streams.length = 0
   output = []
   statuses = []
+  reasons = []
   errors = []
+  // The full backoff, unless a test asks for the jitter.
+  vi.spyOn(Math, 'random').mockReturnValue(1)
   input.mockReset()
   input.mockResolvedValue(undefined)
   vi.stubGlobal('EventSource', FakeEventSource)
@@ -58,6 +64,7 @@ afterEach(() => {
   vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('console session streams', () => {
@@ -138,6 +145,114 @@ describe('console session streams', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(streams).toHaveLength(2)
     expect(session.status).toBe('retry')
+    session.dispose()
+  })
+
+  it('waits a random part of each backoff, so the consoles of every page do not all come back at once', async () => {
+    vi.mocked(Math.random).mockReturnValue(0)
+    const session = open()
+    for (const delay of [500, 1000, 2000, 4000, 5000]) {
+      streams.at(-1)!.error()
+      const count = streams.length
+      await vi.advanceTimersByTimeAsync(delay - 1)
+      expect(streams).toHaveLength(count)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(streams).toHaveLength(count + 1)
+    }
+    session.dispose()
+  })
+
+  it('takes 40 s without a ping or any other event as a dropped stream, and reconnects', async () => {
+    const session = open()
+    streams[0]!.emit('history', ['boot'])
+    // boardd's pings keep a quiet console alive.
+    for (let i = 0; i < 4; i++) { await vi.advanceTimersByTimeAsync(15_000); streams[0]!.emit('ping', Date.now()) }
+    expect(streams).toHaveLength(1)
+    expect(session.status).toBe('live')
+    await vi.advanceTimersByTimeAsync(39_999)
+    expect(streams[0]!.close).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(streams[0]!.close).toHaveBeenCalledOnce()
+    expect(session.status).toBe('retry')
+    expect(session.reason).toBe('连接没有回应')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(streams).toHaveLength(2)
+    // A stream that never says anything at all is dropped the same way.
+    await vi.advanceTimersByTimeAsync(40_000)
+    expect(streams[1]!.close).toHaveBeenCalledOnce()
+    session.dispose()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps why the port closed in the status until the console is live again, without repeating it on screen', async () => {
+    const session = open()
+    streams[0]!.emit('history', ['boot'])
+    streams[0]!.emit('closed', 'adapter unplugged', true)
+    expect([session.status, session.reason]).toEqual(['closed', '串口断开：adapter unplugged'])
+    expect(consoleStatusText(session.status, session.reason, STATUS_TEXT)).toBe('串口断开：adapter unplugged，重连中')
+    await vi.advanceTimersByTimeAsync(1000)
+    // Reconnecting still says why.
+    expect([session.status, session.reason]).toEqual(['retry', '串口断开：adapter unplugged'])
+    output.length = 0
+    // The port does not come back: the same reason, now for a port that did not open, and not again on the screen.
+    streams[1]!.emit('closed', 'adapter unplugged', true)
+    expect(output).toEqual([])
+    expect(session.reason).toBe('串口打不开：adapter unplugged')
+    await vi.advanceTimersByTimeAsync(2000)
+    streams[2]!.error()
+    expect(session.reason).toBe('串口打不开：adapter unplugged')
+    await vi.advanceTimersByTimeAsync(4000)
+    streams[3]!.emit('history', ['boot'])
+    expect([session.status, session.reason]).toEqual(['live', null])
+    expect(consoleStatusText('live', null, STATUS_TEXT)).toBe('实时')
+    expect(consoleStatusText('retry', null, STATUS_TEXT)).toBe('重连中')
+    session.dispose()
+  })
+
+  it('calls a console that never came up 串口打不开, and marks the screen again only when the reason changes', async () => {
+    const session = open()
+    // boardd holds off a failing console and answers every retry with the backend's own words, the same each time.
+    for (let i = 0; i < 4; i++) {
+      streams.at(-1)!.emit('closed', 'no such device', true)
+      expect([session.status, session.reason]).toEqual(['closed', '串口打不开：no such device'])
+      await vi.advanceTimersByTimeAsync(10_000)
+    }
+    expect(output).toEqual(['\r\n\x1b[2m[串口打不开：no such device，重连中…]\x1b[0m\r\n'])
+    expect(output.join('')).not.toContain('串口断开')
+    streams.at(-1)!.emit('closed', 'permission denied', true)
+    expect(output.at(-1)).toBe('\r\n\x1b[2m[串口打不开：permission denied，重连中…]\x1b[0m\r\n')
+    expect(output).toHaveLength(2)
+    expect(consoleStatusText(session.status, session.reason, STATUS_TEXT)).toBe('串口打不开：permission denied，重连中')
+    // Once live, the next failure is news again, even for a reason said before.
+    await vi.advanceTimersByTimeAsync(10_000)
+    streams.at(-1)!.emit('history', ['boot'])
+    streams.at(-1)!.emit('closed', 'permission denied', true)
+    expect(output.at(-1)).toBe('\r\n\x1b[2m[串口断开：permission denied，重连中…]\x1b[0m\r\n')
+    session.dispose()
+  })
+
+  it('says boardd restarted, when it says it is stopping or the next stream comes from another boardd', async () => {
+    const session = open()
+    streams[0]!.emit('hello', { boot: 'one' })
+    streams[0]!.emit('history', ['boot'])
+    output.length = 0
+    streams[0]!.emit('restart', { reason: '服务重启' })
+    expect([session.status, session.reason]).toEqual(['retry', '服务重启'])
+    expect(output.join('')).toContain('[服务重启，重连中…]')
+    expect(consoleStatusText(session.status, session.reason, STATUS_TEXT)).toBe('服务重启，重连中')
+    await vi.advanceTimersByTimeAsync(1000)
+    streams[1]!.emit('hello', { boot: 'one' })
+    streams[1]!.emit('history', ['boot'])
+    // A worker that crashed says nothing: the stream just errors, and the next one is from another boardd.
+    streams[1]!.error()
+    expect(session.reason).toBeNull()
+    await vi.advanceTimersByTimeAsync(1000)
+    output.length = 0
+    streams[2]!.emit('hello', { boot: 'two' })
+    expect([session.status, session.reason]).toEqual(['retry', '服务重启'])
+    streams[2]!.emit('history', ['boot', 'after'])
+    expect(output.join('')).toContain('[服务重启，串口重新连接，补上断开期间的 1 行]')
+    expect(session.status).toBe('live')
     session.dispose()
   })
 

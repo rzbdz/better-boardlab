@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
-import { createServer, type Server } from 'node:net'
+import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { encodeMessage, FrameDecoder, SerialMux } from '../src/modules/serial-mux/client.ts'
 import { dir, useTempDir } from './fakes.ts'
@@ -10,6 +10,22 @@ useTempDir()
 describe('serial-mux protocol', () => {
   let server: Server
   afterEach(() => new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve()))
+
+  it('takes a history larger than a megabyte, in many pieces, and frames split anywhere', () => {
+    // A console that printed a lot (a firmware log) has a history frame of a megabyte or more; serial-mux allows 16.
+    const lines = Array.from({ length: 16_000 }, (_, i) => `[2026-11-19 21:08:19] InstallProtocolInterface: ${i} ${'x'.repeat(60)}`)
+    const frames = Buffer.concat([encodeMessage({ type: 'hello_ack', alias: 's3' }), encodeMessage({ type: 'history', lines }), encodeMessage({ type: 'output', data: 'b2s=' })])
+    expect(frames.length).toBeGreaterThan(1024 * 1024)
+    const decoder = new FrameDecoder(), got: Array<Record<string, unknown>> = []
+    for (let at = 0; at < frames.length; at += 65_536) got.push(...decoder.push(frames.subarray(at, at + 65_536)))
+    expect(got.map(m => m.type)).toEqual(['hello_ack', 'history', 'output'])
+    expect((got[1]!.lines as string[]).length).toBe(16_000)
+    // Split at every awkward place: inside a header, right after one, one byte at a time.
+    const one = new FrameDecoder(), small: string[] = []
+    const two = Buffer.concat([encodeMessage({ type: 'a' }), encodeMessage({ type: 'b' })])
+    for (let at = 0; at < two.length; at++) small.push(...one.push(two.subarray(at, at + 1)).map(m => String(m.type)))
+    expect(small).toEqual(['a', 'b'])
+  })
 
   it('handshakes, replays history, streams output and sends base64 input', async () => {
     const home = join(dir, 'mux')
@@ -40,6 +56,33 @@ describe('serial-mux protocol', () => {
     expect(await output).toBe('echo:ls\n')
     expect(received[0]).toEqual({ type: 'hello', interactive: false })
     session.close()
+  })
+
+  it('ends a session with reasons a person reads, in Chinese, when the port is lost or the daemon goes', async () => {
+    const home = join(dir, 'mux')
+    mkdirSync(join(home, 'sock'), { recursive: true })
+    const sockets: Socket[] = []
+    server = createServer(socket => {
+      sockets.push(socket)
+      const decoder = new FrameDecoder()
+      socket.on('data', chunk => {
+        for (const message of decoder.push(chunk)) {
+          if (message.type === 'hello') socket.write(Buffer.concat([encodeMessage({ type: 'hello_ack', alias: 'com260', device: '/dev/ttyUSB1', baud: 115200, transport: 'serial' }), encodeMessage({ type: 'history', lines: [] })]))
+        }
+      })
+    })
+    await new Promise<void>(resolve => server.listen(join(home, 'sock', 'com260.sock'), resolve))
+    const reasons: string[] = []
+    const lost = await new SerialMux(home).open('com260')
+    const ended = new Promise<void>(resolve => lost.onClose(reason => { reasons.push(reason); resolve() }))
+    sockets[0]!.write(encodeMessage({ type: 'serial_lost', reason: 'device unplugged' }))
+    await ended
+    lost.close()
+    const gone = await new SerialMux(home).open('com260')
+    const closed = new Promise<void>(resolve => gone.onClose(reason => { reasons.push(reason); resolve() }))
+    sockets[1]!.destroy()
+    await closed
+    expect(reasons).toEqual(['serial-mux com260 丢了串口：device unplugged', 'serial-mux com260 关闭了连接'])
   })
 })
 
