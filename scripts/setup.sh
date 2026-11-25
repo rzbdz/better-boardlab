@@ -7,6 +7,10 @@
 #
 #   sh setup.sh --uninstall [--purge]
 #
+# --core-dumps (kept for updates; --no-core-dumps turns it off): boardd runs in <state>/cores with core files allowed
+# (up to 1 GB each), so a crashed worker leaves one there when the kernel's core_pattern is a plain `core`; the
+# supervisor keeps the newest two, named after the worker.
+#
 # As root it sets boardlab up as a service: the program in /opt/boardlab (releases/<version>, `current` links the one in
 # use), state in /var/lib/boardlab, the `boardd` systemd unit, and `boardlab` on PATH. As another user it installs only
 # the CLI under ~/.local (so does --cli, as root too). Updating swaps `current` and restarts boardd once no board is
@@ -14,11 +18,12 @@
 # tarball, or its URL), PATH, /opt/node, or is fetched from nodejs.org, else from a mirror (BOARDLAB_NODE_MIRROR,
 # npmmirror.com by default). A private source's token (--token or BOARDLAB_TOKEN) is kept, readable by this user only.
 set -eu
-SRC="" UNPACKED="" UNINSTALL="" PURGE="" PORT=38127 HOSTS="" ORIGIN="" FORCE="" NODE_GIVEN="" TOKEN=${BOARDLAB_TOKEN:-} CLI_ONLY=""
+SRC="" UNPACKED="" UNINSTALL="" PURGE="" PORT=38127 HOSTS="" ORIGIN="" FORCE="" NODE_GIVEN="" TOKEN=${BOARDLAB_TOKEN:-} CLI_ONLY="" CORES_GIVEN=""
 while [ $# -gt 0 ]; do
   case $1 in
     --source) SRC=$2; shift 2 ;; --unpacked) UNPACKED=$2; shift 2 ;; --from) shift 2 ;; --port) PORT=$2; shift 2 ;; --host) HOSTS="$HOSTS --host $2"; shift 2 ;; --origin) ORIGIN="$ORIGIN --origin $2"; shift 2 ;;
     --node) NODE_GIVEN=$2; shift 2 ;; --token) TOKEN=$2; shift 2 ;; --cli) CLI_ONLY=1; shift ;; --uninstall) UNINSTALL=1; shift ;; --purge) PURGE=1; shift ;; --force) FORCE=1; shift ;;
+    --core-dumps) CORES_GIVEN=1; shift ;; --no-core-dumps) CORES_GIVEN=0; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -28,7 +33,7 @@ die() { printf '!! %s\n' "$*" >&2; exit 1; }
 if [ "$(id -u)" = 0 ] && [ -z "$CLI_ONLY" ]; then PREFIX=/opt/boardlab STATE=/var/lib/boardlab BIN=/usr/local/bin SERVICE=1; else PREFIX=$HOME/.local/share/boardlab STATE=$HOME/.local/state/boardlab BIN=$HOME/.local/bin SERVICE=""; fi
 # How boardd was set up the first time (port, extra addresses, the proxy's origin): an update keeps it unless told
 # otherwise.
-OFFERED=""
+OFFERED="" CORES=""
 if [ -f "$STATE/install.env" ]; then
   GIVEN_PORT=$PORT GIVEN_HOSTS=$HOSTS GIVEN_ORIGIN=$ORIGIN
   . "$STATE/install.env"
@@ -36,6 +41,8 @@ if [ -f "$STATE/install.env" ]; then
   [ -n "$GIVEN_HOSTS" ] && HOSTS=$GIVEN_HOSTS
   [ -n "$GIVEN_ORIGIN" ] && ORIGIN=$GIVEN_ORIGIN
 fi
+[ "$CORES_GIVEN" = 1 ] && CORES=1
+[ "$CORES_GIVEN" = 0 ] && CORES=""
 
 # The token a private release source takes, kept from the first install.
 [ -z "$TOKEN" ] && [ -r "$PREFIX/release-token" ] && TOKEN=$(cat "$PREFIX/release-token")
@@ -184,7 +191,17 @@ if [ -n "$SERVICE" ]; then
   fi
   ln -sfn "releases/$VERSION-$REV" "$PREFIX/current.new" && mv -Tf "$PREFIX/current.new" "$PREFIX/current"
   offer_modules
-  printf 'PORT=%s\nHOSTS="%s"\nORIGIN="%s"\nOFFERED="%s"\n' "$PORT" "$HOSTS" "$ORIGIN" "$OFFERED" > "$STATE/install.env"
+  printf 'PORT=%s\nHOSTS="%s"\nORIGIN="%s"\nOFFERED="%s"\nCORES="%s"\n' "$PORT" "$HOSTS" "$ORIGIN" "$OFFERED" "$CORES" > "$STATE/install.env"
+  # Core files of crashed workers, when asked for: boardd runs in their directory (see --core-dumps).
+  CORE_UNIT=""
+  if [ -n "$CORES" ]; then
+    mkdir -p "$STATE/cores"; chmod 700 "$STATE/cores"
+    CORE_UNIT="WorkingDirectory=$STATE/cores
+LimitCORE=1G"
+    case $(cat /proc/sys/kernel/core_pattern 2>/dev/null) in core|core.*) ;; *) say "core dumps: kernel.core_pattern is not a plain 'core' here, so crashed workers' cores go where it says, not to $STATE/cores" ;; esac
+  fi
+  # What the running supervisor was started with, but for the release named in its description.
+  UNIT_BEFORE=$(grep -v '^Description=' /etc/systemd/system/boardd.service 2>/dev/null || true)
   cat > /etc/systemd/system/boardd.service <<EOF
 [Unit]
 Description=boardd: the board lab (boardlab $VERSION)
@@ -195,6 +212,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=$NODE $FLAGS $PREFIX/current/dist/cli.js serve --supervisor --port $PORT --state-dir $STATE --config $STATE/boardd.json$HOSTS$ORIGIN
 Environment=NODE_NO_WARNINGS=1
+$CORE_UNIT
 Restart=always
 RestartSec=2
 # A restart is the last resort (an update hands over instead): the browser terminals (tmux sessions) and what is
@@ -220,6 +238,10 @@ EOF
     fi
   fi
   [ -z "$SUPERVISED" ] && systemctl restart boardd.service
+  # A handover keeps the supervisor, so a changed unit (node, its flags, core dumps, the port) waits for its next start.
+  if [ -n "$SUPERVISED" ] && [ "$UNIT_BEFORE" != "$(grep -v '^Description=' /etc/systemd/system/boardd.service)" ]; then
+    say "the boardd unit changed; it takes effect at the next 'systemctl restart boardd' (do it while no board is locked)"
+  fi
   for i in $(seq 1 30); do curl -fsS -m 2 -o /dev/null -H "Host: 127.0.0.1:$PORT" "http://127.0.0.1:$PORT/api/state" 2>/dev/null && break; sleep 1; done
   # The release just installed may have been built earlier than the ones already here: its install time decides.
   touch "$PREFIX/releases/$VERSION-$REV"

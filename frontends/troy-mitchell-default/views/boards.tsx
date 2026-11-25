@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import type { Board, Chip } from 'boardlab-core/shared/types.ts'
 import { api, type PageState } from '../../../src/ui/api.ts'
+import { lastRun } from '../../../src/ui/format.ts'
 import { MODE, Pill, Tabs, shortLink, time, who, type Prompt, type Run, type Tab } from '../kit.tsx'
 import { DiscoverBoardDialog, LabPorts } from './labs.tsx'
 
@@ -32,6 +33,7 @@ function ChipRow({ chip, many, lab }: { chip: Chip, many: boolean, lab: boolean 
 function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPrompt: (prompt: Prompt) => void, onRun: Run, onConsole: (board: Board) => void }) {
   const { board, state } = props
   const mine = board.lease?.holder === state.you
+  const ended = lastRun(board)
   const place = board.waiters.findIndex(waiter => waiter.holder === state.you)
   const slot = state.slots.find(item => item.slot === board.slot)
   // A lab's listing can be a minute old, so its boards' consoles are offered and the lab is asked on opening.
@@ -70,6 +72,7 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
         {board.lab.canConfirm && <button className="primary" onClick={() => props.onRun('已告诉实验室', () => api.confirm(board.name, board.lab!.attentionRequest ?? null))}>我已完成</button>}
       </div>}
       {board.lab?.progress && <p className="progress-line" aria-live="polite">启动中：{board.lab.progress}</p>}
+      {ended && <p className={`${ended.tone === 'bad' ? 'warn' : 'muted'} small last-run`}><b>{ended.title}</b>{ended.text ? `：${ended.text}` : ''}</p>}
       {board.busy && <p className="progress-line" aria-live="polite">{board.busy.label}{board.busy.line ? `：${board.busy.line}` : ''}
         {board.busy.cancellable && (mine || !board.lease) && <button className="link danger" onClick={() => props.onRun(`${board.name} 正在停下`, async () => (await api.cancel(board.name)).message)}>停止</button>}</p>}
       {gone && <p className="warn small">这块板的槽位串口不见了（串口线拔掉或换了口）。最近重新布线过的话，到「扫描」里重建主机 {board.slotRef?.split('/').length === 3 ? board.slotRef.split('/')[1] : board.slotRef?.split('/')[0]}。</p>}

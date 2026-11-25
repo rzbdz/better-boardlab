@@ -52,6 +52,11 @@ const feedback: Command = {
       return
     }
     const body = args.join(' ').trim()
+    // A lone `help` is someone asking how the command works, not a request to file.
+    if (/^(help|-h|\?)$/i.test(body)) {
+      console.log(feedback.usage.map(entry => entry.replace('\t', '\n    ')).join('\n'))
+      return
+    }
     if (!body) throw new Error('要写意见或请求的内容，例如：boardlab feedback "想按槽位查板子的串口名"')
     let context: unknown
     if (flags.has('context')) {

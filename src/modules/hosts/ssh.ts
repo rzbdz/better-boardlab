@@ -18,7 +18,7 @@ export interface Executor {
   /** `user@host` as it ended up reachable (or `local`). */
   target: string
   local: boolean
-  run(command: string, options?: { stdin?: string | Buffer, timeoutMs?: number, onLine?: (line: string) => void }): Promise<Result>
+  run(command: string, options?: { stdin?: string | Buffer, timeoutMs?: number, onLine?: (line: string) => void, signal?: AbortSignal }): Promise<Result>
   /** Copy a local file there. */
   put(local: string, remote: string, timeoutMs?: number): Promise<void>
 }
@@ -64,18 +64,22 @@ export class Hosts {
     return [...common, '-o', 'BatchMode=no', '-o', 'PreferredAuthentications=password,keyboard-interactive', '-o', 'PubkeyAuthentication=no', '-o', 'NumberOfPasswordPrompts=1', ...(askpass ? [] : [])]
   }
 
-  private exec(command: string, args: string[], options: { env?: NodeJS.ProcessEnv, stdin?: string | Buffer, timeoutMs?: number, onLine?: (line: string) => void }): Promise<Result> {
+  private exec(command: string, args: string[], options: { env?: NodeJS.ProcessEnv, stdin?: string | Buffer, timeoutMs?: number, onLine?: (line: string) => void, signal?: AbortSignal }): Promise<Result> {
     return new Promise(resolve => {
       const child = spawn(command, args, { env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: !!options.env?.SSH_ASKPASS })
       let stdout = '', stderr = '', partial = ''
       const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? 120_000)
+      // A command whose asker is gone (a search the page replaced) is stopped here, not left running on the machine.
+      const stop = () => child.kill('SIGTERM')
+      if (options.signal?.aborted) stop()
+      else options.signal?.addEventListener('abort', stop, { once: true })
       child.stdout.on('data', (data: Buffer) => {
         stdout += data
         if (options.onLine) { const text = partial + data.toString(); const lines = text.split('\n'); partial = lines.pop() ?? ''; for (const line of lines) options.onLine(line.replace(/\r$/, '')) }
       })
       child.stderr.on('data', (data: Buffer) => { stderr += data })
       child.on('error', error => { clearTimeout(timer); resolve({ code: null, stdout, stderr: `${stderr}${error.message}` }) })
-      child.on('close', code => { clearTimeout(timer); if (partial && options.onLine) options.onLine(partial); resolve({ code, stdout, stderr }) })
+      child.on('close', code => { clearTimeout(timer); options.signal?.removeEventListener('abort', stop); if (partial && options.onLine) options.onLine(partial); resolve({ code, stdout, stderr }) })
       child.stdin.on('error', () => {})
       child.stdin.end(options.stdin ?? '')
     })
@@ -96,7 +100,7 @@ export class Hosts {
   private executor(target: string, opts: string[], env?: NodeJS.ProcessEnv): Executor {
     return {
       target, local: false,
-      run: (command, options = {}) => this.exec(this.ssh, [...opts, target, command], { env, stdin: options.stdin, timeoutMs: options.timeoutMs, onLine: options.onLine }),
+      run: (command, options = {}) => this.exec(this.ssh, [...opts, target, command], { env, stdin: options.stdin, timeoutMs: options.timeoutMs, onLine: options.onLine, signal: options.signal }),
       put: async (local, remote, timeoutMs = 600_000) => {
         const scpOpts = opts.map(item => item === '-p' ? '-P' : item)
         const result = await this.exec(this.scp, ['-q', ...scpOpts, local, `${target}:${remote}`], { env, timeoutMs })

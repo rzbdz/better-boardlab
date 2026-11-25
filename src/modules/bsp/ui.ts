@@ -31,13 +31,15 @@ function install(lab: LabSettings | null): Element[] {
           : field.id === 'board' ? { ...field, options: modelOptions() } : field),
         // A lab already running without a token keeps running without one when it is installed again.
         { kind: 'switch' as const, id: 'noToken', label: '不要 token（主机接受所有请求，只在可信网络里用）', initial: lab ? !lab.hasPassword : false },
+        // Off by default: the installer waits for the host's running jobs and refuses when they outlast its wait.
+        ...(lab ? [{ kind: 'switch' as const, id: 'force', label: '不等主机上正在跑的任务（刷机、启动会被中断）', initial: false }] : []),
       ],
       submitLabel: lab ? '重新安装' : '添加并安装',
       submit: job('install', lab ? '重新安装' : '添加并安装', async (input, sink, signal) => {
         const id = lab?.id ?? String(input.id).trim()
         if (!lab) { sink.line(`添加实验室 ${id}…`); await call('POST', 'api/labs/add', { id, kind: 'bsp' }) }
         try {
-          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board, noToken: input.noToken === true }, sink, signal)
+          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board, noToken: input.noToken === true, force: input.force === true }, sink, signal)
           return done.message
         } catch (error) {
           // A lab added for this attempt and then not installed is not a lab: without this, the next try would be
@@ -470,10 +472,37 @@ export const ui: ModuleUi = {
             ],
           })),
         }] : [notice('还没有板卡主机。添加一台：给出地址和登录方式，boardd 会装好它。', 'neutral')]),
+        // Each host's download cache: read from the host when opened, so a slow host never holds the page up.
+        ...labs.filter(lab => lab.enabled).map(lab => ({ kind: 'details' as const, summary: `${lab.id} 的主机缓存（刷机包、SDK 产物）`, load: () => hostCaches(lab.id) })),
         { kind: 'actions', actions: [open('add', '添加板卡主机', '添加板卡主机', () => install(null), { intent: 'primary' })] },
       ],
     }, siteView(labs)]
   },
+}
+
+// ---- hosts' caches ----
+
+interface HostCache { path: string, used: number, entries: number, held: number, max_bytes: number, ttl_s: number, min_free_bytes: number, free: number | null }
+
+function bytes(value: number): string {
+  if (value >= 2 ** 30) return `${(value / 2 ** 30).toFixed(1)} GiB`
+  if (value >= 2 ** 20) return `${(value / 2 ** 20).toFixed(1)} MiB`
+  return value >= 1024 ? `${Math.round(value / 1024)} KiB` : `${value} B`
+}
+
+/** What each host of a lab keeps of what it downloaded, against its bounds: one bar per host. */
+async function hostCaches(lab: string): Promise<Element[]> {
+  const hosts = await call<Array<{ host: string, cache: HostCache | null, error: string | null }>>('GET', `api/bsp/hosts/${encodeURIComponent(lab)}/cache`)
+  if (!hosts.length) return [text('这个实验室还没有主机。')]
+  return hosts.map((item): Element => {
+    if (item.error) return notice(`${item.host}：读不到（${item.error}）`, 'warn')
+    if (!item.cache) return text([{ strong: item.host }, '：主机上的 bsp 太旧，不报缓存；重新安装后就有。'])
+    const cache = item.cache
+    const label = [`${item.host}：${bytes(cache.used)}${cache.max_bytes ? ` / ${bytes(cache.max_bytes)}` : ''}`, `${cache.entries} 项${cache.held ? `（${cache.held} 项正在用）` : ''}`,
+      cache.ttl_s ? `不用的留 ${Math.round(cache.ttl_s / 86_400)} 天` : null, cache.free !== null ? `磁盘还剩 ${bytes(cache.free)}` : null].filter(Boolean).join(' · ')
+    const fraction = cache.max_bytes ? Math.min(1, cache.used / cache.max_bytes) : null
+    return { kind: 'progress', label, fraction, tone: fraction !== null && fraction >= 0.9 ? 'warn' : 'neutral' }
+  })
 }
 
 // ---- debug: what can debug a board, and its session ----

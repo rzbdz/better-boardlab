@@ -16,6 +16,7 @@ import { BoardPage } from './views/board.tsx'
 import { HomePage } from './views/home.tsx'
 import { canDiscover, DiscoverPage, HistoryPage, NotifyPrefs, SettingsPage, type Theme } from './views/pages.tsx'
 import { ApiPage } from './views/api.tsx'
+import { ImagesPage } from './views/images.tsx'
 import type { Board } from 'boardlab-core/shared/types.ts'
 
 const THEME_KEY = 'boardlab.modern.theme'
@@ -169,6 +170,8 @@ function Shell() {
   // Modules' own pages (the terminal, say) get a tab each, before settings.
   const pages = state ? viewsFor(state, 'page') : []
   const nav: Array<[string, string, number?]> = [['boards', '板子'], ...(state && !canDiscover(state) ? [] : [['discover', '发现', state?.proposals.filter(p => p.status === 'pending').length] as [string, string, number]]), ['history', '历史'],
+    // The image markets get a tab once boardd has one set up.
+    ...((state?.markets ?? []).length ? [['images', '镜像'] as [string, string]] : []),
     ...pages.map(view => [`p/${view.id}`, view.title ?? view.id] as [string, string]), ['api', 'API'], ['settings', '设置']]
   const me = state ? holder(state.you) : null
   return <>
@@ -197,6 +200,7 @@ function Shell() {
         : page === 'discover' ? <DiscoverPage state={state} open={name => go(`#/board/${encodeURIComponent(name)}`)} />
         : page === 'history' ? <HistoryPage state={state} refreshKey={refreshKey} initialBoard={where_.query.get('board') ?? ''} />
         : page === 'p' && pages.some(view => view.id === where_.arg) ? <ViewPage view={pages.find(view => view.id === where_.arg)!} />
+        : page === 'images' ? <ImagesPage state={state} initial={{ market: where_.query.get('market') ?? '', soc: where_.query.get('soc') ?? '' }} />
         : page === 'api' ? <ApiPage />
         : page === 'settings' ? <SettingsPage state={state} theme={theme} onTheme={setTheme} onIdentity={() => void refresh()} focus={where_.arg} />
         : <HomePage state={state} watched={watched} open={name => go(`#/board/${encodeURIComponent(name)}`)} />}

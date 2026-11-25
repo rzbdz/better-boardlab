@@ -9,7 +9,7 @@ import { createElement } from 'react'
 import { job, type View } from '../src/ui/contract.ts'
 import { calls, state } from './frontend-setup.ts'
 
-vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
+vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), searchConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
 afterEach(() => cleanup())

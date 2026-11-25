@@ -72,6 +72,33 @@ describe('cancelling bsp jobs', () => {
     await expect(booting).rejects.toThrow('已取消：k3-a 的启动')
   })
 
+  it('cancels under the lease the board holds when the cancel comes, not the one it started with', async () => {
+    const calls: string[][] = []
+    let finish!: () => void
+    const run: BspRunner = (args, { onStderr, signal }) => {
+      const command = routed(after(args))
+      calls.push(command)
+      if (command[0] === 'job' || (command[0] === 'dut' && command[1] === 'cancel')) return Promise.resolve({ code: 0, stdout: JSON.stringify({ ok: true, result: {} }), stderr: '' })
+      onStderr?.('k3-a @ h1: flash pkg.zip with tool-b, job flash-1794977803-13')
+      return new Promise(resolve => {
+        finish = () => resolve({ code: 4, stdout: cancelledEnvelope, stderr: '' })
+        signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'killed' }), { once: true })
+      })
+    }
+    // The lease ran out during a long flash and boardd took it again (`followLease`): the target reads the new token.
+    let token = 'T1'
+    const target = { ...on('k3-a'), get lease() { return token } }
+    const stop = new AbortController()
+    const flashing = bspLab({ run }).builds!.flash!(config, target, { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, stop.signal)
+    await until(() => calls.length === 1)
+    token = 'T2'
+    stop.abort(new CancelledError('已取消：k3-a 的刷机'))
+    await until(() => calls.length === 3)
+    expect(calls.slice(1)).toEqual(expect.arrayContaining([['dut', 'cancel', 'k3-a', '--lease', 'T2'], ['job', 'cancel', 'flash-1794977803-13', '--lease', 'T2']]))
+    finish()
+    await expect(flashing).rejects.toThrow('已取消')
+  })
+
   it('hands the host\'s refusal to the cancel, and follows the job to its own end instead of calling it cancelled', async () => {
     const calls: string[][] = []
     let finish!: () => void

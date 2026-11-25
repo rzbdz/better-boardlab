@@ -144,6 +144,8 @@ export interface ServerInput { id: string, host: string, user: string, descripti
 export class Site {
   private queue: Promise<unknown> = Promise.resolve()
   syncing = false
+  /** Told after every change to the site's files that went through (an edit, a pull, a new source): what reads them again. */
+  changed: (() => void) | null = null
 
   /**
    * `tree`: the boardctrl tree, whose shipped platforms the hosts layer under the site. `sshCommands`: the ways in for git over ssh.
@@ -158,7 +160,7 @@ export class Site {
 
   /** One change at a time. */
   serial<T>(run: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(run, run)
+    const next = this.queue.then(run, run).then(value => { try { this.changed?.() } catch {} return value })
     this.queue = next.catch(() => {})
     return next
   }

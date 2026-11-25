@@ -6,8 +6,11 @@
  * first and then every few seconds, and at once when it is opened again or `reconnect` is called (a frontend's button).
  */
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
+import { BootRail } from './bootrail.tsx'
+import { BootMarksAddon, bootMarks, forgetBootMarks, type BootLine, type BootMark } from './boots.ts'
 import { CONSOLE_WORDS, consoleErrorText, createConsoleSession, type ConsoleSession } from './console-session.ts'
 
 import type { ConsoleStatus } from './console-session.ts'
@@ -32,7 +35,32 @@ interface Live {
   /** Whether the view is scrolled up from the newest output, and how many lines arrived since. */
   away: { up: boolean, unseen: number }
   onAway: (away: { up: boolean, unseen: number }) => void
+  /**
+   * Find `term` in what the console holds (its screen and scrollback), every match highlighted and the next (or
+   * previous) one selected and scrolled to; false when there is none. `onResults` says which match of how many.
+   */
+  search(term: string, options: { regex: boolean, caseSensitive: boolean }, direction: 'next' | 'previous'): boolean
+  clearSearch(): void
+  onResults: (results: { index: number, count: number }) => void
+  /** Open the search bar (a frontend's button, or Ctrl+F in the console). */
+  openSearch(): void
+  onOpenSearch: () => void
+  /** The boot lines in what the console holds (see BootMarksAddon), and the marks they were found with. */
+  boots: BootMarksAddon
+  marks: BootMark[]
+  /** The buffer's size and the line in the middle of the view, for the boot rail. */
+  view(): { first: number, count: number, current: number }
+  /** Scroll so line `line` of the buffer is near the top, and stop following the output. */
+  scrollTo(line: number): void
+  /** Told when the view moves (scrolled, or output arrived). */
+  onView: Set<() => void>
   dispose(): void
+}
+
+/** The search's highlights: every match amber, the current one brighter, and both marked on the scrollbar. */
+const FOUND: NonNullable<ISearchOptions['decorations']> = {
+  matchBackground: '#5c4a12', matchBorder: '#8a6d1a', matchOverviewRuler: '#d4a72c',
+  activeMatchBackground: '#facc15', activeMatchBorder: '#fde68a', activeMatchColorOverviewRuler: '#facc15',
 }
 const lives = new Map<string, Live>()
 const MAX = 4
@@ -52,6 +80,17 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   void dark
   const fit = new FitAddon()
   term.loadAddon(fit)
+  // At most this many matches are highlighted; past it the count says so (and the log tab searches it all).
+  const finder = new SearchAddon({ highlightLimit: 2000 })
+  term.loadAddon(finder)
+  // Where each boot starts in what the console holds, found as output is written.
+  const boots = new BootMarksAddon()
+  term.loadAddon(boots)
+  // Ctrl+F (Cmd+F on a Mac) in the console opens its search instead of being typed to the board.
+  term.attachCustomKeyEventHandler(event => {
+    if (event.type === 'keydown' && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); live.openSearch(); return false }
+    return true
+  })
   let opened = false, frame = 0
   let session!: ConsoleSession
   const live: Live = {
@@ -69,9 +108,22 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     },
     focus() { term.focus() },
     reconnect() { session.reconnect() },
-    clear() { term.clear(); term.focus() },
+    clear() { term.clear(); boots.reset(); term.focus() },
     bottom() { term.scrollToBottom(); term.focus() },
     away: { up: false, unseen: 0 }, onAway: () => {},
+    search(text, options, direction) {
+      if (!text) { finder.clearDecorations(); live.onResults({ index: -1, count: 0 }); return false }
+      const how: ISearchOptions = { regex: options.regex, caseSensitive: options.caseSensitive, decorations: FOUND }
+      return direction === 'next' ? finder.findNext(text, { ...how, incremental: true }) : finder.findPrevious(text, how)
+    },
+    clearSearch() { finder.clearDecorations(); term.clearSelection(); live.onResults({ index: -1, count: 0 }) },
+    onResults: () => {},
+    openSearch() { live.onOpenSearch() },
+    onOpenSearch: () => {},
+    boots, marks: [],
+    view() { const buffer = term.buffer.active; return { first: 0, count: buffer.length, current: buffer.viewportY + Math.floor(term.rows / 2) } },
+    scrollTo(line) { term.scrollToLine(Math.max(0, line - 2)) },
+    onView: new Set(),
     dispose() { session.dispose(); term.dispose(); el.remove(); lives.delete(key) },
   }
   // Scrolled up means the viewport is above the newest line. New output while away is counted (in lines it moved the
@@ -82,6 +134,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     live.away = next; live.onAway(next)
   }
   const look = () => {
+    live.onView.forEach(fn => fn())
     const buffer = term.buffer.active
     const up = buffer.viewportY < buffer.baseY
     const grew = Math.max(0, buffer.baseY - base); base = buffer.baseY
@@ -89,6 +142,8 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   }
   term.onScroll(look)
   term.onWriteParsed(look)
+  // -1 as the index: more matches than are highlighted.
+  finder.onDidChangeResults(({ resultIndex, resultCount }) => live.onResults({ index: resultIndex, count: resultCount }))
   session = createConsoleSession({
     board, die,
     onOutput: data => term.write(data),
@@ -96,6 +151,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     onError: error => live.onError(consoleErrorText(error)),
   })
   term.onData(session.input)
+  void bootMarks(board, die).then(marks => { live.marks = marks; boots.setMarks(marks) }, () => {})
   lives.set(key, live)
   while (lives.size > MAX) [...lives.values()][0]!.dispose()
   return live
@@ -103,11 +159,18 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
 
 window.addEventListener('pagehide', () => { for (const live of [...lives.values()]) live.dispose() })
 
-/** Connect a board's console again now (a frontend's 重连 button). */
-export function reconnectConsole(board: string, die?: string) { lives.get(`${board}\0${die ?? ''}`)?.reconnect() }
+/** Connect a board's console again now (a frontend's 重连 button). Its boot marks are read again with it: a site sync
+ * may have changed them while the console was open. */
+export function reconnectConsole(board: string, die?: string) {
+  forgetBootMarks(board, die)
+  lives.get(`${board}\0${die ?? ''}`)?.reconnect()
+}
 
 /** Clear a board's console (a frontend's 清屏 button): the screen and its scrollback, without disconnecting. */
 export function clearConsole(board: string, die?: string) { lives.get(`${board}\0${die ?? ''}`)?.clear() }
+
+/** Open the search bar of a board's console (a frontend's 搜索 button). */
+export function searchConsole(board: string, die?: string) { lives.get(`${board}\0${die ?? ''}`)?.openSearch() }
 
 const SPOT_KEY = 'boardlab.console.jump'
 /** Where the person left the button, as fractions of the console box (so it stays put when the box resizes). */
@@ -135,7 +198,8 @@ function JumpToBottom({ live, box, className }: { live: Live, box: HTMLDivElemen
     setSpot({ x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) })
   }
   if (!away.up) return null
-  const at = spot ?? { x: 1, y: 1 }
+  // Unmoved, it sits bottom centre, clear of the scrollbar and the boot rail beside it.
+  const at = spot ?? { x: 0.5, y: 1 }
   return (
     <button ref={self} type="button" className={`${className}${away.unseen ? ' has-new' : ''}`} aria-label="滚到最新输出" title="滚到最新输出（可拖动）"
       style={{ position: 'absolute', zIndex: 4, touchAction: 'none', left: `calc(8px + (100% - 16px) * ${at.x})`, top: `calc(8px + (100% - 16px) * ${at.y})`, transform: `translate(${-at.x * 100}%, ${-at.y * 100}%)` }}
@@ -161,8 +225,73 @@ function JumpToBottom({ live, box, className }: { live: Live, box: HTMLDivElemen
   )
 }
 
+/**
+ * The console's search bar: what the console holds is searched as the person types, every match highlighted, Enter
+ * for the next and Shift+Enter for the one before, Esc to close. `onHistory` offers the same search over the whole log
+ * (what has scrolled out of the console too), for a frontend that has one.
+ */
+function SearchBar({ live, className, onHistory }: { live: Live, className: string, onHistory?: (text: string, regex: boolean) => void }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [regex, setRegex] = useState(false)
+  const [caseSensitive, setCase] = useState(false)
+  const [results, setResults] = useState<{ index: number, count: number } | null>(null)
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    live.onOpenSearch = () => { setOpen(true); requestAnimationFrame(() => { input.current?.focus(); input.current?.select() }) }
+    live.onResults = setResults
+    return () => { live.onOpenSearch = () => {}; live.onResults = () => {} }
+  }, [live])
+  const bad = regex && !!text && (() => { try { new RegExp(text); return false } catch { return true } })()
+  // As the person types: the match nearest the cursor, the rest highlighted.
+  useEffect(() => { if (open && !bad) live.search(text, { regex, caseSensitive }, 'next') }, [open, text, regex, caseSensitive])
+  const close = () => { setOpen(false); setResults(null); live.clearSearch(); live.focus() }
+  if (!open) return null
+  const count = !text || bad ? '' : results === null ? '' : results.count === 0 ? '没有匹配' : results.index < 0 ? `${results.count}+ 处` : `${results.index + 1} / ${results.count}`
+  const go = (direction: 'next' | 'previous') => { if (text && !bad) live.search(text, { regex, caseSensitive }, direction) }
+  return (
+    <div className={className} role="search" style={{ position: 'absolute', zIndex: 5, top: 8, right: 8 }}>
+      <input ref={input} value={text} aria-label="在串口里搜索" placeholder="在串口里搜索" className={bad ? 'bad' : ''} spellCheck={false}
+        onChange={event => setText(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === 'Escape') { event.preventDefault(); close() }
+          else if (event.key === 'Enter') { event.preventDefault(); go(event.shiftKey ? 'previous' : 'next') }
+        }} />
+      <span className="count" aria-live="polite">{count}</span>
+      <button type="button" className={caseSensitive ? 'on' : ''} aria-pressed={caseSensitive} title="区分大小写" onClick={() => setCase(!caseSensitive)}>Aa</button>
+      <button type="button" className={regex ? 'on' : ''} aria-pressed={regex} title="正则" onClick={() => setRegex(!regex)}>.*</button>
+      <button type="button" aria-label="上一个匹配" title="上一个（Shift+Enter）" disabled={!text || bad} onClick={() => go('previous')}>↑</button>
+      <button type="button" aria-label="下一个匹配" title="下一个（Enter）" disabled={!text || bad} onClick={() => go('next')}>↓</button>
+      {onHistory && <button type="button" className="wide" title="串口里只留着最近的输出；在整个日志里搜" disabled={!text || bad} onClick={() => { onHistory(text, regex); close() }}>搜整个日志</button>}
+      <button type="button" aria-label="关闭搜索" title="关闭（Esc）" onClick={close}>×</button>
+    </div>
+  )
+}
+
+/** The boot rail over the live console: the boot lines its buffer holds, followed as output arrives and scrolls. */
+function ConsoleBoots({ live, board, die, className }: { live: Live, board: string, die?: string, className: string }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    // Output and scrolling move where the view is; a frame at most per change keeps it light under a flood of output.
+    let frame = 0
+    const later = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; tick(n => n + 1) }) }
+    const off = live.boots.onChange(later)
+    live.onView.add(later)
+    return () => { off(); live.onView.delete(later); cancelAnimationFrame(frame) }
+  }, [live])
+  // Where each boot line is now: its marker moves as the buffer scrolls and drops its oldest lines.
+  const lines: BootLine[] = live.boots.lines.map(item => ({ line: item.marker.line, id: item.id, text: item.text }))
+  const view = live.view()
+  return <BootRail board={board} die={die} marks={live.marks} lines={lines} first={view.first} count={view.count} current={view.current} go={line => live.scrollTo(line)} className={className} />
+}
+
 /** `onStatus` gets the console's status and, when it is not live, why (as `consoleStatusText` shows it). */
-export function SerialConsole({ board, die, dark, onStatus, className = 'bl-terminal', jumpClassName = 'bl-jump' }: { board: string, die?: string, dark: boolean, onStatus?: (status: ConsoleStatus, reason: string | null) => void, className?: string, jumpClassName?: string }) {
+export function SerialConsole({ board, die, dark, onStatus, className = 'bl-terminal', jumpClassName = 'bl-jump', searchClassName = 'bl-search', bootsClassName = 'bl-boots', onSearchHistory }: {
+  board: string, die?: string, dark: boolean, onStatus?: (status: ConsoleStatus, reason: string | null) => void, className?: string, jumpClassName?: string
+  searchClassName?: string, bootsClassName?: string
+  /** Search the whole log for what the console's search has (a frontend's log view). */
+  onSearchHistory?: (text: string, regex: boolean) => void
+}) {
   const host = useRef<HTMLDivElement>(null)
   const [, setStatus] = useState<ConsoleStatus>('connecting')
   const [current, setCurrent] = useState<Live | null>(null)
@@ -180,7 +309,11 @@ export function SerialConsole({ board, die, dark, onStatus, className = 'bl-term
     onStatus?.(live.status, live.reason)
     return () => { observer.disconnect(); live.el.remove(); live.onStatus = () => {}; setCurrent(null) }
   }, [board, die])
-  return <div ref={host} className={className} style={{ position: 'relative', overflow: 'hidden' }}>{current && <JumpToBottom live={current} box={host.current} className={jumpClassName} />}</div>
+  return <div ref={host} className={className} style={{ position: 'relative', overflow: 'hidden' }}>
+    {current && <JumpToBottom live={current} box={host.current} className={jumpClassName} />}
+    {current && <SearchBar live={current} className={searchClassName} onHistory={onSearchHistory} />}
+    {current && <ConsoleBoots live={current} board={board} die={die} className={bootsClassName} />}
+  </div>
 }
 
 /** The word for each status; `consoleStatusText(status, reason, STATUS_TEXT)` adds why, when boardd said. */

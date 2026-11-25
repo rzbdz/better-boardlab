@@ -1,11 +1,12 @@
 /** Discover, history and settings. */
 import { useEffect, useMemo, useState } from 'react'
-import { api, frontends, identity, type FrontendList, type History, type PageState } from '../../../src/ui/api.ts'
+import { api, frontends, identity, type FilesUsage, type FrontendList, type History, type PageState } from '../../../src/ui/api.ts'
 import { ACTIONS } from '../../../src/ui/format.ts'
 import { ask, onPrefs, permission, prefs, support, TOPICS, type Topic } from '../../../src/ui/notify.ts'
 import type { Board, LabSettings, Proposal } from 'boardlab-core/shared/types.ts'
 import { age, Confirm, fmtAt, Icon, model, slotOf, upper, useUI, Who } from '../kit.tsx'
 import { AddDevicePanel, DiscoverBoardDialog, DiscoverLabDialog } from '../discover.tsx'
+import { sizeText } from '../flashmap.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import type { View } from '../../../src/ui/contract.ts'
 
@@ -251,6 +252,28 @@ function LabSettingsPanel({ lab }: { lab: LabSettings }) {
   )
 }
 
+/** boardd's file store: what it holds against its bound, and the disk under it. */
+function FileStore() {
+  const [usage, setUsage] = useState<FilesUsage | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { void api.filesUsage().then(setUsage, e => setError((e as Error).message)) }, [])
+  return <section className="panel"><h2><Icon name="server" />文件仓库</h2>
+    <p className="lead">网页和命令行传给 boardd 的文件（刷机包、启动镜像）。不用的留几天，总量超过上限时最久没用的先删。</p>
+    {error ? <div className="mv-note warn">读不到：{error}</div> : !usage ? <span className="spin" /> : <UsageBar used={usage.used} max={usage.max} free={usage.free}
+      parts={[`${usage.files} 个文件`, ...(usage.pending ? [`${sizeText(usage.pending)} 还在传`] : []), `不用的留 ${usage.keepDays} 天`]} />}
+  </section>
+}
+
+/** How full a store is: what it holds against its bound, and what its disk has left. */
+export function UsageBar({ used, max, free, parts = [] }: { used: number, max: number | null, free: number | null, parts?: string[] }) {
+  const pct = max ? Math.min(100, Math.round(100 * used / max)) : null
+  return <div className="usage">
+    <div className="usage-top"><b>{sizeText(used)}</b>{max ? <span className="sub"> / 上限 {sizeText(max)}</span> : null}{free !== null && <span className="sub usage-free">磁盘还剩 {sizeText(free)}</span>}</div>
+    {pct !== null && <div className={`usage-bar${pct >= 90 ? ' hot' : ''}`}><i style={{ width: `${pct}%` }} /></div>}
+    {parts.length > 0 && <div className="sub small">{parts.join(' · ')}</div>}
+  </div>
+}
+
 export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void, focus?: string }) {
   // One column of sections, and a list of them on the left that follows the scroll. Each module says where its
   // sections belong (a setup starts with its hosts, say), so this page names no module and no module's parts.
@@ -262,6 +285,7 @@ export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: 
     { id: 'notify', title: '通知', group: '你', body: <section className="panel"><h2><Icon name="bell" />通知</h2><p className="lead">锁拿到了、轮到你了、板子等人操作、锁被抢、关注的板子空了。</p><NotifyPrefs /></section> },
     ...views.map(view => ({ id: `m-${view.id}`, title: view.title ?? view.id, group: view.id === 'version' ? '系统' : '实验室和模块', body: <ViewPanel view={view} /> })),
     ...state.labs.filter(lab => !lab.addedAs).map(lab => ({ id: `lab-${lab.id}`, title: `实验室 ${lab.id}`, group: '实验室和模块', body: <LabSettingsPanel lab={lab} /> })),
+    { id: 'files', title: '文件仓库', group: '系统', body: <FileStore /> },
     { id: 'firmware', title: '自带固件', group: '系统', body: <section className="panel"><h2><Icon name="dl" />自带固件</h2><p className="lead">boardd 自带的固件，用的时候核对 sha256。</p>
       {state.firmware.length ? state.firmware.map(f => <div key={`${f.soc}/${f.purpose}`} className="fw"><b>{f.soc.toUpperCase()} · {f.purpose}</b><span className="sub">{f.note ?? '—'}</span><code title={f.sha256}>{f.sha256.slice(0, 12)}…</code></div>) : <p className="sub small">这个 boardlab 没有自带固件。</p>}</section> },
   ]

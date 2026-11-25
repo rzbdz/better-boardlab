@@ -41,6 +41,10 @@ const labHosts = [
   { host: 'host-a', consoles: [{ id: 'ttyUSB7', label: 'serial-mux a7' }], usb: [{ id: '1-1.2', label: '1-1.2 boot' }] },
   { host: 'host-b', consoles: [{ id: 'ttyUSB8', label: 'serial-mux b8' }, { id: 'ttyUSB9', label: 'serial-mux b9' }], usb: [{ id: '1-1.3', label: '1-1.3 boot' }, { id: '1-1.4', label: '1-1.4 boot' }] },
 ]
+const uploads = new Map<string, { size: number, received: number, name: string }>()
+/** A test sets this to keep an upload's pieces from landing (by its file name) until it lets them go. */
+let uploadCount = 0
+export const uploadGate: { name: string | null, open: Promise<void> | null } = { name: null, open: null }
 const sole = (items: Array<{ id: string }>) => items.length === 1 ? items[0]!.id : null
 
 globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -69,7 +73,28 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     return reply({ debug: { message: `${action} 已完成`, data: [{ label: 'pc', value: '0x08000421' }] } })
   }
   if (path.startsWith('/api/docs/')) return reply({ name: path.slice('/api/docs/'.length), title: '帮助', text: `# 帮助：${path.slice('/api/docs/'.length)}\n\n说明文字，[看这里](https://example.com/a) 和 [别点](javascript:alert(1))。\n\n\`\`\`yaml\nid: x\n\`\`\`` })
+  if (path === '/api/files/usage') return reply({ used: 3 * 2 ** 30, files: 4, pending: 0, max: 20 * 2 ** 30, free: 100 * 2 ** 30, keepDays: 3 })
+  // A file sent in pieces: boardd keeps what arrived, and the seal says the sha256 it hashed to.
+  if (path === '/api/files/uploads' && method === 'POST') { const id = `u${++uploadCount}`; uploads.set(id, { size: body.size, received: 0, name: body.name }); return reply({ id, piece: 8 * 1024 * 1024 }) }
+  const upload = /^\/api\/files\/uploads\/([^/]+)(\/seal|\/abandon)?$/.exec(path)
+  if (upload) {
+    const at = uploads.get(upload[1]!)!
+    if (upload[2] === '/seal') return reply({ sha256: at.name === 'local.zip' ? 'ab'.repeat(32) : 'cd'.repeat(32), size: at.size, name: at.name, done: true, stored: true, received: at.size })
+    if (upload[2] === '/abandon') { uploads.delete(upload[1]!); return reply({ ok: true }) }
+    if (method === 'PUT') {
+      if (uploadGate.name === at.name && uploadGate.open) {
+        // Held until the test lets go, or broken off when the page stops the upload.
+        const signal = init?.signal
+        await Promise.race([uploadGate.open, new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))])
+      }
+      const size = (init?.body as Blob).size; at.received += size; return reply({ received: at.received, size: at.size }) }
+    return reply({ id: upload[1], name: at.name, size: at.size, received: at.received })
+  }
   if (path.startsWith('/api/files/')) return reply({ sha256: path.slice('/api/files/'.length), present: false })
+  if (/^\/api\/bsp\/hosts\/[^/]+\/cache$/.test(path)) return reply([
+    { host: 'host-a', cache: { path: '/var/cache/a', used: 46 * 2 ** 30, entries: 12, held: 1, max_bytes: 50 * 2 ** 30, ttl_s: 7 * 86400, min_free_bytes: 5 * 2 ** 30, free: 80 * 2 ** 30 }, error: null },
+    { host: 'host-b', cache: null, error: null },
+  ])
   if (path === '/api/labs/slots') return reply({ hosts: labHosts, at: state.now, refreshing: false, error: null })
   if (path === '/api/labs/discover/methods') {
     const host = url.searchParams.get('host') ?? '', slot = url.searchParams.get('slot') ?? ''
@@ -93,7 +118,75 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     return reply([probe, ...(bind ? [bind] : []), lookup])
   }
   if (path === '/api/flash/package' && method === 'POST') return reply({ output: 'job flash-1 succeeded' })
-  if (path === '/api/logs') return reply({ lines: ['[2026-11-10 08:59:58] U-Boot SPL 2022.10', '[2026-11-10 09:00:00] ERROR: mmc0 timeout'], matched: 2, truncated: false, source: 'backend' })
+  // One image market with a made-up tree: its kind, folders and SoCs are only names to the page.
+  if (path === '/api/markets') return reply([{ id: 'shelf', kind: 'shelf', kindTitle: '书架', about: '', title: 'Test images', source: 'site', error: null }])
+  if (path === '/api/markets/shelf/list') {
+    const at = url.searchParams.get('path') ?? ''
+    const entries = at === '' ? [{ path: 'soc-a', name: 'soc-a', kind: 'folder', soc: 'k3' }]
+      : at === 'soc-a' ? [{ path: 'soc-a/new.zip', name: 'new.zip', kind: 'image', soc: 'k3', size: 3 << 20, modified: '2026-11-20T08:00:00Z' }, { path: 'soc-a/disk.iso', name: 'disk.iso', kind: 'image', soc: 'k3', size: 1 << 20, modified: '2026-11-19T08:00:00Z' }]
+      : []
+    // For a board, boardd says which images it cannot take (here: anything but a .zip).
+    if (url.searchParams.get('board')) for (const entry of entries as Array<Record<string, unknown>>) if (entry.kind === 'image') entry.refused = String(entry.name).endsWith('.zip') ? null : `${url.searchParams.get('board')} 的后端刷不了这种包`
+    return reply({ market: 'shelf', path: at, entries, readAt: state.now })
+  }
+  // A search over the whole tree: only what leads to a matching image, as boardd answers it.
+  if (path === '/api/markets/shelf/search') {
+    const words = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+    const tree: Array<[string, string, string]> = [['soc-a', 'folder', 'soc-a'], ['soc-a/new.zip', 'image', 'new.zip'], ['soc-a/old', 'folder', 'soc-a/old'], ['soc-a/old/deep.zip', 'image', 'deep.zip'], ['soc-b', 'folder', 'soc-b'], ['soc-b/disk.iso', 'image', 'disk.iso']]
+    const entries = words === 'nothing' ? [] : tree.filter(([at, kind, name]) => kind === 'image' ? name.includes(words) : tree.some(([below, k2]) => k2 === 'image' && below.startsWith(`${at}/`) && below.split('/').at(-1)!.includes(words)))
+      .map(([at, kind, name]) => ({ path: at, name, kind, soc: 'k3', ...(kind === 'image' ? { size: 2 << 20, modified: '2026-11-20T08:00:00Z' } : {}) }))
+    if (url.searchParams.get('board')) for (const entry of entries) if (entry.kind === 'image') (entry as Record<string, unknown>).refused = entry.name.endsWith('zip') ? null : 'bsp-k3-deb1 的后端刷不了这种包'
+    // A market searched by an index that stopped short says so; the shelf answers whole.
+    return reply({ market: 'shelf', text: words, entries, folders: 3, by: 'index', partial: false, readAt: state.now })
+  }
+  if (path === '/api/markets/shelf/targets') return reply([
+    { board: 'bsp-k3-deb1', soc: 'k3', mine: true, free: false, why: null },
+    { board: 'bsp-k1-pico', soc: 'k1', mine: false, free: true, why: null },
+    { board: 'bsp-k3-cm1', soc: 'k3', mine: false, free: false, why: 'user:bob 在用' },
+  ])
+  // What a package would write: streamed like the backend fetching it, then its plan.
+  if (path === '/api/flash/plan' && method === 'POST') {
+    const plan = { package: 'new.zip', partial: true, notes: [], media: [{ id: 'disk', label: 'disk · 8 MiB', size: 8 << 20, partitions: [
+      { name: 'boot', offset: 0, size: 2 << 20, image: 'boot.img', payload: 1 << 20, selectable: true },
+      { name: 'rootfs', offset: 2 << 20, size: null, image: 'rootfs.img', payload: 3 << 20, selectable: true },
+    ] }] }
+    const text = `event: out\ndata: ${JSON.stringify({ text: 'fetching new.zip 100%' })}\n\nevent: exit\ndata: ${JSON.stringify({ ok: true, plan })}\n\n`
+    return new Response(text, { headers: { 'content-type': 'text/event-stream' } })
+  }
+  if (path === '/api/boot-marks') return reply([
+    { id: 'spl', title: 'U-Boot SPL', pattern: 'U-Boot SPL', stage: 1, tone: 'spl' }, { id: 'linux', title: 'Linux', pattern: 'Linux version', stage: 4, tone: 'kernel' },
+  ])
+  if (path === '/api/logs') {
+    // A log of 5000 lines a second apart, read as boardd reads one: a window around a line, where every match is, or
+    // where a time range's lines are.
+    const total = 5000
+    const stampOf = (n: number) => `2026-11-10 ${String(8 + Math.floor(n / 3600)).padStart(2, '0')}:${String(Math.floor(n / 60) % 60).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
+    const text = (n: number) => n === 1 ? `[${stampOf(n)}] ERROR: mmc0 timeout` : n === 4200 ? `[${stampOf(n)}] mmc0: retry` : `[${stampOf(n)}] U-Boot SPL line ${n}`
+    const at = url.searchParams.get('at'), grep = url.searchParams.get('grep')?.toLowerCase()
+    if (at) {
+      const n = at === 'end' ? total - 1 : at === 'start' ? 0 : Number(at.slice('line:'.length))
+      const from = Math.max(0, n - Number(url.searchParams.get('before') ?? 0)), to = Math.min(total, n + Number(url.searchParams.get('after') ?? 0) + 1)
+      const numbers = Array.from({ length: to - from }, (_, i) => from + i)
+      return reply({ lines: numbers.map(text), numbers, positions: numbers.map(i => `d:${i}`), matched: numbers.length, truncated: false, total, base: 0, moreBefore: from > 0, moreAfter: to < total, source: 'backend' })
+    }
+    // Three boots: two stages of the first, the kernel of the second and third.
+    if (url.searchParams.get('marks') === '1') {
+      const all = [{ line: 100, id: 'spl', text: 'U-Boot SPL 2022.10' }, { line: 140, id: 'linux', text: 'Linux version 6.6.36 (b@h)' }, { line: 2000, id: 'linux', text: 'Linux version 6.6.36 (b@h)' }, { line: 4000, id: 'spl', text: 'U-Boot SPL 2022.10' }, { line: 4050, id: 'linux', text: 'Linux version 6.6.36 (b@h)' }]
+      const from = Number(url.searchParams.get('fromLine') ?? 0)
+      return reply({ lines: [], matched: 0, truncated: false, total, base: 0, marks: all.filter(mark => mark.line >= from), marksTruncated: false, source: 'backend' })
+    }
+    if (url.searchParams.get('hits') === '1') {
+      const hits = Array.from({ length: total }, (_, i) => i).filter(i => !grep || text(i).toLowerCase().includes(grep))
+      return reply({ lines: [], matched: hits.length, truncated: false, hits, hitsTruncated: false, total, base: 0, source: 'backend' })
+    }
+    // Where a time range's lines are: the first one inside it and how many it holds, read no lines.
+    if (url.searchParams.get('bounds') === '1') {
+      const since = url.searchParams.get('since') ?? '', until = url.searchParams.get('until') ?? ''
+      const inside = Array.from({ length: total }, (_, i) => i).filter(i => (!since || stampOf(i) >= since) && (!until || stampOf(i) <= until))
+      return reply({ lines: [], matched: inside.length, truncated: false, total: inside.length, ...(inside.length ? { base: inside[0] } : {}), source: 'backend' })
+    }
+    return reply({ lines: [text(0), text(1)], matched: 2, truncated: false, source: 'backend' })
+  }
   // A person acknowledging boardd's database restore: the state stops reporting it.
   if (path === '/api/database/acknowledge' && method === 'POST') { const acknowledged = state.restored ?? null; state.restored = null; return reply({ acknowledged }) }
   if (path === '/api/lock' && method === 'POST') {

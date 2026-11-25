@@ -5,18 +5,25 @@
  * switch, the pinned banner for a board waiting for a person, flashing a package from a link, and
  * help pages with their AI hints.
  */
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { calls, FakeEventSource, state } from './frontend-setup.ts'
+import { calls, FakeEventSource, state, uploadGate } from './frontend-setup.ts'
 
-vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
+const consoleProps = vi.hoisted(() => ({ last: null as null | { onSearchHistory?: (text: string, regex: boolean) => void } }))
+vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: (props: { onSearchHistory?: (text: string, regex: boolean) => void }) => { consoleProps.last = props; return null }, reconnectConsole: () => {}, clearConsole: vi.fn(), searchConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
 
 const wait = { timeout: 4000 }
 const card = async (board: string) => { await waitFor(() => expect(document.querySelector(`[data-board="${board}"]`)).toBeTruthy(), wait); return document.querySelector(`[data-board="${board}"]`) as HTMLElement }
 const button = async (label: string | RegExp, scope: HTMLElement = document.body) => {
-  const visible = (el: Element) => { const t = (el.textContent ?? '').replace(/\s/g, ''); return typeof label === 'string' ? t === label : label.test(t) }
+  // Its text, or for a button that shows only an icon, its label.
+  const visible = (el: Element) => [el.textContent ?? '', el.getAttribute('aria-label') ?? ''].map(t => t.replace(/\s/g, '')).some(t => t && (typeof label === 'string' ? t === label : label.test(t)))
   await waitFor(() => expect(within(scope).getAllByRole('button').some(visible)).toBe(true), wait)
   return within(scope).getAllByRole('button').find(visible)! as HTMLButtonElement
+}
+/** A tab of a tab list (the flash dialog's sources), by its visible text. */
+const tab = async (label: RegExp, scope: HTMLElement) => {
+  await waitFor(() => expect(within(scope).getAllByRole('tab').some(el => label.test((el.textContent ?? '').replace(/\s/g, '')))).toBe(true), wait)
+  return within(scope).getAllByRole('tab').find(el => label.test((el.textContent ?? '').replace(/\s/g, '')))! as HTMLButtonElement
 }
 const go = (hash: string) => { location.hash = hash; window.dispatchEvent(new HashChangeEvent('hashchange')) }
 /** The page's own event stream, not a board's trace: the fake browser keeps every source it was handed. */
@@ -150,12 +157,105 @@ describe('Modern frontend', () => {
     expect(document.querySelector('.tilebox')?.textContent).toContain('使用中')
     expect(await button('排队')).toBeTruthy()
     fireEvent.click(await button('日志'))
-    await waitFor(() => expect(screen.getByTestId('log-lines').textContent).toContain('mmc0 timeout'), wait)
-    expect(calls.filter(c => c.path.startsWith('api/logs?')).at(-1)!.path).toMatch(/board=bsp-k3-cm1/)
+    // The whole log is as long as it is: only the lines in view are read, a page at a time, from the end.
+    await waitFor(() => expect(document.querySelector('.lfoot')?.textContent).toContain('共 5,000 行'), wait)
+    expect(calls.some(c => /^api\/logs\?board=bsp-k3-cm1&at=end/.test(c.path))).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('log-lines').textContent).toContain('U-Boot SPL line 4999'), wait)
+    const reads = calls.filter(c => c.path.startsWith('api/logs?') && /at=line%3A/.test(c.path))
+    expect(reads.length).toBeLessThanOrEqual(2)
+    expect(document.querySelectorAll('.ll').length).toBeLessThan(300)
+    // A search: boardd says where every match is, the count shows, and the next one is scrolled to and read.
     fireEvent.change(document.querySelector('.lq input') as HTMLInputElement, { target: { value: 'mmc0' } })
-    await waitFor(() => expect(document.querySelectorAll('.ll.hit').length).toBe(1), wait)
+    await waitFor(() => expect(document.querySelector('.lcount')?.textContent).toBe('– / 2'), wait)
+    expect(calls.filter(c => c.path.includes('hits=1')).at(-1)!.path).toMatch(/grep=mmc0/)
+    fireEvent.click(await button('下一个匹配'))
+    await waitFor(() => expect(document.querySelector('.lcount')?.textContent).toBe('1 / 2'), wait)
+    await waitFor(() => expect(document.querySelector('.ll.on')?.textContent).toContain('mmc0 timeout'), wait)
+    expect(document.querySelector('.ll.on mark')?.textContent).toBe('mmc0')
+    fireEvent.click(await button('下一个匹配'))
+    await waitFor(() => expect(document.querySelector('.ll.on')?.textContent).toContain('mmc0: retry'), wait)
+    expect(document.querySelector('.ll.on .no')?.textContent).toBe('4201')
     expect(await button('复制wget')).toBeTruthy()
     expect(await button('下载.log')).toBeTruthy()
+  })
+
+  it('draws a log of just the time range asked for, and keeps drawing it as its pages are read', async () => {
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    fireEvent.click(await button('日志'))
+    await waitFor(() => expect(document.querySelector('.lfoot')?.textContent).toContain('共 5,000 行'), wait)
+    const picker = () => document.querySelector('select[aria-label="搜索的时间范围"]') as HTMLSelectElement
+    fireEvent.change(picker(), { target: { value: 'custom' } })
+    fireEvent.change(document.querySelector('input[aria-label="开始"]')!, { target: { value: '2026-11-10T08:50:00' } })
+    fireEvent.change(document.querySelector('input[aria-label="结束"]')!, { target: { value: '2026-11-10T08:59:59' } })
+    // boardd says where the range's lines are (3000 to 3599), and the list is those 600 rows, not the whole log.
+    await waitFor(() => expect(document.querySelector('.lfoot')?.textContent).toContain('这段时间 600 行'), wait)
+    const asked = calls.filter(c => c.path.includes('bounds=1')).at(-1)!.path
+    // The range as a stamp a log line can be compared with, whatever the input added.
+    expect(asked).toContain('since=2026-11-10+08%3A50')
+    expect(asked).toContain('until=2026-11-10+08%3A59%3A59')
+    expect(asked).not.toContain('grep=')
+    // Reading a page of the range answers with the whole log's size: that must not put the whole log back.
+    await waitFor(() => expect(screen.getByTestId('log-lines').textContent).toContain('U-Boot SPL line 3599'), wait)
+    expect(document.querySelector('.lfoot')?.textContent).toContain('这段时间 600 行')
+    expect(document.querySelectorAll('.ll').length).toBeLessThan(300)
+    // Leave the panel as the next test expects to find it.
+    go('#/')
+  })
+
+  it('marks every boot beside the log, goes to one, and remembers which stages the person shows for that console', async () => {
+    localStorage.removeItem('boardlab.boots.shown')
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    fireEvent.click(await button('日志', document.querySelector('.ctb') as HTMLElement))
+    const rail = () => document.querySelector('.logwrap .lboots') as HTMLElement
+    await waitFor(() => expect(rail()?.querySelectorAll('.tick').length).toBe(5), wait)
+    // Each tick sits where its line is in the whole log, tinted by its stage.
+    const ticks = [...rail().querySelectorAll<HTMLElement>('.tick')]
+    expect(ticks.map(tick => tick.style.top)).toEqual(['2.01%', '2.81%', '40.01%', '80.01%', '81.01%'])
+    expect(ticks.map(tick => tick.className.split(' ')[1])).toEqual(['t-spl', 't-kernel', 't-kernel', 't-spl', 't-kernel'])
+    // Two boots by stage order (SPL then Linux, a lone Linux, SPL then Linux): three.
+    expect(rail().querySelector('.kn')!.textContent).toContain('次启动')
+    fireEvent.click(ticks[2]!)
+    await waitFor(() => expect(document.querySelector('.ll[data-line="2000"]')?.textContent).toContain('2001'), wait)
+    // ‹ › step from one boot to the next, not from stage to stage: from a boot's first line, next goes to the next
+    // boot's first line, not to the kernel that follows in the same boot.
+    fireEvent.click(ticks[0]!)
+    await waitFor(() => expect(document.querySelector('.ll[data-line="100"]')).toBeTruthy(), wait)
+    fireEvent.click(rail().querySelector('.kn + .kb') as HTMLElement)
+    await waitFor(() => expect(document.querySelector('.ll[data-line="2000"]')?.textContent).toContain('2001'), wait)
+    fireEvent.click(rail().querySelector('.kb') as HTMLElement)
+    await waitFor(() => expect(document.querySelector('.ll[data-line="100"]')).toBeTruthy(), wait)
+    // The panel: the boots, newest first, and the kinds of line to show; showing only kernels is remembered.
+    fireEvent.click(rail().querySelector('.kn')!)
+    const panel = () => rail().querySelector('.panel') as HTMLElement
+    expect([...panel().querySelectorAll('.boot .n')].map(n => n.textContent)).toEqual(['#3', '#2', '#1'])
+    fireEvent.click(within(panel()).getByRole('button', { name: 'U-Boot SPL', pressed: true }))
+    await waitFor(() => expect(rail().querySelectorAll('.tick').length).toBe(3), wait)
+    expect(JSON.parse(localStorage.getItem('boardlab.boots.shown')!)).toEqual({ 'bsp-k3-cm1.die0': ['spl'] })
+    fireEvent.click(within(panel()).getAllByRole('button', { name: 'Linux' }).at(-1)!)
+    await waitFor(() => expect(document.querySelector('.ll[data-line="140"]')).toBeTruthy(), wait)
+    expect(rail().querySelector('.panel')).toBeNull()
+    // Another visit to the console keeps the choice.
+    go('#/')
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.logwrap .lboots')?.querySelectorAll('.tick').length).toBe(3), wait)
+    localStorage.removeItem('boardlab.boots.shown')
+    go('#/')
+  })
+
+  it('takes a search from the console to the whole log, which opens on its first match', async () => {
+    const consoleUi = await import('../src/ui/console.tsx')
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    fireEvent.click(await button('串口', document.querySelector('.ctb') as HTMLElement))
+    fireEvent.click(await button('搜索', document.querySelector('.ctb') as HTMLElement))
+    expect(consoleUi.searchConsole).toHaveBeenCalledWith('bsp-k3-cm1', 'die0')
+    await waitFor(() => expect(consoleProps.last?.onSearchHistory).toBeTruthy(), wait)
+    act(() => consoleProps.last!.onSearchHistory!('mmc0', false))
+    await waitFor(() => expect((document.querySelector('.lq input') as HTMLInputElement)?.value).toBe('mmc0'), wait)
+    await waitFor(() => expect(document.querySelector('.lcount')?.textContent).toBe('– / 2'), wait)
+    go('#/')
   })
 
   it('offers to stop a fastboot boot at U-Boot when the SDK\'s recipe has that break point', async () => {
@@ -170,27 +270,172 @@ describe('Modern frontend', () => {
     go('#/')
   })
 
-  it('flashes a package from a link, offers the last link again, and never uploads a file', async () => {
+  it('flashes a package from a link, and offers the last link again', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
-    const open = async () => { fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
+    const open = async () => { fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
     go('#/board/bsp-k3-deb1')
     await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    // Booting no longer flashes: 启动 only loads into memory.
+    fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    expect(within(dialog()).queryAllByRole('button').some(el => /刷机包|^刷机/.test(el.textContent ?? ''))).toBe(false)
+    fireEvent.click(await button('取消', dialog()))
+    await waitFor(() => expect(dialog()).toBeNull(), wait)
     await open()
-    fireEvent.click(await button(/^刷机包/, dialog()))
-    expect((await button('开始', dialog())).disabled).toBe(true)
+    fireEvent.click(await tab(/^链接/, dialog()))
+    expect((await button('开始刷机', dialog())).disabled).toBe(true)
     fireEvent.change(dialog().querySelector('input[type=url]')!, { target: { value: 'https://images.test/k3/pkg.zip' } })
     fireEvent.change(screen.getByPlaceholderText('留空由后端按刷机包选'), { target: { value: 'tool-b' } })
-    fireEvent.click(await button('开始', dialog()))
+    fireEvent.click(dialog().querySelector('label.check input')!)
+    fireEvent.click(await button('开始刷机', dialog()))
     await waitFor(() => expect(calls.find(c => c.path === 'api/flash/package')?.body).toEqual({ board: 'bsp-k3-deb1', url: 'https://images.test/k3/pkg.zip', flasher: 'tool-b' }), wait)
 
-    // The link and tool are offered again; the page has no file picker at all (uploading is disabled for RISC-V Node).
+    // The link and tool are offered again.
     await open()
-    fireEvent.click(await button(/^刷机包/, dialog()))
     expect((dialog().querySelector('input[type=url]') as HTMLInputElement).value).toBe('https://images.test/k3/pkg.zip')
-    expect(dialog().querySelector('input[type=file]')).toBeNull()
-    expect(within(dialog()).queryAllByRole('button').some(el => /上传文件/.test(el.textContent ?? ''))).toBe(false)
     fireEvent.click(await button('取消', dialog()))
-    expect(calls.some(c => c.path.startsWith('api/files/'))).toBe(false)
+    go('#/')
+  })
+
+  it('sends a file from this computer in pieces, then flashes it by the sha256 boardd hashed', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    fireEvent.click(await tab(/^上传文件/, dialog()))
+    const big = new File([new Uint8Array(8 * 1024 * 1024 + 100)], 'local.zip')
+    fireEvent.change(dialog().querySelector('input[type=file]')!, { target: { files: [big] } })
+    await waitFor(() => expect(dialog().textContent).toContain('传好了'), wait)
+    // Two pieces, each from where the last stopped, then the seal; the browser hashes nothing.
+    const id = calls.find(c => c.method === 'PUT' && c.path.startsWith('api/files/uploads/'))!.path.split('/')[3]!.split('?')[0]!
+    expect(calls.filter(c => c.path.startsWith(`api/files/uploads/${id}?`)).map(c => c.path)).toEqual([`api/files/uploads/${id}?offset=0`, `api/files/uploads/${id}?offset=${8 * 1024 * 1024}`])
+    expect(calls.find(c => c.path === 'api/files/uploads')?.body).toEqual({ name: 'local.zip', size: big.size })
+    expect(calls.some(c => c.path === `api/files/uploads/${id}/seal`)).toBe(true)
+    fireEvent.click(await button('开始刷机', dialog()))
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toMatchObject({ board: 'bsp-k3-deb1', sha256: 'ab'.repeat(32) }), wait)
+    go('#/')
+  })
+
+  it('sends only the newest file when another is picked while one is still being sent', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    let letGo!: () => void
+    uploadGate.name = 'first.zip'; uploadGate.open = new Promise<void>(resolve => { letGo = resolve })
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    fireEvent.click(await tab(/^上传文件/, dialog()))
+    const input = () => dialog().querySelector('input[type=file]')!
+    fireEvent.change(input(), { target: { files: [new File([new Uint8Array(100)], 'first.zip')] } })
+    await waitFor(() => expect(dialog().textContent).toContain('传给 boardd'), wait)
+    // The second file replaces the first: the first is stopped and given up, the second is sent and sealed.
+    fireEvent.change(input(), { target: { files: [new File([new Uint8Array(200)], 'second.zip')] } })
+    await waitFor(() => expect(dialog().textContent).toContain('传好了 · sha256 cdcdcdcdcdcd'), wait)
+    letGo()
+    const [first, second] = calls.filter(c => c.path.startsWith('api/files/uploads/') && c.method === 'PUT').map(c => c.path.split('/')[3]!.split('?')[0]!).filter((id, i, all) => all.indexOf(id) === i).slice(-2)
+    await waitFor(() => expect(calls.some(c => c.path === `api/files/uploads/${first}/abandon`)).toBe(true), wait)
+    expect(calls.some(c => c.path === `api/files/uploads/${second}/seal`)).toBe(true)
+    expect(calls.some(c => c.path === `api/files/uploads/${first}/seal`)).toBe(false)
+    expect(dialog().textContent).not.toContain('没传上去')
+    fireEvent.click(await button('取消', dialog()))
+    go('#/')
+  })
+
+  it('flashes an image of a market: the tree for the board\'s SoC, what it would write, chosen partitions and a reset', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    fireEvent.click(await tab(/^镜像市场/, dialog()))
+    // The tree is read folder by folder, filtered to the board's SoC.
+    fireEvent.click(await button(/^soc-a/, dialog()))
+    await waitFor(() => expect(calls.some(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))).toBe(true), wait)
+    expect(calls.find(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))!.path).toMatch(/soc=k3.*board=bsp-k3-deb1/)
+    // An image its backend does not take cannot be picked.
+    expect((await button(/^disk\.iso/, dialog())).disabled).toBe(true)
+    fireEvent.click(await button(/^new\.zip/, dialog()))
+    // Picking a package reads its plan at once: its map is there without asking for it.
+    await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
+    // The tool typed last time on this board (the link test) is remembered and goes with the plan too.
+    // The plan of this package, read as it was picked (other tests' plans came before it).
+    expect(calls.filter(c => c.path === 'api/flash/plan').at(-1)?.body).toEqual({ board: 'bsp-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b' })
+    // A look at another tab and back to the same image is not another package: its plan is kept, not asked for again.
+    const plans = () => calls.filter(c => c.path === 'api/flash/plan').length
+    const once = plans()
+    fireEvent.click(await tab(/^链接/, dialog()))
+    fireEvent.click(await tab(/^镜像市场/, dialog()))
+    await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
+    expect(plans()).toBe(once)
+    fireEvent.click(await button('指定分区', dialog()))
+    expect((await button('开始刷机', dialog())).disabled).toBe(true)
+    fireEvent.click(await button('rootfs', dialog()))
+    fireEvent.click(await button('开始刷机', dialog()))
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'bsp-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b', partitions: ['rootfs'], reset: true }), wait)
+    go('#/')
+  })
+
+  it('searches the whole market at once: the folders leading to a match, expanded, and nothing else', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    fireEvent.click(await tab(/^镜像市场/, dialog()))
+    const find = dialog().querySelector('input[aria-label=找镜像]') as HTMLInputElement
+    // The whole tree is read in boardd at once, filtered the board's SoC and marked for its backend.
+    fireEvent.change(find, { target: { value: 'deep' } })
+    await waitFor(() => expect(calls.some(c => c.path.startsWith('api/markets/shelf/search?q=deep'))).toBe(true), wait)
+    expect(calls.find(c => c.path.startsWith('api/markets/shelf/search'))!.path).toMatch(/soc=k3.*board=bsp-k3-deb1/)
+    // Only the folders leading to the match, expanded all the way, and the match itself.
+    await waitFor(() => expect(dialog().querySelector('.mk-found')?.textContent).toContain('deep.zip'), wait)
+    const rows = [...dialog().querySelectorAll('.mk-found .mk-row')].map(row => row.textContent ?? '')
+    expect(rows.some(row => row.includes('soc-b'))).toBe(false)
+    expect(rows.some(row => row.includes('soc-a'))).toBe(true)
+    expect(rows.some(row => row.includes('old'))).toBe(true)
+    expect(rows.find(row => row.includes('deep.zip'))).toBeTruthy()
+    fireEvent.click(await button(/deep\.zip/, dialog()))
+    // Nothing matches: said so, with no folder left behind.
+    fireEvent.change(find, { target: { value: 'nothing' } })
+    await waitFor(() => expect(dialog().querySelector('.mk-found')?.textContent).toContain('没有名字里有「nothing」的镜像'), wait)
+    expect([...dialog().querySelectorAll('.mk-found .mk-row.mk-folder')].length).toBe(0)
+    // The shelf was searched whole: nothing says an image may be missing.
+    fireEvent.change(find, { target: { value: 'deep' } })
+    await waitFor(() => expect(dialog().querySelector('.mk-found')?.textContent).toContain('deep.zip'), wait)
+    expect(dialog().querySelector('.mk-count')?.textContent ?? '').not.toContain('可能有遗漏')
+    fireEvent.click(await button('取消', dialog()))
+    go('#/')
+  })
+
+  it('browses an image market by SoC, and flashes an image onto a free board, locked for the person', async () => {
+    const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
+    go('#/')
+    await waitFor(() => expect([...document.querySelectorAll('.nav a')].some(a => a.textContent === '镜像')).toBe(true), wait)
+    go('#/images')
+    await waitFor(() => expect(document.querySelector('.hero h1')?.textContent).toBe('镜像'), wait)
+    // The SoCs to filter by are the ones the market files its folders under.
+    fireEvent.click(await button('K3'))
+    await waitFor(() => expect(location.hash).toBe('#/images?market=shelf&soc=k3'), wait)
+    fireEvent.click(await button(/^soc-a/))
+    fireEvent.click(await button(/^new\.zip/))
+    await waitFor(() => expect(document.querySelector('.mk-detail h2')?.textContent).toBe('new.zip'), wait)
+    expect(document.querySelector('.mk-detail')!.textContent).toContain('3 MiB')
+    fireEvent.click(await button('刷机…'))
+    await waitFor(() => expect(dialog()?.textContent).toContain('刷到哪块板子'), wait)
+    // Boardd says where it can go: yours, a free one, one held by someone else that cannot be picked.
+    expect((await button('不能刷', dialog())).disabled).toBe(true)
+    expect(await button('刷这块', dialog())).toBeTruthy()
+    fireEvent.click(await button('拿锁并刷', dialog()))
+    await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board?: string }).board === 'bsp-k1-pico')?.body).toMatchObject({ board: 'bsp-k1-pico', purpose: '刷机 new.zip' }), wait)
+    // The flash dialog opens on the image picked, for that board.
+    await waitFor(() => expect(dialog()?.querySelector('h2')?.textContent).toBe('刷机'), wait)
+    expect(dialog().textContent).toContain('BSP-K1-PICO')
+    expect(dialog().querySelector('.fl-picked')?.textContent).toContain('soc-a/new.zip')
+    // Its backend cannot say what a package would write, so that is not offered.
+    expect(dialog().textContent).not.toContain('看看会写什么')
+    expect(dialog().querySelector('.fl-plan')).toBeNull()
+    fireEvent.click(await button('取消', dialog()))
     go('#/')
   })
 
@@ -200,6 +445,102 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
     fireEvent.click(await button('清屏', document.querySelector('.ctb') as HTMLElement))
     expect(consoleUi.clearConsole).toHaveBeenCalledWith('bsp-k3-cm1', 'die0')
+    go('#/')
+  })
+
+  it('switches to another board from the name, by mouse or keys, keeping the tab it shows', async () => {
+    go('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    fireEvent.click(await button('日志'))
+    // The board's side panel starts over on a switch, the name with it: look it up each time.
+    let name = document.querySelector('.bswitch [role=button]') as HTMLElement
+    expect(name.getAttribute('aria-expanded')).toBe('false')
+    expect(name.closest('h1')?.className).toBe('bname')
+    expect(name.getAttribute('aria-label')).toMatch(/^BSP-K3-CM1，/)
+    fireEvent.click(name)
+    const list = () => document.querySelector('.bswitch [role=listbox]') as HTMLElement | null
+    await waitFor(() => expect(list()).toBeTruthy(), wait)
+    // Every board but the empty slots, the one shown marked; a short list has no filter box and takes the keys itself.
+    const options = within(list()!).getAllByRole('option')
+    expect(options.map(o => o.querySelector('.bs-name')!.textContent)).toContain('BSP-K1-PICO')
+    expect(options.some(o => /HOST-B-S6/.test(o.textContent ?? ''))).toBe(false)
+    expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('.bs-name')!.textContent)).toEqual(['BSP-K3-CM1'])
+    expect(document.querySelector('.bswitch input')).toBeNull()
+    expect(document.activeElement).toBe(list())
+    const at = () => list()!.querySelector('[data-active]')!.querySelector('.bs-name')!.textContent
+    expect(at()).toBe('BSP-K3-CM1')
+    // Esc closes it and gives the focus back; so does a press outside.
+    fireEvent.keyDown(list()!, { key: 'Escape' })
+    await waitFor(() => expect(list()).toBeNull(), wait)
+    expect(document.activeElement).toBe(name)
+    fireEvent.keyDown(name, { key: 'Enter' })
+    await waitFor(() => expect(list()).toBeTruthy(), wait)
+    fireEvent.pointerDown(document.querySelector('.ctb')!)
+    await waitFor(() => expect(list()).toBeNull(), wait)
+    // The arrows move from the board shown, Enter picks: its page, on the same tab.
+    fireEvent.keyDown(name, { key: 'ArrowDown' })
+    await waitFor(() => expect(list()).toBeTruthy(), wait)
+    fireEvent.keyDown(list()!, { key: 'ArrowDown' })
+    const next = at()!
+    expect(next).not.toBe('BSP-K3-CM1')
+    fireEvent.keyDown(list()!, { key: 'Enter' })
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe(next), wait)
+    expect(document.querySelector('.ctb .tab.on')?.textContent).toBe('日志')
+
+    // More than eight boards: a filter box, which has the keys; a click picks.
+    const extra = ['bsp-k1-extra-a', 'bsp-k1-extra-b'].map(n => ({ ...structuredClone(state.boards.find(b => b.name === 'bsp-k1-musecard')!), name: n }))
+    state.boards.push(...extra)
+    const source = await stateStream()
+    source.emit('changed', { board: null })
+    name = document.querySelector('.bswitch [role=button]') as HTMLElement
+    fireEvent.click(name)
+    await waitFor(() => expect(within(list()!).getAllByRole('option')).toHaveLength(9), wait)
+    const filter = document.querySelector('.bswitch input') as HTMLInputElement
+    expect(document.activeElement).toBe(filter)
+    fireEvent.change(filter, { target: { value: 'musecard' } })
+    await waitFor(() => expect(within(list()!).getAllByRole('option')).toHaveLength(1), wait)
+    fireEvent.change(filter, { target: { value: 'k3-cm' } })
+    await waitFor(() => expect(within(list()!).getAllByRole('option')).toHaveLength(1), wait)
+    fireEvent.click(within(list()!).getByRole('option'))
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    expect(location.hash).toBe('#/board/bsp-k3-cm1')
+    expect(list()).toBeNull()
+    await waitFor(() => expect(calls.filter(c => c.path.startsWith('api/logs?')).at(-1)!.path).toMatch(/board=bsp-k3-cm1/), wait)
+    state.boards.splice(state.boards.length - extra.length, extra.length)
+    source.emit('changed', { board: null })
+    go('#/')
+  })
+
+  it('says how the last run ended when it needs a person, and nothing after a success', async () => {
+    const pico = state.boards.find(b => b.name === 'bsp-k1-pico')!
+    pico.run = { id: 'run-a1b2c3d4', boards: ['bsp-k1-pico'], kind: 'boot', label: '刷机中', by: 'user:alice', since: '2026-11-10T09:00:00.000Z', line: 'flash rootfs', status: 'interrupted' as const, message: 'boardd 在它运行时重启了，没能跟到它结束', endedAt: '2026-11-10T09:20:00.000Z' }
+    const source = await stateStream()
+    source.emit('changed', { board: pico.name })
+    go('#/board/bsp-k1-pico')
+    await waitFor(() => expect(document.querySelector('.detail .last-run')?.textContent).toContain('刷机没跟到结束'), wait)
+    expect(document.querySelector('.detail .last-run')?.textContent).toContain('boardd 在它运行时重启了')
+    pico.run = { ...pico.run, status: 'succeeded', message: null }
+    source.emit('changed', { board: pico.name })
+    await waitFor(() => expect(document.querySelector('.detail .last-run')).toBeNull(), wait)
+    pico.run = null
+    go('#/')
+  })
+
+  it('keeps the board shortcuts out of the open switcher', async () => {
+    // bsp-k3-deb1 is yours, so R resets it; a letter typed in the open list does not.
+    go('#/board/bsp-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    fireEvent.click(document.querySelector('.bswitch [role=button]')!)
+    const list = () => document.querySelector('.bswitch [role=listbox]') as HTMLElement | null
+    await waitFor(() => expect(list()).toBeTruthy(), wait)
+    fireEvent.keyDown(list()!, { key: 'r' })
+    fireEvent.keyDown(list()!, { key: 'd' })
+    await new Promise(r => setTimeout(r, 50))
+    expect(calls.some(c => c.path === 'api/reset' || c.path === 'api/fastboot')).toBe(false)
+    fireEvent.keyDown(list()!, { key: 'Escape' })
+    await waitFor(() => expect(list()).toBeNull(), wait)
     go('#/')
   })
 
@@ -347,6 +688,29 @@ describe('Modern frontend', () => {
       const site = [...document.querySelectorAll('.settings-flow .panel')].find(p => p.textContent?.includes('SDK 与站点'))
       expect(site?.textContent).toContain('abc1234')
     }, wait)
+    go('#/')
+  })
+
+  it('shows how full boardd\'s file store is in settings', async () => {
+    go('#/settings/files')
+    await waitFor(() => expect(document.querySelector('#s-files')?.textContent).toContain('3 GiB / 上限 20 GiB'), wait)
+    expect(document.querySelector('#s-files')!.textContent).toContain('磁盘还剩 100 GiB')
+    expect(document.querySelector('#s-files')!.textContent).toContain('4 个文件 · 不用的留 3 天')
+    expect((document.querySelector('#s-files .usage-bar i') as HTMLElement).style.width).toBe('15%')
+    go('#/')
+  })
+
+  it('shows what each board host keeps in its cache, read when opened', async () => {
+    go('#/settings/bsp-hosts')
+    const opener = () => [...document.querySelectorAll('button')].find(item => /的主机缓存/.test(item.textContent ?? ''))
+    await waitFor(() => expect(opener()).toBeTruthy(), wait)
+    expect(calls.some(c => /^api\/bsp\/hosts\/.*\/cache/.test(c.path))).toBe(false)
+    fireEvent.click(opener()!)
+    const box = () => opener()!.parentElement!
+    await waitFor(() => expect(box().textContent).toContain('host-a：46.0 GiB / 50.0 GiB'), wait)
+    expect(box().textContent).toContain('12 项（1 项正在用） · 不用的留 7 天 · 磁盘还剩 80.0 GiB')
+    expect(box().textContent).toContain('host-b：主机上的 bsp 太旧')
+    expect(box().querySelector('progress, [role=progressbar], .mv-progress')).toBeTruthy()
     go('#/')
   })
 

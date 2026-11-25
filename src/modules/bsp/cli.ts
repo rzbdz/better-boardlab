@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
-import { sdkCommand as sdkStream } from '../../shared/bsp-client.ts'
+import { sdkCommand as sdkStream, sdkFollowing } from '../../shared/bsp-client.ts'
 import { installedAgentSkills, noAgentsMessage } from 'boardlab-core/cli/agents.ts'
 import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
 
@@ -95,7 +95,7 @@ async function sdkCommand({ client, argv, json, out }: CommandContext) {
   const at = args.findIndex((arg, index) => index > 0 && ['-o', '--output'].includes(args[index - 1]!))
   const target = at >= 0 ? resolve(args[at]!) : null
   if (at >= 0) args[at] = '@download'
-  const result = await sdkStream(client, args, json, write)
+  const result = await sdkFollowing(client, args, json, write)
   if (target && result.download) await client.fetchFile(result.download, target)
   process.exitCode = result.code
 }
@@ -107,12 +107,13 @@ async function sdkCommand({ client, argv, json, out }: CommandContext) {
  */
 async function registryCommand(client: BoardsClient, raw: string[], json: boolean) {
   const [what, ...rest] = raw.filter(arg => arg !== '--json')
-  if (what === 'hosts') return runCatalog(client, ['status'], json)
+  if (what === 'hosts' || what === 'holdings') return runCatalog(client, ['status'], json)
   if (what === 'refresh') return runCatalog(client, ['refresh'], json)
   if (what !== 'sdk' || !rest.length || rest[0] === 'help' || rest[0] === '--help') {
     console.log(`用法：
-  boardlab registry hosts                              板卡主机、各自拿到的 SDK 目录版本，以及被目录盖住、没有生效的本地改动
-  boardlab registry refresh                            清掉所有缓存的目录副本（boardd 这边和每台主机），马上重新拿，列出每台主机的版本
+  boardlab registry hosts                              板卡主机、各自拿到的 SDK 目录版本，以及被目录盖住、没有生效的本地改动（也可写 holdings）
+  boardlab registry refresh                            清掉所有缓存的目录副本（boardd 这边和每台主机），让每台主机马上重新拿并核对版本；
+                                                       逐台说送到并生效，或 NOT DELIVERED、原因和下一步；一台都没拿到就报错
   boardlab registry sdk list [--kind sdk|family|server|workspace]
   boardlab registry sdk get <sdk> [-o 文件]            文档（YAML）；-o 写到文件，第一行记着版本号，改完原样 put 回去
   boardlab registry sdk put <sdk> -f 文件 [--check] [-m 说明] [--force]
@@ -120,7 +121,8 @@ async function registryCommand(client: BoardsClient, raw: string[], json: boolea
   boardlab registry sdk recipe <sdk> load|download -f 文件 [--check] [-m 说明]
                                                        只改一个启动方式（load 内存启动 / download 刷机）：步骤列表，或 {status, steps, notes, variants}
   boardlab registry sdk rm <sdk> --base <版本> | history <sdk> | rollback <sdk> <版本> | import | status
-  文档也可以是 family/<id>、server/<id>、workspace/<id>。改动立刻推到各板卡主机，不用重启；谁改的、为什么，都记在 history 里。`)
+  文档也可以是 family/<id>、server/<id>、workspace/<id>。put 之后逐台送到各板卡主机、核对版本，不用重启；没送到的主机会写明原因和该做什么
+  （主机配置没有 server.announce 的，加上后要重启那台的 boardctrld）。谁改的、为什么，都记在 history 里。`)
     return
   }
   return runCatalog(client, rest, json)

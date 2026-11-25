@@ -60,6 +60,12 @@ function startHost(dir: string, id: string, token: string, port: number): Promis
   const example = readFileSync(join(BSP, 'tests/fixtures/site/duts/mock-slot.yaml'), 'utf8').replace(/^host: .*$/m, `host: ${id}`)
   writeFileSync(join(site, 'duts', 'mock-board.yaml'), example)
   writeFileSync(join(site, 'boardctrl.yaml'), '{}\n')
+  // The board's console log as serial-mux keeps it on the host: by day, each line stamped. Two boots, and a timeout.
+  mkdirSync(join(dir, id, 'logs', 'mock-slot'), { recursive: true })
+  const boot = (h: string) => [`[2026-11-24 ${h}:00:01] U-Boot SPL 2022.10-dirty (Nov 10 2026 - 08:00:00 +0800)`, `[2026-11-24 ${h}:00:02] OpenSBI v1.3`,
+    `[2026-11-24 ${h}:00:03] U-Boot 2022.10-dirty (Nov 10 2026 - 08:00:00 +0800)`, `[2026-11-24 ${h}:00:04] [    0.000000] Linux version 6.6.36 (builder@host) (gcc 13.2) #1 SMP`,
+    `[2026-11-24 ${h}:00:05] mmc0: error -110 whilst initialising SD card`]
+  writeFileSync(join(dir, id, 'logs', 'mock-slot', '2026-11-24.log'), [...boot('08'), ...boot('09')].join('\n') + '\n')
   writeFileSync(join(site, 'hosts', `${id}.yaml`), [
     'host:',
     `  id: ${id}`,
@@ -77,6 +83,7 @@ function startHost(dir: string, id: string, token: string, port: number): Promis
     '  sdk: {}',
     '  dut:',
     '    probe: {pulse_ms: 20}',
+    `    serial_log_dir: ${join(dir, id, 'logs')}`,
     '',
   ].join('\n'))
   const child = spawn(PYTHON, ['-m', 'frontends.server', '-c', join(site, 'hosts', `${id}.yaml`)], {
@@ -199,6 +206,22 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
     expect(one.out).toMatch(/^P\d+/m)
     expect(one.out + one.err).not.toMatch(/unknown remote|missing or wrong token/)
   })
+
+  it('reads a host\'s console log by line number, finds every match and every boot, through boardd and bsp', () => {
+    const boots = cli(['boots', 'host-a-mock-slot', '--json'])
+    expect(boots.code, boots.err).toBe(0)
+    expect(JSON.parse(boots.out).map((mark: { line: number, id: string }) => [mark.line, mark.id])).toEqual([[0, 'spl'], [1, 'opensbi'], [2, 'uboot'], [3, 'linux'], [5, 'spl'], [6, 'opensbi'], [7, 'uboot'], [8, 'linux']])
+    const hits = cli(['logs', 'host-a-mock-slot', '--grep', 'mmc0', '--hits', '--json'])
+    expect(hits.code, hits.err).toBe(0)
+    expect(JSON.parse(hits.out)).toMatchObject({ hits: [4, 9], matched: 2, total: 10, source: 'backend' })
+    // The line a match names is the line a window there shows, and its position names it again.
+    const window = JSON.parse(cli(['logs', 'host-a-mock-slot', '--line', '9', '--before', '1', '--after', '0', '--json']).out)
+    expect(window).toMatchObject({ numbers: [8, 9], moreBefore: true, moreAfter: false, snapped: false })
+    expect(window.lines[1]).toContain('mmc0: error -110')
+    const again = JSON.parse(cli(['logs', 'host-a-mock-slot', '--at', window.positions[0], '--before', '0', '--after', '0', '--json']).out)
+    expect(again).toMatchObject({ numbers: [8], at: window.positions[0] })
+    expect(again.lines[0]).toContain('Linux version')
+  }, 180_000)
 
   it('takes a board lock and gives it back', () => {
     const lock = cli(['lock', 'host-a-mock-slot', '--for', 'end to end'])

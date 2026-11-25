@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Duplex } from 'node:stream'
 import { bspLab, type BspRunner } from '../src/modules/bsp/driver.ts'
+import { followJob } from '../src/modules/bsp/follow.ts'
 import { encodeMessage, FrameDecoder } from '../src/modules/serial-mux/client.ts'
 import type { BoardTarget, LabConfig } from 'boardlab-core/core/backend.ts'
 
@@ -222,14 +223,48 @@ describe('bsp lab driver', () => {
     expect(await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/k3/pkg.zip?sig=1', flasher: null }, line => progress.push(line), abort.signal))
       .toBe('[   0.0s] download package\n[  41.0s] flash rootfs 100%\n刷机工具：tool-b，用时 41 秒')
     await lab.builds!.flash!(config, on('k3-a', 'T1'), { path: '/files/abc/pkg.zip', sha256: 'abc', flasher: 'tool-b' }, () => {})
+    // `refresh` reaches bsp for a link only: an uploaded file has nothing to download again.
+    await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/k3/pkg.zip', flasher: null, refresh: true }, () => {})
+    await lab.builds!.flash!(config, on('k3-a', 'T1'), { path: '/files/abc/pkg.zip', sha256: 'abc', flasher: null, refresh: true }, () => {})
     expect(bsp.calls.map(call => call.args.slice(2).join(' '))).toEqual([
       'dut flash k3-a --package https://images.test/k3/pkg.zip?sig=1 --lease T1 --timeout 3600',
       'dut flash k3-a --package /files/abc/pkg.zip --sha256 abc --flasher tool-b --lease T1 --timeout 3600',
+      'dut flash k3-a --package https://images.test/k3/pkg.zip --refresh --lease T1 --timeout 3600',
+      'dut flash k3-a --package /files/abc/pkg.zip --sha256 abc --lease T1 --timeout 3600',
     ])
     expect(progress).toEqual(['[  12.0s] flash rootfs 40%'])
     // The runner gets the signal that kills it: the lock ending stops the CLI, a cancel first tells the host.
     expect(signals[0]).toBeInstanceOf(AbortSignal)
     expect(signals[1]).toBeUndefined()
+  })
+
+  it('reads what each host of a lab keeps in its cache, and says which hosts it could not reach', async () => {
+    const cache = { path: '/var/cache/a', used: 10, entries: 2, held: 1, max_bytes: 100, ttl_s: 86400, min_free_bytes: 5, free: 1000 }
+    const bsp = fakeBsp(() => ok([{ host: 'h1', via: 'http', modules: ['dut'], duts: [], cache }, { host: 'h2', via: 'ssh', modules: ['dut'], duts: [], cache: null }, { host: 'h3', error: 'refused' }]))
+    expect(await bspLab({ run: bsp.run }).caches(config)).toEqual([{ host: 'h1', cache, error: null }, { host: 'h2', cache: null, error: null }, { host: 'h3', cache: null, error: 'refused' }])
+    expect(bsp.calls[0]!.args.slice(2)).toEqual(['hosts'])
+  })
+
+  it('says which packages it takes, flashes chosen partitions, and asks the host what a package would write', async () => {
+    const plan = { package: 'pkg.zip', partial: true, notes: [], media: [{ id: 'disk', label: 'disk', size: 1 << 20, partitions: [{ name: 'boot', offset: 0, size: 4096, image: 'boot.img', payload: 100, selectable: true }] }] }
+    let planning = true
+    const bsp = fakeBsp(() => planning ? ok({ plan }) : ok({ job: 'flash-9', lines: ['done'], flashed: true }))
+    const lab = bspLab({ run: bsp.run })
+    expect(lab.builds!.accepts).toEqual({ schemes: ['http', 'https', 'ssh'], suffixes: ['.zip', '.tar.gz', '.tgz', '.tar'] })
+    // A plan touches no board: the host reads the package and answers with its layout.
+    expect(await lab.builds!.plan!(config, on('k3-a', 'T1'), { url: 'ssh://builder@build.example.org/out/pkg.zip' }, () => {})).toEqual(plan)
+    expect(bsp.calls.at(-1)!.args.slice(2).join(' ')).toBe('dut flash k3-a --package ssh://builder@build.example.org/out/pkg.zip --plan --lease T1 --timeout 900')
+    // Chosen partitions go to the host as a list; none chosen flashes the whole package.
+    planning = false
+    await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', partitions: ['boot', 'rootfs'] }, () => {})
+    await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', partitions: [] }, () => {})
+    expect(bsp.calls.slice(-2).map(call => call.args.slice(2).join(' '))).toEqual([
+      'dut flash k3-a --package https://images.test/pkg.zip --partitions boot,rootfs --lease T1 --timeout 3600',
+      'dut flash k3-a --package https://images.test/pkg.zip --lease T1 --timeout 3600',
+    ])
+    // A host whose bsp does not know --plan answers without one: say so.
+    const old = bspLab({ run: fakeBsp(() => ok({})).run })
+    await expect(old.builds!.plan!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip' }, () => {})).rejects.toThrow(/--plan/)
   })
 
   it('registers boards as bsp finds them, on the slots asked for, and says why a slot found nothing', async () => {
@@ -257,6 +292,71 @@ describe('bsp lab driver', () => {
     const range = await bspLab({ run: bsp.run }).serial.logs!(config, on('k3-a'), { since: '2026-11-10 08:00:00', grep: 'error', limit: 500 })
     expect(range).toEqual({ lines: ['[2026-11-10 09:00:00] ERROR mmc0'], matched: 1, truncated: false })
     expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--since', '2026-11-10 08:00:00', '--grep', 'error', '--limit', '500'])
+  })
+
+  it('reads a window of the host\'s log by line or position, and where every match and boot line is', async () => {
+    const answers: Record<string, unknown> = {
+      window: { dut: 'k3-a', lines: ['a', 'b'], positions: ['2026-11-10:0', '2026-11-10:2'], numbers: [7, 8], at: '2026-11-10:2', more_before: true, more_after: false, snapped: false, total: 9 },
+      hits: { dut: 'k3-a', lines: [], positions: [], numbers: [], matched: 2, total: 9, hits: [3, 8], hits_truncated: false, truncated: false, marks: [{ line: 1, id: 'linux', text: 'Linux version 6.6 (' }], marks_truncated: false },
+    }
+    const bsp = fakeBsp(args => ok(args.includes('--at') ? answers.window : answers.hits))
+    const lab = bspLab({ run: bsp.run })
+    expect(await lab.serial.logs!(config, on('k3-a'), { at: 'line:8', before: 1, after: 3 })).toEqual({
+      lines: ['a', 'b'], matched: 2, truncated: false, positions: ['2026-11-10:0', '2026-11-10:2'], numbers: [7, 8], total: 9, base: 0, at: '2026-11-10:2', moreBefore: true, moreAfter: false, snapped: false,
+    })
+    expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--at', 'line:8', '--before', '1', '--after', '3'])
+    const marks = [{ id: 'linux', title: 'Linux', pattern: 'Linux version \\d', stage: 4, tone: 'kernel' as const }]
+    expect(await lab.serial.logs!(config, on('k3-a'), { grep: 'err', hits: true, maxHits: 50, marks, fromLine: 4 })).toMatchObject({ hits: [3, 8], hitsTruncated: false, marks: [{ line: 1, id: 'linux' }], marksTruncated: false, total: 9, matched: 2 })
+    expect(bsp.calls[1]!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--grep', 'err', '--limit', '20000', '--hits', '--max-hits', '50',
+      '--marks', JSON.stringify([{ id: 'linux', pattern: 'Linux version \\d', flags: '' }]), '--from-line', '4'])
+  })
+
+  it('reads an older host\'s last lines when it does not know windows or hits, numbered here, so the page still reads it', async () => {
+    const lines = Array.from({ length: 30 }, (_, i) => i === 12 ? '[    0.000000] Linux version 6.6.36 (b@h) (gcc) #1' : `line ${i}`)
+    const bsp = fakeBsp(args => {
+      // As an older bsp answers a flag it does not know: argparse's usage on stderr, exit 2, no envelope.
+      if (args.some(arg => ['--at', '--hits', '--marks', '--from-line'].includes(arg))) return { code: 2, stdout: '', stderr: 'usage: boardctrl [-h] <command> ...\nboardctrl: error: unrecognized arguments: --at end' }
+      return ok({ dut: 'k3-a', lines, matched: lines.length, truncated: false })
+    })
+    const lab = bspLab({ run: bsp.run })
+    expect(await lab.serial.logs!(config, on('k3-a'), { at: 'end', before: 2 })).toMatchObject({ lines: ['line 28', 'line 29'], numbers: [28, 29], total: 30, moreBefore: true })
+    expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--limit', '20000'])
+    expect(await lab.serial.logs!(config, on('k3-a'), { grep: 'linux', hits: true })).toMatchObject({ hits: [12], matched: 1, total: 30 })
+    const marks = [{ id: 'linux', title: 'Linux', pattern: 'Linux version \\d', stage: 4, tone: 'kernel' as const }]
+    expect((await lab.serial.logs!(config, on('k3-a'), { marks })).marks).toEqual([{ line: 12, id: 'linux', text: lines[12] }])
+    // A plain search from an older host is its own answer, and other failures are still failures.
+    expect(await lab.serial.logs!(config, on('k3-a'), { grep: 'line 1' })).toMatchObject({ lines, matched: 30 })
+    const down = fakeBsp(() => fail('host unreachable'))
+    await expect(bspLab({ run: down.run }).serial.logs!(config, on('k3-a'), { at: 'end', before: 2 })).rejects.toThrow(/unreachable/)
+  })
+
+  it('says what the board\'s SoC prints as it boots, as its host knows it, and none from an older host', async () => {
+    const marks = [{ id: 'rom', title: 'Boot ROM', pattern: '(?:ROMA: boot start)', flags: '', stage: 0, tone: 'rom' }]
+    const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'boot-marks' ? ok({ dut: 'k3-a', soc: 'soc-a', marks }) : ok({}))
+    const lab = bspLab({ run: bsp.run })
+    expect(await lab.serial.bootMarks!(config, on('k3-a'))).toEqual(marks)
+    // Asked once a while, however often the page opens the console.
+    await lab.serial.bootMarks!(config, on('k3-a'))
+    expect(bsp.calls.filter(call => call.args.includes('boot-marks'))).toHaveLength(1)
+    // Another host entirely (nothing kept for it): one installed before it knew boot marks has none.
+    const { forgetBootMarks } = await import('../src/modules/bsp/logs.ts')
+    forgetBootMarks()
+    const old = fakeBsp(() => { throw new Error('invalid choice: boot-marks') })
+    expect(await bspLab({ run: old.run }).serial.bootMarks!(config, on('k3-a'))).toEqual([])
+  })
+
+  it('reads the boot marks again after a site sync, and not before', async () => {
+    const { bootMarksOf, forgetBootMarks } = await import('../src/modules/bsp/logs.ts')
+    let read = 0
+    const marks = bootMarksOf(async () => { read++; return { marks: [{ id: 'rom', title: 'Boot ROM', pattern: 'ROM: x', stage: 0, tone: 'rom' as const }] } })
+    const config = { url: 'ssh://lab-1', username: 'root' } as never
+    await marks(config, 'k3-a')
+    await marks(config, 'k3-a')
+    expect(read).toBe(1)
+    // The site changed (its SoCs may have): the next ask reads the host again.
+    forgetBootMarks()
+    await marks(config, 'k3-a')
+    expect(read).toBe(2)
   })
 
   it('greys a board whose slot lost its adapter', async () => {
@@ -390,6 +490,22 @@ describe('bsp lab rename', () => {
     // A name that is neither renamed nor there is an error.
     const neither = fakeBsp(args => args[0] === 'dut' && args[1] === 'list' ? ok([{ id: 'k3-c', host: 'h1' }]) : fail('no DUT k3-a'))
     await expect(bspLab({ run: neither.run }).rename!.rename(config, on('k3-a'), 'k3-b')).rejects.toThrow(/no DUT k3-a/)
+  })
+})
+
+describe('bsp lab cancel', () => {
+  it('says there is nothing to cancel, and what ran last, instead of a board that would not stop', async () => {
+    const nothing = (details: unknown) => fakeBsp(() => ({ code: 1, stdout: JSON.stringify({ ok: false, error: { code: 'invalid_request', message: 'k3-a: no job running', hint: 'nothing to cancel', details } }), stderr: '' }))
+    const last = nothing({ running: false, last_job: { id: 'flash-7', kind: 'flash', status: 'failed', error: { message: 'line busy' } } })
+    const error = await bspLab({ run: last.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
+    expect(error).toMatchObject({ code: 'conflict', message: expect.stringMatching(/不用取消.*flash-7（flash）failed：line busy.*bsp job get flash-7/) })
+    const never = nothing({ running: false, last_job: null })
+    await expect(bspLab({ run: never.run }).cancel!(config, on('k3-a', 'tok'))).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/没有它跑过任务的记录/) })
+    // Any other refusal stays an error of its own (boardd reports it as a board that did not stop).
+    const refused = fakeBsp(() => fail('lease held by someone else'))
+    const other = await bspLab({ run: refused.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
+    expect(other.code).toBeUndefined()
+    expect(other.message).toMatch(/lease held/)
   })
 })
 
@@ -597,5 +713,64 @@ describe('bsp debug stream', () => {
     await expect(lab.discovery!.compose!(config, 'manual', { host: 'h1', name: 'bad name' }, {})).rejects.toThrow(/板名/)
     await expect(lab.discovery!.compose!(config, 'manual', { host: 'h1', name: 'x', services: '{' }, {})).rejects.toThrow(/JSON/)
     expect(bsp.calls.filter(call => call.args.includes('add'))).toHaveLength(1)
+  })
+})
+
+describe('bsp runs boardd lost', () => {
+  it('reports the host job a flash names as its handle, and follows that job again to its end', async () => {
+    const handles: string[] = []
+    const run: BspRunner = async (args, options) => {
+      options.onStderr?.('k3-a @ h1: flash pkg.zip with tool-b, job flash-17-4')
+      options.onStderr?.('[  12.0s] flash rootfs 40%')
+      return fakeBsp(() => ok({ job: 'flash-17-4', lines: [], flasher: 'tool-b' })).run(args, options)
+    }
+    await bspLab({ run }).builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, undefined, { handle: handle => handles.push(handle) })
+    expect(handles).toHaveLength(1)
+
+    // The next boardd follows the job on its host until it ends, with the board's lease.
+    const views = [
+      { status: 'running', lines: ['flash rootfs 80%'], next: 3 },
+      { status: 'succeeded', lines: ['flash rootfs 100%'], next: 4 },
+    ]
+    const bsp = fakeBsp(() => ok(views.shift()))
+    const progress: string[] = []
+    expect(await bspLab({ run: bsp.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, line => progress.push(line), new AbortController().signal))
+      .toBe('flash rootfs 80%\nflash rootfs 100%')
+    expect(progress).toEqual(['flash rootfs 80%', 'flash rootfs 100%'])
+    expect(bsp.calls.map(call => call.args.slice(2).join(' '))).toEqual([
+      '-r h1 job get flash-17-4 --since 0 --wait 30',
+      '-r h1 job get flash-17-4 --since 3 --wait 30',
+    ])
+
+    // A job that failed or was cancelled on the host ends that way.
+    const failed = fakeBsp(() => ok({ status: 'failed', lines: [], next: 0, error: { message: 'flasher exited 2' } }))
+    await expect(bspLab({ run: failed.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toThrow(/flasher exited 2/)
+    const cancelled = fakeBsp(() => ok({ status: 'cancelled', lines: [], next: 0 }))
+    await expect(bspLab({ run: cancelled.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' })
+  })
+
+  it('asks a host it cannot reach again, and stops on what the host says about the job', async () => {
+    const handle = JSON.stringify({ job: 'flash-17-4', host: 'h1' })
+    const answers: Array<() => unknown> = [
+      () => { throw new Error('ssh: connect to host h1: Connection refused') },
+      () => { throw new Error('bsp job get: timed out') },
+      () => ({ status: 'running', lines: ['flash rootfs 90%'], next: 5 }),
+      () => ({ status: 'succeeded', lines: ['done'], next: 6 }),
+    ]
+    const asked: string[] = []
+    const get = async (args: string[]) => { asked.push(args.join(' ')); return answers.shift()!() as never }
+    expect(await followJob(handle, () => {}, get, { retryMs: [1] })).toBe('flash rootfs 90%\ndone')
+    expect(asked).toEqual([
+      'job get flash-17-4 --since 0 --wait 30', 'job get flash-17-4 --since 0 --wait 30',
+      'job get flash-17-4 --since 0 --wait 30', 'job get flash-17-4 --since 5 --wait 30',
+    ])
+    // A host that does not know the job answers about it: not asked again.
+    let calls = 0
+    const unknown = async () => { calls++; throw Object.assign(new Error('no job flash-17-4'), { bsp: { code: 'not_found' } }) }
+    await expect(followJob(handle, () => {}, unknown, { retryMs: [1] })).rejects.toThrow(/no job/)
+    expect(calls).toBe(1)
+    // One out of reach for too long is given up on, saying the job may still run there.
+    const away = async () => { throw new Error('Connection refused') }
+    await expect(followJob(handle, () => {}, away, { retryMs: [5], awayMs: 20 })).rejects.toThrow(/跟不上了.*job get flash-17-4/)
   })
 })

@@ -131,7 +131,8 @@
       "packages": [
         "react",
         "@xterm/xterm",
-        "@xterm/addon-fit"
+        "@xterm/addon-fit",
+        "@xterm/addon-search"
       ]
     },
     "frontends": {
@@ -151,7 +152,8 @@
         "react",
         "react-dom",
         "@xterm/xterm",
-        "@xterm/addon-fit"
+        "@xterm/addon-fit",
+        "@xterm/addon-search"
       ],
       "$comment": "each frontend is a whole page of its own; it renders the modules' views and knows no module's internals"
     },
@@ -195,6 +197,10 @@
       "hosts": [],
       "system": [],
       "feedback": [],
+      "nexus-images": [],
+      "sftp-images": [
+        "hosts"
+      ],
       "human": []
     }
   },

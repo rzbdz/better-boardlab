@@ -10,6 +10,7 @@ import { EventStream, type Endpoint } from 'boardlab-core/core/api.ts'
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { BoardLab } from 'boardlab-core/core/lab.ts'
 import type { Hosts } from '../hosts/ssh.ts'
+import { forgetBootMarks } from './logs.ts'
 import { SiteSyncError, syncHost } from './provision.ts'
 import type { Site } from './site.ts'
 
@@ -58,6 +59,8 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
         site.recordHost(item.id, { revision: last.ok ? revision : last.unknown ? '?' : had?.revision ?? '', at: new Date().toISOString(), ok: last.ok, message: last.message })
         lab.kernel.record(holder, null, 'bsp-site', `sync ${item.id} ${revision}`, last.ok, last.message.slice(0, 200))
       }
+      // A sync may have changed the SoCs' boot marks: read them from the hosts again rather than keep the old ones.
+      if (results.some(result => result.ok)) forgetBootMarks()
       return { revision, results, images }
     } finally {
       site.syncing = false

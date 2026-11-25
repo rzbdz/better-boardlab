@@ -31,8 +31,12 @@ function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: b
   )
 }
 
-/** A flash package: a link the board's backend downloads itself. */
-export interface FlashPackage { url: string, flasher?: string }
+/**
+ * A flash package: a link the board's backend downloads itself, a file sent to boardd first (its sha256), or an image
+ * of a market by its place there. Only the
+ * chosen partitions are written when some are given, and the board is reset after when asked.
+ */
+export interface FlashPackage { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], reset?: boolean }
 
 /** boardd's operations (`Board.busy.kind`) as the buttons that start them. */
 const SERVER: Record<string, string> = { reset: 'reset', fastboot: 'fastboot', boot: 'boot', stage: 'boot', refresh: 'refresh', remove: 'remove', discover: 'discover', rebuild: 'rebuild', lock: 'lock' }
@@ -78,7 +82,10 @@ export function useBoardActions(board: Board) {
     confirm: () => void run('confirm', '确认', () => api.confirm(board.name, board.lab?.attentionRequest ?? null), `${name} 继续了`),
     boot: (sdk: string, method: 'load' | 'download', brk?: string) => run('boot', method === 'load' ? '内存启动' : '刷机', () => api.bootSdk(board.name, sdk, method, brk)),
     cancel: () => run('cancel', '取消', () => api.cancel(board.name), `${name} 正在停下`),
-    flashPackage: (pkg: FlashPackage) => run('boot', '刷机', () => api.flashPackage(board.name, { url: pkg.url, flasher: pkg.flasher || undefined })),
+    flashPackage: (pkg: FlashPackage) => run('boot', '刷机', () => api.flashPackage(board.name, {
+      ...(pkg.image ? { image: pkg.image } : pkg.sha256 ? { sha256: pkg.sha256 } : { url: pkg.url }), flasher: pkg.flasher || undefined,
+      ...(pkg.partitions?.length ? { partitions: pkg.partitions } : {}), ...(pkg.reset ? { reset: true } : {}),
+    })),
     refresh: () => ask(`重新读取 ${name}`, '复位板子，从 EEPROM 读型号；换了板子时用。', '读取', () => void run('refresh', '重新读取', () => api.refresh(board.name, {}))),
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),
     discoverSlot: () => {

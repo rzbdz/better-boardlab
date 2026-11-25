@@ -23,9 +23,13 @@ export function hostLab(options: HostOptions = {}): Backend {
   const transports = new Map<string, Transport>()
   const reach = (config: LabConfig) => { const key = `${config.url}\0${config.username}`; let t = transports.get(key); if (!t) transports.set(key, t = transport(config)); return t }
   /** A client acting for `holder` on the host: a person by name, an agent by its holder. */
+  // A host's worker restarting is back within a second or two; a host that is gone is said at once, not after the
+  // client's half minute of waiting, since the hub keeps asking anyway.
+  const HOST_RETRY_MS = [200, 500, 1000]
   const as = (config: LabConfig, holder?: string | null): BoardsClient => {
-    if (!holder) return new BoardsClient(reach(config))
-    const client = new BoardsClient(reach(config), holder)
+    const client = new BoardsClient(reach(config), holder || undefined)
+    client.retryMs = HOST_RETRY_MS
+    if (!holder) return client
     if (!holder.startsWith('user:')) return client
     const person = holder.slice(5)
     const open = client.open.bind(client)
@@ -159,9 +163,10 @@ export function hostLab(options: HostOptions = {}): Backend {
       async logs(config, target, query) {
         const params = new URLSearchParams({ board: target.device })
         if (target.die && target.die !== 'die0') params.set('die', target.die)
-        for (const [key, value] of Object.entries({ since: query.since, until: query.until, grep: query.grep, limit: query.limit })) if (value != null && value !== '') params.set(key, String(value))
+        for (const [key, value] of Object.entries({ since: query.since, until: query.until, grep: query.grep, limit: query.limit, maxHits: query.maxHits, at: query.at, before: query.before, after: query.after })) if (value != null && value !== '') params.set(key, String(value))
         if (query.regex) params.set('regex', '1')
         if (query.first) params.set('first', '1')
+        if (query.hits) params.set('hits', '1')
         return call(as(config).call('GET', `/api/logs?${params}`))
       },
     },

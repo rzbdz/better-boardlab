@@ -5,23 +5,21 @@
  */
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
-import { clearConsole, reconnectConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
+import { clearConsole, reconnectConsole, searchConsole, SerialConsole, STATUS_TEXT, type ConsoleStatus } from '../../../src/ui/console.tsx'
 import { consoleStatusText } from '../../../src/ui/console-session.ts'
-import { ACTIONS, PURPOSES } from '../../../src/ui/format.ts'
+import { ACTIONS, lastRun, PURPOSES } from '../../../src/ui/format.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
-import { canRediscover, useBoardActions, type FlashPackage } from '../actions.tsx'
+import { canRediscover, useBoardActions } from '../actions.tsx'
+import { FlashDialog } from '../flash.tsx'
 import { age, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
-import { LogPanel } from './logs.tsx'
+import { usePicker } from '../../../src/ui/picker.ts'
+import { LogPanel, type LogQuery } from './logs.tsx'
 
 const LAST_BOOT = 'boardlab.modern.lastBoot'
 const lastBoot = (board: string): { sdk: string, method: 'load' | 'download' } | null => { try { return JSON.parse(localStorage.getItem(LAST_BOOT) ?? '{}')[board] ?? null } catch { return null } }
 const saveBoot = (board: string, value: { sdk: string, method: 'load' | 'download' }) => { try { localStorage.setItem(LAST_BOOT, JSON.stringify({ ...JSON.parse(localStorage.getItem(LAST_BOOT) ?? '{}'), [board]: value })) } catch {} }
-// The flash package link (and flashing tool) last used on each board, offered again next time.
-const LAST_PACKAGE = 'boardlab.modern.lastPackage'
-const lastPackage = (board: string): { url: string, flasher: string } | null => { try { return JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}')[board] ?? null } catch { return null } }
-const savePackage = (board: string, value: { url: string, flasher: string }) => { try { localStorage.setItem(LAST_PACKAGE, JSON.stringify({ ...JSON.parse(localStorage.getItem(LAST_PACKAGE) ?? '{}'), [board]: value })) } catch {} }
 
 // Break points come from a slow read of the SDK's recipe and do not change while the page lives: one read per board and
 // SDK, shared by the dialog (opening it again is instant) and prefetched as soon as the board's page shows. A read for
@@ -47,17 +45,19 @@ function prefetchBreaks(board: string, sdk: string) { if (sdk) void readBreaks(b
 export function BoardPage({ state, name, dark, full, setFull, watched }: { state: PageState, name: string, dark: boolean, full: boolean, setFull: (full: boolean) => void, watched: string[] }) {
   const board = state.boards.find(b => b.name === name)
   const [tab, setTab] = useState<'tty' | 'log'>('tty')
+  // A search the console handed to the log: the log opens on it.
+  const [logQuery, setLogQuery] = useState<LogQuery | null>(null)
   const [status, setStatus] = useState<ConsoleStatus>('connecting')
   const [reason, setReason] = useState<string | null>(null)
   const [die, setDie] = useState<string | undefined>()
   const ui = useUI()
   if (!board) return <div className="page"><section className="hero"><h1>没有这块板子</h1><p>可能被移除了。<a href="#/">回到板子</a></p></section></div>
   const m = model(board, state.you)
-  const dies = board.chips.filter(c => c.online || board.lab).map(c => c.die), chosen = die ?? dies[0]
+  const dies = board.chips.filter(c => c.online || board.lab).map(c => c.die), chosen = die && dies.includes(die) ? die : dies[0]
   const lab = board.lab ? state.labs.find(item => item.id === board.lab!.id) : null
   return (
     <div className={`detail${full ? ' full' : ''}`}>
-      <aside className="side">{full ? <Rail board={board} m={m} /> : <Side state={state} board={board} m={m} watched={watched} openLogs={() => setTab('log')} />}</aside>
+      <aside className="side">{full ? <Rail board={board} m={m} /> : <Side key={board.name} state={state} board={board} m={m} watched={watched} openLogs={() => setTab('log')} />}</aside>
       <section className="con">
         {lab?.discovery?.running && <div className="flag run" style={{ margin: '0 12px 8px' }}><span className="spin" /><div><b>实验室正在发现板子</b><span>{lab.discovery.line}</span></div>
           <button className="pill sm" onClick={() => void api.cancelDiscovery(lab.id).then(out => ui.toast('取消发现', out.message), error => ui.fail('取消发现失败', error))}>取消发现</button></div>}
@@ -68,14 +68,16 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
           {full && <span className="cname">{upper(board.name)}</span>}
           <span className="gap" />
           <span className="st"><span className={`dot ${m.flags.gone || m.flags.offline ? 'bad' : status === 'live' ? 'live' : status === 'retry' || status === 'closed' ? 'warn' : ''}`} />{m.flags.gone ? '串口离线' : consoleStatusText(status, reason, STATUS_TEXT)}</span>
+          {tab === 'tty' && <button className="ib" title="在串口里搜索（Ctrl+F）" aria-label="搜索" onClick={() => searchConsole(board.name, chosen)}><Icon name="search" /></button>}
           {tab === 'tty' && <button className="ib" title="清屏（保留连接）" aria-label="清屏" onClick={() => clearConsole(board.name, chosen)}>清屏</button>}
           {tab === 'tty' && status !== 'live' && <button className="ib" title="现在重连串口" aria-label="重连" onClick={() => reconnectConsole(board.name, chosen)}>重连</button>}
           {dies.length > 1 && <span className="seg2">{dies.map(d => <button key={d} className={d === chosen ? 'on' : ''} onClick={() => setDie(d)}>{d}</button>)}</span>}
           <button className="ib" title={full ? '还原' : '占满'} aria-label={full ? '还原' : '占满'} onClick={() => setFull(!full)}><Icon name={full ? 'shrink' : 'expand'} /></button>
         </div>
-        {tab === 'log' ? <LogPanel board={board.name} die={chosen} />
+        {tab === 'log' ? <LogPanel board={board.name} die={chosen} query={logQuery} />
           : dies.length || board.lab ? <>
-            <SerialConsole key={`${board.name}:${chosen ?? ''}`} board={board.name} die={chosen} dark={dark} onStatus={(next, why) => { setStatus(next); setReason(why) }} className="terminal" jumpClassName="jump" />
+            <SerialConsole key={`${board.name}:${chosen ?? ''}`} board={board.name} die={chosen} dark={dark} onStatus={(next, why) => { setStatus(next); setReason(why) }} className="terminal" jumpClassName="jump" searchClassName="tsearch" bootsClassName="tboots"
+              onSearchHistory={(grep, regex) => { setLogQuery({ grep, regex }); setTab('log') }} />
             {!m.mine && <div className="ro"><Icon name="eye" />{m.holder ? `${holder(m.holder).name} 拿着锁，你的输入会和他们的混在一起` : '没拿锁也能输入；长时间用请拿锁'}</div>}
           </> : <div className="term-empty">这块板子没有在线的串口</div>}
       </section>
@@ -95,6 +97,46 @@ function Rail({ board, m }: { board: Board, m: Model }) {
   </>
 }
 
+/**
+ * The board's name, which is also the way to another board: it looks like a field on hover (always on a touch screen),
+ * and opens the boards to switch to, each with where it is and its state. The page keeps its tab across the switch.
+ */
+function BoardSwitch({ state, board }: { state: PageState, board: Board }) {
+  // Yours first, then by host and slot, as on the boards page; an empty slot only when it is the one shown.
+  const boards = state.boards.filter(b => !b.lab?.empty || b.name === board.name)
+    .map(b => ({ b, m: model(b, state.you) }))
+    .sort((x, y) => Number(y.m.mine) - Number(x.m.mine) || (x.b.slotRef ?? x.b.name).localeCompare(y.b.slotRef ?? y.b.name, 'en', { numeric: true }))
+  const p = usePicker({
+    items: boards, key: x => x.b.name, current: board.name,
+    text: x => [x.b.name, upper(x.b.name), where(x.b), x.b.product, x.m.word].join(' '),
+    onPick: x => { location.hash = `#/board/${encodeURIComponent(x.b.name)}` },
+  })
+  return (
+    <div className={`bswitch${p.open ? ' open' : ''}`} {...p.rootProps}>
+      {/* The heading holds the button, not the other way round: a button's content is not read as a heading. */}
+      <h1 className="bname">
+        <span className="bswitch-t" {...p.triggerProps} title={`${upper(board.name)} · 换一块板子`} aria-label={`${upper(board.name)}，换一块板子`}>
+          {upper(board.name)}<Icon name="chev" />
+        </span>
+      </h1>
+      {p.open && <div className="pop">
+        {p.filtering && <label className="find"><Icon name="search" /><input {...p.inputProps} placeholder="找板子" aria-label="找板子" /></label>}
+        <ul {...p.listProps} aria-label="换一块板子">
+          {p.shown.map((x, i) => (
+            <li key={x.b.name} {...p.optionProps(x, i)}>
+              <span className={`dot ${x.m.tone}`} />
+              <span className="bs-name">{upper(x.b.name)}</span>
+              <span className="bs-sub">{where(x.b)} · {x.m.word}</span>
+              {x.b.name === board.name && <Icon name="check" />}
+            </li>
+          ))}
+          {!p.shown.length && <li className="bs-none">没有匹配的板子</li>}
+        </ul>
+      </div>}
+    </div>
+  )
+}
+
 function Side({ state, board, m, watched, openLogs }: { state: PageState, board: Board, m: Model, watched: string[], openLogs: () => void }) {
   const act = useBoardActions(board)
   const ui = useUI()
@@ -108,6 +150,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
       if (m.mine && !m.flags.gone && k === 'r') act.reset()
       else if (m.mine && !m.flags.gone && k === 'd') act.fastboot()
       else if (m.mine && !m.flags.gone && k === 'b') bootDialog()
+      else if (m.mine && !m.flags.gone && k === 'w' && canFlash) flashDialog()
       else if (k === 'l' && m.lock === 'free') act.lock()
     }
     window.addEventListener('keydown', onKey)
@@ -119,8 +162,11 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   const sdks = board.lab?.sdks ?? []
   const bootSdk = last && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? ''
   useEffect(() => { prefetchBreaks(board.name, bootSdk) }, [board.name, bootSdk])
-  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, method, brk) => { saveBoot(board.name, { sdk, method }); void act.boot(sdk, method, brk) }}
-    onPackage={pkg => { if (pkg.url) savePackage(board.name, { url: pkg.url, flasher: pkg.flasher ?? '' }); void act.flashPackage(pkg) }} />)
+  const bootDialog = () => ui.layer(close => <BootDialog board={board} close={close} onStart={(sdk, brk) => { saveBoot(board.name, { sdk, method: 'load' }); void act.boot(sdk, 'load', brk) }} />)
+  // Flashing is its own action: an image of a market, a link, or an SDK's build, with what it would write shown first.
+  const canFlash = !!board.lab?.canFlashPackage || sdks.length > 0
+  const flashDialog = () => ui.layer(close => <FlashDialog board={board} close={close} onPackage={pkg => void act.flashPackage(pkg)}
+    onSdk={sdk => { saveBoot(board.name, { sdk, method: 'download' }); void act.boot(sdk, 'download') }} />, 'wide')
   const renameDialog = () => ui.layer(close => <RenameDialog board={board} close={close} />)
   const relay = () => ui.layer(close => <RelayDialog board={board} close={close} />, 'wide')
   const extra = viewsFor(state, 'board', { board: board.name })
@@ -134,10 +180,11 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 
   const tiles: Array<[string, string, string, string, () => void, boolean]> = [
     ['reset', 'power', '复位', 'R', act.reset, true], ['fastboot', 'zap', '下载模式', 'D', act.fastboot, true], ['boot', 'rocket', '启动', 'B', bootDialog, true],
+    ...(canFlash ? [['flash', 'flash', '刷机', 'W', flashDialog, true] as [string, string, string, string, () => void, boolean]] : []),
     ...(lab?.canRelay ? [['relay', 'plug', '继电器', '', relay, true] as [string, string, string, string, () => void, boolean]] : []),
     ['logs', 'dl', '日志', '', openLogs, false],
   ]
-  const sub: Record<string, string> = { reset: '约 3 秒', fastboot: '停在 boot ROM 等文件', boot: last ? `上次：${last.sdk} · ${last.method === 'load' ? '内存' : '刷机'}` : board.lab?.canFlashPackage ? '选 SDK 或刷机包' : '选 SDK，内存启动或刷机', relay: '电源、复位、BOOT 键', logs: '搜索、下载、wget' }
+  const sub: Record<string, string> = { reset: '约 3 秒', fastboot: '停在 boot ROM 等文件', boot: last?.method === 'load' ? `上次：${last.sdk}` : '内存启动，不动存储', flash: board.lab?.canFlashPackage ? '镜像市场、链接或 SDK' : '用 SDK 的产物', relay: '电源、复位、BOOT 键', logs: '搜索、下载、wget' }
 
   return <>
     <div className="side-top"><a className="back" href="#/"><Icon name="back" />板子</a>
@@ -153,14 +200,17 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
         </div>}
       </div>
     </div>
-    <h1 className="bname" title={upper(board.name)}>{upper(board.name)}</h1>
+    <BoardSwitch state={state} board={board} />
     <div className="bwhere">{where(board)}{board.product ? ` · ${board.product}` : ''}</div>
     <Flags board={board} m={m} act={act} />
     <LockBox state={state} board={board} m={m} act={act} />
     {m.lock !== 'empty' && <>
       <div className="controls">{tiles.map(([key, icon, label, kbd, go, needsLock]) => {
-        const locked = needsLock && !m.mine, spinning = act.busy === key || (key === 'boot' && !!m.flags.booting && m.mine)
-        const off = locked || (needsLock && m.flags.gone) || (needsLock && !!act.busy && act.busy !== key) || (key === 'boot' && !!m.flags.booting)
+        // Booting and flashing are both a `boot` run on the board: the run's own label says which tile started it, and both wait for it.
+        const starts = key === 'boot' || key === 'flash'
+        const run = act.busy === 'boot' || (!!m.flags.booting && m.mine) ? (board.busy?.label === '刷机中' ? 'flash' : 'boot') : null
+        const locked = needsLock && !m.mine, spinning = starts ? run === key : act.busy === key
+        const off = locked || (needsLock && m.flags.gone) || (needsLock && !!act.busy && !(starts && act.busy === 'boot') && act.busy !== key) || (starts && (!!m.flags.booting || act.busy === 'boot'))
         return (
           <button key={key} className={`ctl${spinning ? ' busy' : ''}`} disabled={off || spinning} onClick={go}>
             <Icon name={icon} /><div><b>{label}{kbd && m.mine && <kbd>{kbd}</kbd>}</b><span>{spinning ? '进行中…' : locked ? '先拿锁' : sub[key]}</span></div>
@@ -168,7 +218,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
           </button>
         )
       })}</div>
-      {m.mine && last && !m.flags.booting && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} disabled={!!act.busy} onClick={() => void act.boot(last.sdk, last.method)}><Icon name="rebuild" />再来一次：{last.sdk} · {last.method === 'load' ? '内存启动' : '刷机'}</button>}
+      {m.mine && last?.method === 'load' && sdks.includes(last.sdk) && !m.flags.booting && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} disabled={!!act.busy} onClick={() => void act.boot(last.sdk, 'load')}><Icon name="rebuild" />再来一次：{last.sdk} · 内存启动</button>}
     </>}
     {extra.map(view => <div key={view.id} style={{ marginTop: 10 }}><ViewPanel view={view} /></div>)}
     <div className="sect">这块板子</div><Facts board={board} />
@@ -186,7 +236,9 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
 export const canStop = (board: Board, m: Model) => !!m.flags.busy?.cancellable && (m.mine || !board.lease)
 
 function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
+  const ended = lastRun(board)
   return <>
+    {ended && <div className={`flag ${ended.tone === 'bad' ? 'bad' : 'attn'} last-run`}><Icon name="warn" /><div><b>{ended.title}</b><span>{ended.text}</span></div></div>}
     {m.flags.attn && <div className="flag attn"><Icon name="hand" /><div><b>等人操作 · {where(board)}</b><span>{m.flags.attn}</span></div>{m.canConfirm && <button className="pill sm dark" disabled={act.has('confirm')} onClick={act.confirm}>{act.has('confirm') ? <span className="spin" /> : <Icon name="check" />}我操作好了</button>}</div>}
     {m.flags.gone && <div className="flag bad"><Icon name="warn" /><div><b>串口离线</b><span>{slotOf(board).host} 上找不到这块板子的串口。最近重新布线过的话，重新发现这台主机（在用的板子不受影响）。</span></div><button className="pill sm" onClick={canRediscover(board) ? act.rediscover : act.rebuild}><Icon name="rebuild" />{canRediscover(board) ? '重新发现' : '重建'}</button></div>}
     {m.flags.progress && <div className="flag run"><span className="spin" /><div><b>{m.flags.progress}</b>{m.flags.pct != null && <div className="bar2"><i style={{ width: `${m.flags.pct}%` }} /></div>}</div>
@@ -292,45 +344,27 @@ function RenameDialog({ board, close }: { board: Board, close: () => void }) {
   </form>
 }
 
-function BootDialog({ board, close, onStart, onPackage }: { board: Board, close: () => void, onStart: (sdk: string, method: 'load' | 'download', brk?: string) => void, onPackage: (pkg: FlashPackage) => void }) {
-  const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name), canPackage = !!board.lab?.canFlashPackage, used = lastPackage(board.name)
+function BootDialog({ board, close, onStart }: { board: Board, close: () => void, onStart: (sdk: string, brk?: string) => void }) {
+  const sdks = board.lab?.sdks ?? [], last = lastBoot(board.name)
   const [sdk, setSdk] = useState(last?.sdk && sdks.includes(last.sdk) ? last.sdk : sdks[0] ?? '')
-  const [method, setMethod] = useState<'load' | 'download' | 'package'>(!sdks.length && canPackage ? 'package' : last?.method ?? 'load')
-  const [url, setUrl] = useState(used?.url ?? '')
-  const [flasher, setFlasher] = useState(used?.flasher ?? '')
-  // Break points of the SDK's recipe (`breaker:` steps): boot U-Boot alone, say. Fastboot (load) only, for now.
+  // Break points of the SDK's recipe (`breaker:` steps): boot U-Boot alone, say.
   // The state starts from what the page already read (or null, still reading) so opening the dialog again is instant.
   const [breaks, setBreaks] = useState<string[] | null>(() => sdk ? cachedBreaks(board.name, sdk) : null)
   const [brk, setBrk] = useState('')
   useEffect(() => {
     setBrk('')
-    if (!sdk || method !== 'load') { setBreaks([]); return }
+    if (!sdk) { setBreaks([]); return }
     setBreaks(cachedBreaks(board.name, sdk))
     let live = true
     void readBreaks(board.name, sdk).then(list => { if (live) setBreaks(list) }).catch(() => { if (live) setBreaks([]) })
     return () => { live = false }
-  }, [board.name, sdk, method])
-  const pkg = method === 'package', link = url.trim()
-  const ready = pkg ? /^https?:\/\/\S+$/i.test(link) : !!sdk
-  const start = () => {
-    close()
-    if (!pkg) return onStart(sdk, method as 'load' | 'download', method === 'load' && brk ? brk : undefined)
-    onPackage({ url: link, flasher: flasher.trim() || undefined })
-  }
+  }, [board.name, sdk])
+  const start = () => { close(); onStart(sdk, brk || undefined) }
   return <>
-    <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · {pkg ? '用一个刷机包刷写板子' : '用一个 SDK 编好的产物启动板子'}。开始后可以关掉这个窗口，进度在板子上显示。</p>
-    {!pkg && (sdks.length ? <label className="field">SDK<select className="select" value={sdk} onChange={e => setSdk(e.target.value)}>{sdks.map(s => <option key={s}>{s}</option>)}</select></label>
-      : <div className="mv-note warn">这块板子没有登记可用的 SDK：先在它的登记里选好 SoC 或 SDK。</div>)}
-    <div className="field">方式<div className="opts">
-      <button className={`opt${method === 'load' ? ' on' : ''}`} onClick={() => setMethod('load')}><Icon name="rocket" /><div><b>内存启动</b><span>经下载口加载到内存，不动存储；复位就没了。</span></div></button>
-      <button className={`opt${method === 'download' ? ' on' : ''}`} onClick={() => setMethod('download')}><Icon name="dl" /><div><b>刷机</b><span>写进 eMMC / SD，要几分钟；之后复位从存储启动。</span></div></button>
-      {canPackage && <button className={`opt${pkg ? ' on' : ''}`} onClick={() => setMethod('package')}><Icon name="link" /><div><b>刷机包</b><span>给一个刷机包的链接，板子所在的主机自己下载，整个写进板子的存储。</span></div></button>}
-    </div></div>
-    {pkg && <>
-      <label className="field">链接<input className="input" type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/package.zip" /><span className="sub small">板子所在的主机自己下载；网页不接收文件。</span></label>
-      <label className="field">刷机工具（可选）<input className="input" value={flasher} onChange={e => setFlasher(e.target.value)} placeholder="留空由后端按刷机包选" /></label>
-    </>}
-    {!pkg && method === 'load' && (breaks === null || breaks.length > 0) && <label className="field">停在哪
+    <h2>启动</h2><p className="lead"><b>{upper(board.name)}</b> · 用一个 SDK 编好的产物经下载口加载到内存启动，不动存储；复位就没了。要写进存储，用「刷机」。</p>
+    {sdks.length ? <label className="field">SDK<select className="select" value={sdk} onChange={e => setSdk(e.target.value)}>{sdks.map(s => <option key={s}>{s}</option>)}</select></label>
+      : <div className="mv-note warn">这块板子没有登记可用的 SDK：先在它的登记里选好 SoC 或 SDK。</div>}
+    {(breaks === null || breaks.length > 0) && <label className="field">停在哪
       {breaks === null ? <span className="sub small">读取中…</span> : <>
         <div className="chips">
           <button className={`chip${brk === '' ? ' on' : ''}`} onClick={() => setBrk('')}>完整启动</button>
@@ -339,7 +373,7 @@ function BootDialog({ board, close, onStart, onPackage }: { board: Board, close:
         <span className="sub small">只启动到这一步，之后自己在串口里操作（调 U-Boot 或内核时用）。</span>
       </>}
     </label>}
-    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!ready} onClick={start}><Icon name={pkg ? 'dl' : 'rocket'} />开始</button></div>
+    <div className="foot"><button className="pill" onClick={close}>取消</button><button className="pill dark" disabled={!sdk} onClick={start}><Icon name="rocket" />开始</button></div>
   </>
 }
 

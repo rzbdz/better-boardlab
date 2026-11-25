@@ -51,13 +51,13 @@ export async function shipHostTools(exec: Executor, sudo: string, dir: string | 
   progress(`放主机工具：${tools.map(tool => tool.name).join('、')}`)
   await exec.run(`mkdir -p ${staging}/tools`)
   for (const tool of tools) await exec.put(tool.path, `${staging}/tools/${tool.name}`)
-  // Where they go: the install's tools/ (first on boardctrld's PATH), or the same place of a host installed before
-  // the rename. Each command picks it for itself: one `exec.run` does not see another's variables.
-  const pick = `D=${HOST_TOOLS}; if [ ! -d "$D" ] && [ -d ${OLD_HOST_TOOLS} ]; then D=${OLD_HOST_TOOLS}; fi; mkdir -p "$D"`
+  // Where they go: always the install's tools/, which is first on boardctrld's PATH. A host installed before the
+  // rename gets them in its old tools/ too, for a service that still runs from there; the old place alone is never
+  // enough, because the service is moved to the new name as it is installed.
   const install = tools.map(tool =>
-    `${pick}; ` +
     `[ "$(sha256sum ${staging}/tools/${tool.name} | cut -d' ' -f1)" = ${tool.sha256} ] || { echo "${tool.name}: sha256 mismatch" >&2; exit 1; }; ` +
-    `${sudo}install -D -m 755 ${staging}/tools/${tool.name} "$D/${tool.name}"`)
+    `${sudo}install -D -m 755 ${staging}/tools/${tool.name} ${HOST_TOOLS}/${tool.name}; ` +
+    `if [ -d ${OLD_HOST_TOOLS} ]; then ${sudo}install -m 755 ${staging}/tools/${tool.name} ${OLD_HOST_TOOLS}/${tool.name}; fi`)
   const run = await exec.run(`set -e; ${install.join('; ')}; rm -rf ${staging}/tools`, { timeoutMs: 120_000 })
   if (run.code !== 0) throw new Error(`放主机工具失败：${(run.stderr || run.stdout).trim().split('\n').slice(-3).join(' / ')}`)
   return tools.map(tool => tool.name)

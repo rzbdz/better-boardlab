@@ -87,7 +87,8 @@ export function jobIn(line: string): { id: string, host: string | null } | null 
  */
 export async function cancellable(attempt: (onLine: ((line: string) => void) | undefined, kill: AbortSignal | undefined) => Promise<BspResult>,
   tell: (what: string[], host: string | null) => Promise<unknown>,
-  options: { onStderr?: (line: string) => void, signal?: AbortSignal, stop?: string[], jobArgs?: string[], graceMs?: number }): Promise<BspResult> {
+  options: { onStderr?: (line: string) => void, signal?: AbortSignal, stop?: () => string[], jobArgs?: () => string[], graceMs?: number }): Promise<BspResult> {
+  // `stop` and `jobArgs` are read when the cancel comes: the board's lease may have been taken again since the start.
   const { onStderr, signal, stop } = options
   if (!signal) return attempt(onStderr, undefined)
   const kill = new AbortController()
@@ -100,11 +101,11 @@ export async function cancellable(attempt: (onLine: ((line: string) => void) | u
     ;(signal.reason as CancelledError).answer(tell(what, host))
   }
   const cancelling = () => signal.aborted && signal.reason instanceof CancelledError && !signal.reason.refused
-  const cancelJob = (job: { id: string, host: string | null }) => once(['job', 'cancel', job.id, ...(options.jobArgs ?? [])], job.host)
+  const cancelJob = (job: { id: string, host: string | null }) => once(['job', 'cancel', job.id, ...(options.jobArgs?.() ?? [])], job.host)
   let grace: ReturnType<typeof setTimeout> | undefined
   const aborted = () => {
     if (!cancelling()) return kill.abort(signal.reason)
-    if (stop) once(stop, null)
+    if (stop) once(stop(), null)
     for (const job of jobs) cancelJob(job)
     // Nothing started on the host yet (an upload, a call still on its way): there is nothing to follow.
     if (!jobs.length && !stop) return kill.abort(signal.reason)

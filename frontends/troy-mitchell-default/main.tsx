@@ -159,7 +159,7 @@ function App() {
             : <HistoryTab refreshKey={refreshKey} state={state} />}
         </div>
       </main>
-      {state && current && <Console key={current.name} board={current} state={state} onClose={closeConsole} onError={showError} />}
+      {state && current && <Console key={current.name} board={current} state={state} onClose={closeConsole} onError={showError} onSwitch={setConsoleBoard} />}
       {state && <AttentionPanel state={state} onRun={run} />}
       {prompt?.kind === 'relay' && <RelayDialog board={prompt.board} onClose={() => setPrompt(null)} onRun={run} />}
       {prompt && prompt.kind !== 'relay' && <PromptDialog prompt={prompt} onClose={() => setPrompt(null)} onRun={run} onIdentity={() => void refresh()} />}

@@ -130,6 +130,33 @@ describe('setting up a bsp board host', () => {
     expect(lines).toContain('token-len 0')
   })
 
+  it('restarts a host that runs jobs only when asked to force it, and passes the installer\'s refusal on', async () => {
+    const remote = join(dir, 'remote')
+    const ssh = fakeSsh(remote)
+    process.env.PATH = `${ssh.bin}:${process.env.PATH}`
+    const hosts = new Hosts(join(dir, 'state'))
+    const access = { address: 'lab-1', user: 'root', password: 'opensesame' }
+    // The installer as it is on a host running a flash: it refuses unless forced, naming the job.
+    const tree = fakeBspTree(`force=""; [[ " $ALL " == *" --force "* ]] && force=1
+if [[ -z $force ]]; then
+  echo "!! jobs still run after 600s of waiting, so not restarting boardctrld (it would cut them off):" >&2
+  echo "!!   job flash-1-1 (flash, board board-1): board-1: flash, 700s, 40%" >&2
+  echo "!! let them finish or cancel them (\\\`boardctrl job cancel <id>\\\`), then install again; --force goes ahead anyway." >&2
+  exit 1
+fi
+echo "--> --force: restarting boardctrld although these run"`)
+    // The fake installer parses its arguments away; keep them all for the check above.
+    const script = join(tree, 'deploy/bspd-install.sh')
+    writeFileSync(script, readFileSync(script, 'utf8').replace('#!/bin/bash\n', '#!/bin/bash\nALL="$*"\n'))
+    await expect(installHost(hosts, tree, { id: 'lab1', access }, null, () => {})).rejects.toThrow(/job flash-1-1 .*boardctrl job cancel/)
+    expect(ssh.log()).not.toContain('--force')
+    const lines: string[] = []
+    const done = await installHost(hosts, tree, { id: 'lab1', access, force: true }, null, line => lines.push(line))
+    expect(done.version).toBe('f61b6f8')
+    expect(ssh.log()).toMatch(/bspd-install\.sh .*--force/)
+    expect(lines.some(line => line.includes('--force: restarting boardctrld'))).toBe(true)
+  })
+
   it.skipIf(process.getuid?.() !== 0)('installs on this very machine without ssh, and reaches it on its loopback port', async () => {
     const hosts = new Hosts(join(dir, 'state'))
     const done = await installHost(hosts, fakeBspTree(), { id: 'here', access: { address: 'localhost', user: 'root' } }, 'a'.repeat(48), () => {})
@@ -161,6 +188,13 @@ describe('setting up a bsp board host', () => {
       const shipped = join(remote, 'opt/boardctrl/tools/flasher')
       expect(readFileSync(shipped, 'utf8')).toContain('echo riscv64')
       expect(statSync(shipped).mode & 0o777).toBe(0o755)
+      // A host installed before the rename has only the old tools/: they go to the new one, on the service's PATH,
+      // and to the old one as well, never to the old one alone.
+      rmSync(join(remote, 'opt'), { recursive: true })
+      mkdirSync(join(remote, 'opt/bspd/tools'), { recursive: true })
+      await installHost(hosts, fakeBspTree(), setup, null, () => {}, undefined, tools)
+      expect(readFileSync(shipped, 'utf8')).toContain('echo riscv64')
+      expect(readFileSync(join(remote, 'opt/bspd/tools/flasher'), 'utf8')).toContain('echo riscv64')
       // A file that is not what host-tools.json says does not go.
       rmSync(join(remote, 'opt'), { recursive: true })
       writeFileSync(join(tools, 'riscv64/flasher'), 'something else')

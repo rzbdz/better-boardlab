@@ -2,7 +2,7 @@
  * Browser access to boardd's API, for every frontend and for modules' UI parts. The page acts as the local user, so it
  * never handles lease tokens. Paths are relative, so a page also works behind a reverse proxy under `/boardlab/`.
  */
-import type { Action, BoardChannels, BoardDetail, DiscoveryContext, DiscoveryMethod, LabPorts, LabSettings, Lease, LockResult, SendResult, State } from 'boardlab-core/shared/types.ts'
+import type { Action, BoardChannels, BoardDetail, DiscoveryContext, DiscoveryMethod, FlashPlan, LabPorts, LabSettings, Lease, LockResult, Market, MarketListing, MarketSearch, MarketTarget, SendResult, State } from 'boardlab-core/shared/types.ts'
 import type { Scan, Slot } from '../shared/local.ts'
 import type { HaSettings } from '../shared/home-assistant.ts'
 
@@ -42,13 +42,37 @@ const fetched = new Set<() => void>()
 export function onFetched(listener: () => void): () => void { fetched.add(listener); return () => { fetched.delete(listener) } }
 const tellFetched = () => queueMicrotask(() => { for (const listener of fetched) listener() })
 
-export async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+/**
+ * The waits before a read is tried again while boardd is away (the connection failed, or a proxy in front answered
+ * 502-504 while a boardd worker restarts): about 30 s in all. A write is never tried again, since it may have been done.
+ */
+const READ_RETRY_MS = [200, 300, 500, 1000, 2000, 3000, 5000, 8000, 10_000]
+const AWAY = new Set([502, 503, 504])
+
+/**
+ * `signal` stops a read the page no longer wants (a search the words moved on from): the request is dropped, and its
+ * answer, if it comes, is not read.
+ */
+export async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const user = identity.get()
-  const response = await fetch(path, {
+  const send = () => fetch(path, {
     method, headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(user ? { 'X-Boards-User': user } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body), ...(signal ? { signal } : {}),
   })
-  const text = await response.text()
+  let response: Response
+  let text: string | null = null
+  for (let attempt = 0; ; attempt++) {
+    const last = method !== 'GET' || attempt >= READ_RETRY_MS.length
+    try { response = await send() }
+    catch (error) { if (last) throw error; await new Promise(resolve => setTimeout(resolve, READ_RETRY_MS[attempt])); continue }
+    if (last || !AWAY.has(response.status)) break
+    // boardd's own answer (a board host that failed is a 502 with its code): an answer, not boardd being away.
+    text = await response.text()
+    if (refusal(response.status, text).code) break
+    text = null
+    await new Promise(resolve => setTimeout(resolve, READ_RETRY_MS[attempt]))
+  }
+  text ??= await response.text()
   if (!response.ok) throw refusal(response.status, text)
   const value = (response.headers.get('content-type') ?? '').includes('json') ? JSON.parse(text) as T : text as T
   tellFetched()
@@ -99,6 +123,9 @@ function readModels(): Promise<string[]> {
   return modelsRead
 }
 
+/** boardd's file store as `GET /api/files/usage` says: bytes kept and arriving, the bound past which the least used go, the disk's free space. */
+export interface FilesUsage { used: number, files: number, pending: number, max: number, free: number | null, keepDays: number }
+
 export const api = {
   state: () => call<RawPageState>('GET', 'api/state').then(page),
   board: (name: string) => call<BoardDetail>('GET', `api/board?name=${encodeURIComponent(name)}`),
@@ -131,8 +158,37 @@ export const api = {
   bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
   /** Where an SDK's recipe can stop early (empty when it has none). */
   bootBreaks: (board: string, sdk: string) => call<{ load: string[], download: string[] }>('GET', `api/boot/breaks?board=${encodeURIComponent(board)}&sdk=${encodeURIComponent(sdk)}`),
-  /** Flash a package: a `url` the board's backend downloads itself. */
-  flashPackage: (board: string, input: { url: string, flasher?: string }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
+  /** Flash a package: a `url` the board's backend downloads itself, a file sent to boardd (its `sha256`, see upload.ts), or an image of a market by its place there; only the chosen partitions when some are given, and a reset after when asked. */
+  flashPackage: (board: string, input: { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], reset?: boolean }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
+  /** What a package would write, medium by medium, without touching the board: the backend's progress (fetching the package) goes to `line`. */
+  flashPlan: async (board: string, input: { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string }, line: (text: string) => void, signal?: AbortSignal): Promise<FlashPlan> => {
+    const done = await stream('api/flash/plan', { board, ...input }, { line }, signal) as unknown as { plan?: FlashPlan }
+    if (!done.plan) throw new Error('看不了刷机包里有什么')
+    return done.plan
+  },
+  /** How much boardd's file store holds: kept files, what is still arriving, its bound, the disk's free space. */
+  filesUsage: () => call<FilesUsage>('GET', 'api/files/usage'),
+  /** The image markets that are set up, and why one cannot be used when it cannot. */
+  markets: () => call<Array<Market & { error: string | null }>>('GET', 'api/markets'),
+  /** One folder of a market, newest first; `soc` keeps that SoC's entries, `board` marks what that board cannot take, `refresh` reads the market again instead of using the minute's cache. */
+  marketFolder: (market: string, path = '', options: { soc?: string | null, refresh?: boolean, board?: string | null } = {}) => {
+    const query = new URLSearchParams({ path })
+    if (options.soc) query.set('soc', options.soc)
+    if (options.refresh) query.set('refresh', '1')
+    // For a board: each image says why that board cannot take it (`refused`), as boardd decides.
+    if (options.board) query.set('board', options.board)
+    return call<MarketListing>('GET', `api/markets/${encodeURIComponent(market)}/list?${query}`)
+  },
+  /** A market searched whole: the images whose name has `text`, and the folders leading to them, in the tree's order. */
+  marketSearch: (market: string, text: string, options: { soc?: string | null, board?: string | null, refresh?: boolean, signal?: AbortSignal } = {}) => {
+    const query = new URLSearchParams({ q: text })
+    if (options.soc) query.set('soc', options.soc)
+    if (options.board) query.set('board', options.board)
+    if (options.refresh) query.set('refresh', '1')
+    return call<MarketSearch>('GET', `api/markets/${encodeURIComponent(market)}/search?${query}`, undefined, options.signal)
+  },
+  /** The boards an image could be flashed onto: yours first, then free ones, then the rest with why not. */
+  marketTargets: (market: string, path: string) => call<MarketTarget[]>('GET', `api/markets/${encodeURIComponent(market)}/targets?path=${encodeURIComponent(path)}`),
   fastboot: (board: string) => call('POST', 'api/fastboot', { board }),
   /** Keystrokes for the online console, sent as they are. */
   // People on the page type without the lock (agents use the CLI and need it).

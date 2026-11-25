@@ -17,7 +17,11 @@ import { shipHostTools } from './host-tools.ts'
 
 /** `ca`: a certificate the host must trust (the network's own CA), installed before anything is downloaded there. */
 /** `noToken`: the host takes every request (no token anywhere), for a lab whose port only trusted machines reach. */
-export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null, noToken?: boolean }
+/**
+ * `force`: restart the host's bspd even while it runs jobs. Without it, the installer waits for them right before the
+ * restart and refuses, naming them, when they outlast its wait; with it, they end `interrupted by a service restart`.
+ */
+export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null, noToken?: boolean, force?: boolean }
 /** A host config the site carries (`<site>/hosts/<id>.yaml`): its provider sections are merged into the host's own file. */
 export interface SiteHostConfig { id: string, file: string }
 export interface Installed { target: string, port: number, token: string, version: string, url: string }
@@ -324,7 +328,7 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
     let stage: string | null = null
     const run = await exec.run(
-      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg}; cd /; rm -rf ${remote}`,
+      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg} ${setup.force === true ? '--force' : ''}; cd /; rm -rf ${remote}`,
       {
         timeoutMs: 1_800_000, onLine: line => {
           if (!line.trim()) return
@@ -361,6 +365,8 @@ export async function uninstallHost(hosts: Hosts, access: Access, purge: boolean
   const run = await exec.run(`set -e; d=$(mktemp -d); cd $d; ` +
     `if [ -x /opt/boardctrl/current/app/deploy/bspd-install.sh ]; then ${sudo}bash /opt/boardctrl/current/app/deploy/bspd-install.sh --uninstall ${purge ? '--purge' : ''}; ` +
     `elif [ -x /opt/bspd/current/app/deploy/bspd-install.sh ]; then ${sudo}bash /opt/bspd/current/app/deploy/bspd-install.sh --uninstall ${purge ? '--purge' : ''}; ` +
-    `else echo BOARDCTRLD-REMOVED; fi`, { timeoutMs: 120_000 })
+    // The installer waits for running jobs first (BOARDCTRL_UPGRADE_WAIT, 600 s by default) and says so line by
+    // line: the timeout outlasts that wait, and the lines are the progress.
+    `else echo BOARDCTRLD-REMOVED; fi`, { timeoutMs: 900_000, onLine: line => { if (line.trim() && !/(?:BOARDCTRLD|BSPD)-REMOVED/.test(line)) progress(line.trim()) } })
   if (!/(?:BOARDCTRLD|BSPD)-REMOVED/.test(run.stdout)) throw new Error(`卸载 boardctrld 失败：${(run.stderr || run.stdout).trim().split('\n').slice(-3).join(' / ')}`)
 }

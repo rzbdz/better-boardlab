@@ -114,6 +114,41 @@ boardd 能做什么由它加载的模块决定：
 
 实验室的板子可以直接用 SDK 编好的产物启动：`boardlab boot <板子> --sdk <SDK> [--method load|download] [--variant V]`，刷机是 `boardlab flash <板子> --sdk <SDK>`；网页卡片上拿着锁时点「用 SDK 启动」。这是远程下载口这条路：板子所在的主机自己去构建服务器取产物、按 SDK 的启动流程加载或烧录（bsp 是 `bsp dut boot --sdk`），文件不经过 boardd，进度显示在卡片上。本机的板子走本机下载口，用 `boardlab boot <板子> <文件>…`。
 
+## 镜像市场
+
+镜像市场是放刷机包的地方：一个 Nexus raw 仓库，或构建服务器上的几个输出目录。boardd 列出它们的目录，新的在前，可以按 SoC 筛；挑一个镜像就能刷到板子上，不用自己拼链接。
+
+市场在 bsp 站点的 `markets/` 里配，一个 yaml 文件一个市场，站点同步或编辑后 boardd 会重新读：
+
+```yaml
+# markets/images.yaml：Nexus 的 raw 仓库（nexus-images 模块）
+kind: nexus
+title: 发布镜像
+config:
+  url: https://nexus.example.org
+  repository: images
+  socs: { "soc-a/": soc-a, "soc-b/": soc-b }   # 哪个目录属于哪个 SoC
+  exclude: ["*/tmp/*"]
+```
+
+```yaml
+# markets/builds.yaml：构建服务器上的目录，经 ssh 读（sftp-images 模块）
+kind: sftp
+title: 每日构建
+config:
+  roots:
+    - { name: soc-a-daily, host: builder@build.example.org, dir: /srv/out/soc-a, glob: "*.zip", soc: soc-a }
+```
+
+服务器地址、仓库、目录这些只在站点里，模块本身是通用的。boardd 要加载提供这种市场的模块（`nexus-images`、`sftp-images`）。
+
+- **网页**：顶栏的「镜像」列出市场和它的目录树。选一个镜像看大小、时间、sha256，点「刷机…」：boardd 列出后端收这种包、SoC 对得上的板子，你拿着的在前，空闲的会替你拿锁（锁一直是你的）。板子页的「刷机」（W）也能从市场里挑。
+- **找镜像**：网页上「镜像」页和刷机对话框的搜索框一输入就会读整个市场，只留下名字对得上的镜像和通往它们的目录，整棵树展开；没有对得上的目录就不显示。命令行是 `boardlab images <市场> --find <文字> [--soc S]`。没找完时（市场太大、太慢，或有目录读不了）会说明可能有遗漏。
+- **命令行**：`boardlab images`、`boardlab images <市场>:<目录> [--soc S] [--refresh]`、`boardlab images <市场>:<镜像> --targets`；刷机用 `boardlab flash <板子> --image <市场>:<镜像>`。
+- **先看会写什么**：网页上选好镜像或传好文件后，刷机对话框自己读一遍刷机包，按介质画出分区表和包里的内容（每个分区都标了名字），不碰板子；命令行是 `flash … --plan`。后端支持时可以 `--partitions a,b`（网页上点「指定分区」）只刷其中几个，`--reset` 刷完复位。
+- **上传**：网页的「上传文件」把本机的刷机包按 8 MiB 一片传给 boardd，断了从收到的地方接着传，传完由 boardd 自己算 sha256；同一个文件不会存两份。CLI 照旧用 scp。
+- **清理**：boardd 的文件仓库里不用的文件留三天，总量超过 `files.maxBytes`（默认 20 GiB）时最久没用的先删；设置 → 文件仓库显示用了多少、磁盘还剩多少。板卡主机自己的下载缓存也有时间和大小上限，在主机的状态里能看到。
+
 ## SDK：在构建服务器上开发
 
 `boardlab sdk <操作> …` 由 boardd 那边的 bsp 执行（`bsp sdk …`，用 boardd 所在机器的 bsp site 和它到构建服务器的 ssh），开发机上不用装 bsp、不用配 site：租源码树（`acquire --task`、`release`）、编译（`build`，输出实时传回）、跑命令（`exec -- …`）、读写文件（`get … -o 本机文件`、`put … 本机文件`，文件经 boardd 中转）。每个持有人在 boardd 上有自己的 bsp 配置目录，SDK 租约凭证互不相混。boardd 所在用户要能免密 ssh 到 site 里写的构建服务器账号。

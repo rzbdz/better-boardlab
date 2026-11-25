@@ -15,7 +15,7 @@ const lease = (board: string, holder: string, purpose: string) => ({ id: `l-${bo
 const chip = (board: string, online = true) => ({ board, die: 'die0', serialPath: null, baud: 115200, alias: board, downloadUsbPath: '2-1.4', usbId: null, lastSeenAt: now, online, gateError: null })
 const inLab = (device: string, extra: Partial<NonNullable<Board['lab']>> = {}): Board['lab'] => ({
   id: 'bsp', device, online: false, ip: null, heldBy: null, leaseError: null, attention: null, attentionRequest: null, canConfirm: true, empty: false, slotGone: false,
-  canRefresh: true, mediaBoot: { method: 'reset', available: true, why: null }, sdks: ['k1x-2.0', 'upstream-k1'], progress: null, canFlashPackage: true, ...extra,
+  canRefresh: true, mediaBoot: { method: 'reset', available: true, why: null }, sdks: ['k1x-2.0', 'upstream-k1'], progress: null, canFlashPackage: true, packages: null, ...extra,
 })
 const board = (name: string, extra: Partial<Board>): Board => ({
   name, slot: null, serial: null, product: null, baseMac: null, soc: null, notes: null, source: 'lab', mode: 'normal', chips: [chip(name)],
@@ -25,12 +25,13 @@ const board = (name: string, extra: Partial<Board>): Board => ({
 export function mockState(you = 'user:alice'): State {
   return {
     you, now,
+    markets: [{ id: 'shelf', kind: 'shelf', kindTitle: '书架', about: '', title: 'Test images', source: 'site' }],
     yields: [{ id: 'y1', board: 'bsp-k1-musecard', holder: 'claude:kernel-bisect-mmc', purpose: 'bisect the mmc0 timeout', owner: you, at: now, until: now }],
     modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'bsp', title: 'bsp 板卡主机' }, { id: 'clients', title: '客户端配置' }, { id: 'system', title: '系统' }],
     boards: [
       board('bsp-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'bsp/host-a/s1',
         lab: inLab('k1-musecard', { debug: { provider: 'my-swd', title: 'SWD over GPIO', kinds: ['halt', 'run', 'step', 'regs', 'trace'] } }) }),
-      board('bsp-k3-deb1', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s3', lease: lease('bsp-k3-deb1', you, '临时调试'), lab: inLab('k3-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null } }) }),
+      board('bsp-k3-deb1', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s3', lease: lease('bsp-k3-deb1', you, '临时调试'), lab: inLab('k3-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null }, packages: { schemes: ['https'], suffixes: ['.zip'] }, canPlan: true }) }),
       board('bsp-k3-cm1', { product: 'k3_com260', soc: 'k3', slotRef: 'bsp/host-b/s4', lease: lease('bsp-k3-cm1', 'user:bob', '跑启动回归'), waiters: [{ id: 'w1', board: 'bsp-k3-cm1', holder: 'user:carol', purpose: '临时开发任务', queuedAt: now }], lab: inLab('k3-cm1') }),
       board('bsp-k1-pico', { product: 'k1-x_pico', soc: 'k1', slotRef: 'bsp/host-a/s2', lab: inLab('k1-pico', { attention: '请按一下 k1-pico 的 RESET 键，然后点「我已完成」' }) }),
       board('bsp-k3-gone', { product: 'k3_deb1', soc: 'k3', slotRef: 'bsp/host-b/s1', chips: [chip('bsp-k3-gone', false)], lab: inLab('k3-gone', { slotGone: true }) }),

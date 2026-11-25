@@ -779,7 +779,7 @@ describe('installing a host without a token', () => {
     fakeHost()
     const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
     writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
-token=""; while [[ $# -gt 0 ]]; do case $1 in --token) token=$2; shift 2;; *) shift;; esac; done
+token=""; while [[ $# -gt 0 ]]; do case $1 in --token) token=$2; shift 2;; --force) echo "forced"; shift;; *) shift;; esac; done
 echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
 `)
     const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ stateDir: join(dir, 'state'), bin: fakeBsp().bin, tree, sdk: { run: async () => 0 } as never })] })
@@ -800,6 +800,7 @@ echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
     const done = await install({ id: 'lab1', address: 'lab-1', user: 'root', noToken: true })
     expect(done.exit).toMatchObject({ ok: true })
     expect(done.lines).toContain('token-len 0')
+    expect(done.lines).not.toContain('forced')            // the installer waits for the host's jobs unless asked not to
     const settings = lab.backends.labSettings().find(item => item.id === 'lab1')!
     expect(settings.hasPassword).toBe(false)
     expect(lab.backends.config('lab1').password).toBe('')
@@ -809,8 +810,10 @@ echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
     const list = view.body.find(element => element.kind === 'list') as { items: Array<{ actions: Array<{ id: string, body?: () => Array<{ kind: string, fields?: Array<{ id: string, initial?: unknown }> }> }> }> }
     const form = list.items[0]!.actions.find(item => item.id === 'reinstall')!.body!().find(element => element.kind === 'form')!
     expect(form.fields!.find(field => field.id === 'noToken')?.initial).toBe(true)
-    // Installed again with a token, the lab keeps the new one.
-    expect((await install({ id: 'lab1', address: 'lab-1', user: 'root' })).exit).toMatchObject({ ok: true })
+    // Installed again with a token, the lab keeps the new one; `force` reaches the installer only when given.
+    const again = await install({ id: 'lab1', address: 'lab-1', user: 'root', force: true })
+    expect(again.exit).toMatchObject({ ok: true })
+    expect(again.lines).toContain('forced')
     expect(lab.backends.labSettings().find(item => item.id === 'lab1')?.hasPassword).toBe(true)
     expect(lab.backends.config('lab1').password).toMatch(/^[0-9a-f]{48}$/)
   }, 30_000)

@@ -14,8 +14,10 @@ import type { Module } from 'boardlab-core/core/module.ts'
 import { bspLab, FDL_STRATEGIES, type BspBackend, type BspBoardChange } from './driver.ts'
 import { hostsFor } from '../hosts/ssh.ts'
 import { installHost, uninstallHost } from './provision.ts'
+import { forgetBootMarks } from './logs.ts'
 import { panelEndpoints } from './panel.ts'
 import { Site } from './site.ts'
+import { readMarkets } from './markets.ts'
 import { siteEndpoints } from './site-api.ts'
 import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkReach, type SdkRunner, type SdkStream } from './sdk.ts'
 
@@ -49,6 +51,26 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
       const site = options.stateDir ? new Site(join(options.stateDir, 'bsp', 'site'), lab.kernel.settings('bsp.site'), {
         tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BSP ?? 'bsp',
       }) : null
+      // The image markets the site sets up (markets/<id>.yaml): read now and again after every change to the site's files.
+      // A file that is not a market, or a market its driver refuses, is listed with what is wrong; the rest still load.
+      if (site) {
+        const readSiteMarkets = () => {
+          const { markets } = readMarkets(site.dir)
+          const kept: string[] = []
+          for (const { id, setup } of markets) {
+            // A market id core refuses is still a file of the site: it is listed under a name core takes, with why.
+            try { lab.markets.configure(id, setup); kept.push(id) }
+            catch (error) {
+              const safe = `site-${id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 58)}`
+              lab.markets.configure(safe, { kind: '', title: id, config: {}, source: 'site', problem: `markets/${id}.yaml：${(error as Error).message}` })
+              kept.push(safe)
+            }
+          }
+          lab.markets.retain('site', kept)
+        }
+        site.changed = readSiteMarkets
+        readSiteMarkets()
+      }
       /** The site for a host being installed (its images fetched first), and the revision it is; nothing when there is none. */
       const siteFor = (say: (line: string) => void) => {
         let revision: string | null = null
@@ -96,7 +118,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
         },
       }
       lab.api.add('bsp', [{
-        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token）：ssh 过去装 bspd，接入实验室，输出边装边推送',
+        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token；主机上有任务在跑时安装等它跑完，等不到就不装，force=true 时不等、直接重启，那些任务会中断）：ssh 过去装 bspd，接入实验室，输出边装边推送',
         handle: ({ body, caller }) => {
           if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 bsp，不能装主机')
           const id = String(body.id ?? '')
@@ -117,7 +139,9 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
                 // The site may carry this host's config with its providers' own sections (the EC's pins, say): installed
                 // with the machine, they reach it as part of the same repository as the provider.
                 const hostFile = site && existsSync(join(site.dir, 'hosts', `${id}.yaml`)) ? join(site.dir, 'hosts', `${id}.yaml`) : null
-                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert'), noToken: body.noToken === true }, null, say, shipped.bundle, undefined, hostFile ? { id, file: hostFile } : null)
+                const done = await installHost(hosts, options.tree!, { id, access: how, board: boardChoice(body.board), ca: lab.kernel.setting('ca.cert'), noToken: body.noToken === true, force: body.force === true }, null, say, shipped.bundle, undefined, hostFile ? { id, file: hostFile } : null)
+                // The site that went with the install may have changed the boards' boot marks: they are read again.
+                if (shipped.bundle) forgetBootMarks()
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
                 say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
@@ -215,6 +239,14 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           const route = lab.backends.route(name)
           if (!('boardConfig' in route.backend)) throw new BoardError('invalid', `${name} 不是 bsp 板子`)
           return (route.backend as BspBackend).boardConfig(route.config, route.target.device)
+        },
+      }, {
+        method: 'GET', path: '/api/bsp/hosts/:id/cache', about: '一个 bsp 实验室每台主机的产物缓存：用了多少、上限、留多久、磁盘还剩多少（主机太旧时 cache 为 null）',
+        handle: async ({ params }) => {
+          const id = String(params.id ?? '')
+          const backend = lab.backends.get(id)
+          if (!('caches' in backend.backend)) throw new BoardError('invalid', `${id} 不是 bsp 实验室`)
+          return (backend.backend as BspBackend).caches(lab.backends.config(id))
         },
       }, {
         method: 'GET', path: '/api/bsp/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',

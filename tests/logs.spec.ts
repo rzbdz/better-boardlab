@@ -14,11 +14,11 @@ describe('serial logs', () => {
     expect(logs.wget({ board: 'k1', grep: "it's" }, page)).toBe("wget --content-disposition 'https://lab.example/boardlab/api/logs?board=k1&grep=it%27s&download=1'")
   })
 
-  it('turn quick ranges into stamps ending now', () => {
+  it('open quick ranges at their start and leave them open, so a log being followed keeps growing', () => {
     const now = new Date(2026, 10, 10, 9, 30, 15)
     expect(stamp(now)).toBe('2026-11-10 09:30:15')
-    expect(rangeOf(60, now)).toEqual({ since: '2026-11-10 08:30:15', until: '2026-11-10 09:30:15' })
-    expect(rangeOf(-1, now)).toEqual({ since: '2026-11-10 00:00:00', until: '2026-11-10 09:30:15' })
+    expect(rangeOf(60, now)).toEqual({ since: '2026-11-10 08:30:15' })
+    expect(rangeOf(-1, now)).toEqual({ since: '2026-11-10 00:00:00' })
     expect(rangeOf(null, now)).toEqual({})
   })
 })

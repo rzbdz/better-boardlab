@@ -47,12 +47,14 @@ class Bench implements Backend {
   download: Backend['download'] = { stage: async () => 'staged', present: async () => true }
 }
 
-async function host(port: number) {
-  const bench = new Bench()
-  const lab = new BoardLab({ db: openDatabase(join(dir, `host-${port}.sqlite`)), modules: [{ id: 'bench', title: '假主机', setup: lab => lab.backends.register('bsp', bench) }] })
+let hosts = 0
+/** A host boardd on a port the system picks (`portOf` reads it back), so two test files never ask for the same one. */
+async function host() {
+  const bench = new Bench(), n = ++hosts
+  const lab = new BoardLab({ db: openDatabase(join(dir, `host-${n}.sqlite`)), modules: [{ id: 'bench', title: '假主机', setup: lab => lab.backends.register('bsp', bench) }] })
   await lab.backends.configure('user:root', 'bsp', { enabled: true, url: 'http://bench', username: '', password: '', devices: '' })
   await lab.backends.sync('bsp')
-  const running = await serve(lab, { port, socketPath: join(dir, `host-${port}.sock`), uiDir: null })
+  const running = await serve(lab, { port: 0, socketPath: join(dir, `host-${n}.sock`), uiDir: null })
   return { lab, bench, running }
 }
 
@@ -65,13 +67,12 @@ async function hub(ports: Record<string, number>) {
   return lab
 }
 
-const port = () => 41000 + Math.floor(Math.random() * 4000)
 /** The port a served boardd listens on. */
 const portOf = (running: { http: import('node:http').Server[] }) => (running.http[0]!.address() as import('node:net').AddressInfo).port
 
 describe('a hub over host boardds', () => {
   it('lists every host\'s boards, and a lock through the hub is the host\'s lock for the same person', async () => {
-    const one = await host(port()), two = await host(port())
+    const one = await host(), two = await host()
     try {
       const central = await hub({ lab1: portOf(one.running), lab2: portOf(two.running) })
       const names = central.boards.list().map(board => board.name).sort()
@@ -93,7 +94,7 @@ describe('a hub over host boardds', () => {
   })
 
   it('shows a board held on the host itself as held, and a board waiting for a person with what to do', async () => {
-    const one = await host(port())
+    const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
       await one.lab.locks.lock('bsp-k3-a', 'user:bob', '在主机页面上调试')
@@ -111,7 +112,7 @@ describe('a hub over host boardds', () => {
   })
 
   it('opens the host\'s console from the hub and types into it under the hub\'s lock', async () => {
-    const one = await host(port())
+    const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
       await central.locks.lock('lab1-bsp-k3-a', 'user:alice', '看串口')
@@ -127,8 +128,20 @@ describe('a hub over host boardds', () => {
     } finally { await one.running.close() }
   })
 
+  it('reads the host\'s log through the hub: a search with line numbers, where every match is, and a window around one', async () => {
+    const one = await host()
+    try {
+      const central = await hub({ lab1: portOf(one.running) })
+      expect(await central.consoles.logs('lab1-bsp-k3-a', undefined, { grep: 'login', hits: true })).toMatchObject({ matched: 1, hits: [0], total: 1, source: 'backend' })
+      const window = await central.consoles.logs('lab1-bsp-k3-a', undefined, { at: 'line:0', before: 3, after: 3 })
+      expect(window).toMatchObject({ lines: ['k3-a login:'], numbers: [0], moreBefore: false, moreAfter: false })
+      // The host's position for the line, passed back through the hub, names the same line.
+      expect(await central.consoles.logs('lab1-bsp-k3-a', undefined, { at: window.positions![0] })).toMatchObject({ lines: ['k3-a login:'], snapped: false })
+    } finally { await one.running.close() }
+  }, 30_000)
+
   it('gives the board to the hub\'s waiter once the host\'s holder releases it, and takes it on the host for them', async () => {
-    const one = await host(port())
+    const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
       await one.lab.locks.lock('bsp-k3-a', 'user:bob', '在主机页面上调试')
@@ -144,7 +157,7 @@ describe('a hub over host boardds', () => {
   })
 
   it('reports a host that went away instead of answering from a copy', async () => {
-    const one = await host(port())
+    const one = await host()
     const central = await hub({ lab1: portOf(one.running) })
     await one.running.close()
     await expect(central.backends.sync('lab1')).rejects.toThrow()

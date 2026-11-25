@@ -35,4 +35,18 @@ export const ACTIONS: Record<string, string> = {
   'flash-package': '刷机包', configure: '改操作',
 }
 /** One-click purposes when taking or queueing for a lock. */
+const ENDED: Record<string, string> = { failed: '失败了', cancelled: '被取消了', interrupted: '没跟到结束' }
+/**
+ * How the board's last run ended, when that needs a person: it failed, was cancelled, or boardd restarted under it.
+ * Null while something runs (the busy line says that) and after a run that succeeded.
+ */
+export function lastRun(board: Board): { title: string, text: string, tone: 'bad' | 'warn' } | null {
+  const run = board.run
+  if (board.busy || !run || !ENDED[run.status]) return null
+  return {
+    title: `${run.label.replace(/中$/, '')}${ENDED[run.status]}`,
+    text: [run.message ?? run.line, run.endedAt ? stamp(run.endedAt) : null].filter(Boolean).join(' · '),
+    tone: run.status === 'failed' ? 'bad' : 'warn',
+  }
+}
 export const PURPOSES = ['临时调试', 'boardlab 调试', '临时开发任务']

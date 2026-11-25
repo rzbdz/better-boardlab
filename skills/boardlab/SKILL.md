@@ -1,6 +1,6 @@
 ---
 name: boardlab
-description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，再复位、fastboot、看串口、发命令；在构建服务器上租 SDK 源码树、编译、改代码（boardlab sdk）；用 SDK 的产物或本机文件内存启动、刷机，或用刷机包（链接或文件）刷机；用完放锁。要操作开发板、编译并在板子上验证内核或固件、看板子串口输出、找新接上的板子时使用。
+description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，再复位、fastboot、看串口、发命令；在构建服务器上租 SDK 源码树、编译、改代码（boardlab sdk）；用 SDK 的产物或本机文件内存启动、刷机，或用镜像市场里的镜像、刷机包（链接或文件）刷机，可以只刷几个分区；用完放锁。要操作开发板、编译并在板子上验证内核或固件、看板子串口输出、找新接上的板子时使用。
 ---
 
 # 开发板（boardlab）
@@ -94,7 +94,8 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
   ```
 
 - **启动/刷机**本身是后台任务：`boardlab boot …` 会跟着任务走，`--timeout` 给比预期略长的值；等太久可以
-  `boardlab cancel <board>`，不要让它一直挂着。
+  `boardlab cancel <board>`，不要让它一直挂着。boardd 中途重启时启动/刷机不会丢：命令行说一次「连接断了」，
+  然后接着跟到它结束，按它真正的结果退出（0 成功；失败、取消或「被打断」都不是 0）；`boardlab show <board>` 也看得到它最后一次怎样结束。被打断的不要直接重跑，先看板子现在的样子。
 - **板子在等人**（`lab.attention`）：等用户，不要 sleep 猜；用户说做完了再 `boardlab confirm <board> --request <lab.attentionRequest>`。提示已经消失（实验室自己看到板子到位）说明不用再确认，不要把它当失败重试。
 - **确实没有阻塞接口时才轮询**：间隔从短到长（0.5 秒、1 秒、2 秒…）并设总超时，拿到结果立即继续。
 
@@ -127,6 +128,21 @@ boardlab sdk build sdk-a kernel                  # 编译，输出实时显示�
 boardlab sdk release sdk-a
 ```
 
+**先对齐上游，除非用户明确说就在本地分支上做。** `acquire` 从源码树当前检出的提交切出任务分支，这个提交可能落后远端很多。用户没有明确说“就用本地分支/当前代码”时，改代码之前对每个开发仓库（`boardlab sdk show` 列出）先 fetch 再比较：
+
+```sh
+boardlab sdk exec sdk-a -- git -C linux-6.18 fetch origin
+boardlab sdk exec sdk-a -- git -C linux-6.18 status -sb                 # 是否 behind 上游
+boardlab sdk exec sdk-a -- git -C linux-6.18 log --oneline HEAD..@{u}   # 远端有、本地没有的
+boardlab sdk exec sdk-a -- git -C linux-6.18 log --oneline @{u}..HEAD   # 本地有、远端没有的
+```
+
+- 已是最新：直接继续。
+- 只是落后、没有本地独有提交：告诉用户落后多少，**问**要不要基于最新远端开发；同意后在刚切出的 `bsp/<task>` 上 `git merge --ff-only @{u}`（在你提交任何东西之前）。
+- 有本地独有提交、已分叉或没设上游：不要自己 rebase / reset，说清看到了什么，问用户用哪个基线。
+- fetch 失败（构建服务器没网或没权限）：说出来，问用户是否就用本地状态继续。
+- 永远不动所有者自己的分支，只让任务分支跟上远端。
+
 编好以后在板子上验证，不用把产物拷来拷去：
 
 ```sh
@@ -138,10 +154,22 @@ boardlab unlock bsp-board-1
 ```
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
-- SDK 配方拿不到的本机自定义文件（例如自己打的 FIT）才让 CLI 用 scp 送过去：`boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`。URL 或板端已有路径用 `boardlab boot <board> https://…/Image.itb`、`boardlab boot <board> host:/绝对路径`，由板端自己取并计算 sha256，不上传。网页和 HTTP 上传已禁用。
+- SDK 配方拿不到的本机自定义文件（例如自己打的 FIT）才让 CLI 用 scp 送过去：`boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`。URL 或板端已有路径用 `boardlab boot <board> https://…/Image.itb`、`boardlab boot <board> host:/绝对路径`，由板端自己取并计算 sha256，不上传。网页上传是给人用的（分片传，boardd 自己算 sha256）；CLI 一律用 scp。
 - 只在调 U-Boot、edk2 或它们加载的内核时：`boardlab boot <board> --sdk <sdk> --break <名字>` 停在 recipe 的 `breaker:` 那一步（常见 `uboot`、`edk2`；页面启动对话框的「停在哪」列出的就是可用的名字，没有列出来的不要猜）。edk2 的流程停在 UEFI Shell / ACPI 阶段，U-Boot 的停在自己的命令行，之后在串口里自己操作。
 - 启动或刷机卡住了用 `boardlab cancel <board>`：正在跑的这一步会被停下（连同它起的进程），锁还在你手里。被取消的命令以**退出码 4** 结束（3 是被占用或连不上，0 才是成功）：不要把 4 当成功，也不要自动重跑。
-- 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`：http(s) 链接由板子所在主机自己下载，本机文件先由 CLI scp 到 boardd、再到板卡主机。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
+- 镜像市场里的刷机包（站点配好的仓库或构建服务器目录）用名字刷，不用自己拼链接：
+
+  ```sh
+  boardlab images                                   # 有哪些镜像市场
+  boardlab images <市场>:<目录> --soc <soc>          # 一层目录，新的在前；--soc 只看这块板的 SoC
+  boardlab images <市场> --find <文字> [--soc <soc>] # 把整个市场读一遍，只列名字里有这几个字的镜像（和通往它们的目录）
+  boardlab images <市场>:<镜像> --targets            # 这个镜像能刷到哪些板子上
+  boardlab flash <board> --image <市场>:<镜像> --plan   # 只看会写哪些分区，不碰板子（要拿锁）
+  boardlab flash <board> --image <市场>:<镜像> [--partitions a,b] [--reset]
+  ```
+
+  `--plan` 列出每个介质上的分区、包里对应的文件，以及能不能单独刷（`·` 标记的可以）。只改了某几个分区时用 `--partitions`（名字照 `--plan` 列的），不要整包重刷；`--reset` 刷完复位，从刚写的系统启动。不知道镜像在哪个目录里时用 `--find`（例如 `boardlab images <市场> --find <版本或关键字> --soc <soc>`），它会读整个市场，不需要一层层找；文件夹太多或太慢时会说没读完整个市场，那时再按目录找。用户说“刷最新的镜像”时，先 `images` 或 `--find` 找到这块板 SoC 的最新那个，说清楚是哪一个再刷。
+- 现成的刷机包（用户给的链接或本机文件）用 `boardlab flash <board> <链接|文件> [--flasher <工具>]`（`--plan`、`--partitions`、`--reset` 一样能用）：http(s) 链接由板子所在主机自己下载，本机文件先由 CLI scp 到 boardd、再到板卡主机。板卡主机可能按链接把下载过的包留一段时间，同一个链接再刷就不再下载（日志里会说是缓存的）；链接后面的内容换过了就加 `--refresh` 重新下载。同样要拿锁，会改写板子的存储，先说明原因；`lab.canFlashPackage` 为 false 的板子不支持。
 
 ## 分层知识：先问平台，再问 SDK，不要问用户
 
@@ -181,7 +209,7 @@ boardlab registry hosts                             # 每台主机拿到的目�
 ```
 
 - 板卡主机上的 site 文件（`/etc/boardctrl/site/…`，旧的安装是 `/etc/bsp/site/…`）改了不生效：`boardlab registry hosts` 会把它列成 NOT IN EFFECT。要生效就 put 进目录。怀疑主机拿的不是最新版本，就运行 `boardlab registry refresh`。
-- put 会说这次改动送到了哪些主机（reaches），没送到的是哪些（NOT REACHED：那台主机没在向目录报到）。refresh 列出每台主机拿到的版本和没送到的主机；一台在报到的主机都没有时，refresh 直接报错。看到没送到的主机，不要自己去改那台主机上的文件：告诉用户，再用 `boardlab feedback` 报一条。
+- put 会逐台列出这次改动：`delivered rev N, verified, in effect` 是送到并核对过；`NOT DELIVERED` 后面写着原因（连不上、不再报到、主机没配 server.announce、拿到了但加载不了）和 `next:` 该做什么。refresh 让每台主机从头重新拿，同样逐台列出；一台都没拿到时 refresh 直接报错并说明原因。看到没送到的主机，不要自己去改那台主机上的文件：告诉用户，再用 `boardlab feedback` 报一条。
 - 别人在你之后改过同一个文档，put 会报冲突：重新 get、把你的改动做在新版本上再 put，不要 `--force` 盖掉别人的。
 - 校验不过（引用了不存在的服务器、产物或步骤）什么都不会写，按报错改。
 - 新流程没在硬件上验证过，`-m` 里写明；第一次用它刷机前告诉用户。
