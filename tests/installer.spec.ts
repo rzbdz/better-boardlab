@@ -94,23 +94,23 @@ describe('install.sh', () => {
     const offer = (offered: string) => execFileSync('sh', ['-c', `say() { echo "==> $*"; }\n${step}\nOFFERED="${offered}"; offer_modules; echo "OFFERED=$OFFERED"`],
       { env: { ...process.env, STATE: state, NODE: process.execPath, FLAGS: '' }, encoding: 'utf8' }).trim().split('\n').sort().join(' ')
     // First install: the default config, everything offered.
-    expect(offer('')).toBe('OFFERED=system clients feedback alerts console-watch market human sftp-images terminal boardlab added the pub module market: boardd fetches it at its next start')
-    expect(Object.keys(JSON.parse(readFileSync(config, 'utf8')).modules)).toEqual(['boardctrl', 'system', 'clients', 'terminal', 'feedback', 'alerts', 'console-watch', 'market', 'human', 'sftp-images'])
+    expect(offer('')).toBe('OFFERED=system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab added the pub module market: boardd fetches it at its next start')
+    expect(Object.keys(JSON.parse(readFileSync(config, 'utf8')).modules)).toEqual(['boardctrl', 'system', 'local', 'home-assistant', 'script-slots', 'clients', 'terminal', 'feedback', 'alerts', 'console-watch', 'market', 'human', 'sftp-images'])
     // A machine with no market of its own gets the pub one recorded, so its modules have somewhere to come from.
     expect(JSON.parse(readFileSync(join(state, 'markets.json'), 'utf8'))).toEqual({ markets: [{ id: 'pub', url: 'git@github.com:rzbdz/boardlab-modules-pub.git', branch: null, commit: null }] })
     // An update from a release that had none of them, to a config with no modules at all.
     writeFileSync(config, '{ "modules": {}, "port": 1 }\n'); chmodSync(config, 0o600)
     // It has a market now (the pub one, from the first run): its owner's own markets are not touched again.
-    expect(offer('')).toBe('OFFERED=system clients feedback alerts console-watch market human sftp-images terminal boardlab')
-    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { system: {}, clients: {}, feedback: {}, alerts: {}, 'console-watch': {}, market: {}, human: {}, 'sftp-images': {}, terminal: {}, boardlab: {} }, port: 1 })
+    expect(offer('')).toBe('OFFERED=system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab')
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { system: {}, boardctrl: {}, local: {}, 'home-assistant': {}, 'script-slots': {}, clients: {}, feedback: {}, alerts: {}, 'console-watch': {}, market: {}, human: {}, 'sftp-images': {}, terminal: {}, boardlab: {} }, port: 1 })
     expect(statSync(config).mode & 0o777).toBe(0o600)
     // Taken out afterwards: stays out.
     writeFileSync(config, '{ "modules": { "boardctrl": { "x": 1 } } }\n')
-    expect(offer('system clients feedback alerts console-watch market human sftp-images terminal boardlab')).toBe('OFFERED=system clients feedback alerts console-watch market human sftp-images terminal boardlab')
+    expect(offer('system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab')).toBe('OFFERED=system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab')
     expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { boardctrl: { x: 1 } } })
     // Offered before one of them existed: only the new one is added.
-    expect(offer('system')).toBe('OFFERED=system clients feedback alerts console-watch market human sftp-images terminal boardlab')
-    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { boardctrl: { x: 1 }, clients: {}, feedback: {}, alerts: {}, 'console-watch': {}, market: {}, human: {}, 'sftp-images': {}, terminal: {}, boardlab: {} } })
+    expect(offer('system')).toBe('OFFERED=system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab')
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ modules: { boardctrl: { x: 1 }, local: {}, 'home-assistant': {}, 'script-slots': {}, clients: {}, feedback: {}, alerts: {}, 'console-watch': {}, market: {}, human: {}, 'sftp-images': {}, terminal: {}, boardlab: {} } })
     // A config it cannot read is left alone, and offered again next time.
     writeFileSync(config, '{ modules: oops')
     expect(offer('')).toMatch(/could not add the system module[\s\S]*OFFERED=$/)
