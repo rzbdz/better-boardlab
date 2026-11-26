@@ -222,6 +222,16 @@ boardlab registry hosts                             # 每台主机拿到的目�
 - 自动发现（boardctrl 的「自动刷机」）会让实验室逐个拉没人用的复位线，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。知道这批板子接在哪些排针上时给它 `--set prefer=12,13` 先试那些 GPIO（`12,13`、`GPIO12`、`gpio_13`、`P15` 等写法由后端认）。
 - 发现卡住或用户不想要了：`boardlab lab cancel <实验室>`，不要等（会停在当前这一步，已经登记的留着）。
 
+## 模块和模块市场
+
+boardd 能做什么由它装的模块决定。`boardlab module` 列出装了的模块：每个是什么、要什么（`inject`）、给什么（`provide`）、在不在跑；不在跑的会说为什么（等着哪个服务、或者起不来）。`boardlab module search <文字>` 按名字、说明和标签在**装了的**和**市场里的**模块里一起找。
+
+市场里的模块不是随 boardlab 发的：`boardlab market` 列出这台机器加了哪些市场，`boardlab market show <市场>` 看一个市场提供什么，`boardlab market add <市场> <git 地址>` 加一个。装哪个由 boardd 的配置说（`boardd.json` 的 `modules` 里写模块名和它的设置），**改完要重启 boardd 才生效**；市场更新同理（`boardlab market update --all` 会列出哪个模块的代码变了）。
+
+- 不要为了让某个模块工作去改 boardd 的状态目录或市场复制品里的文件：那是 git 的复制品，`market update` 会盖掉。要改就去改市场仓库。
+- 一个模块在 `boardlab module` 里是「等着」，说明它 `inject` 的服务没人提供：看是哪个模块没装或起不来，别硬重启。
+- 装了什么模块、某个模块为什么不在跑，先看 `boardlab module --json` 再说，不要猜。
+
 ## 全部接口
 
 要看 boardd 提供的全部接口：网页上的「API」页按模块列出来，机器可读的是 `GET /api/openapi.json`（OpenAPI 3.1，和 `GET /api` 的列表一致）。CLI 没覆盖到的接口，可以先在这里找，再用 `boardlab` 自己的命令或 HTTP 调（地址见 `boardlab remote show`）。
