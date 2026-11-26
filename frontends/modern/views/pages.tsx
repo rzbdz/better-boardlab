@@ -2,9 +2,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, frontends, identity, type FilesUsage, type FrontendList, type History, type PageState } from '../../../src/ui/api.ts'
 import { ACTIONS } from '../../../src/ui/format.ts'
-import { ask, onPrefs, permission, prefs, support, TOPICS, type Topic } from '../../../src/ui/notify.ts'
+import { ask, insecureHelp, onPrefs, permission, prefs, support, TOPICS, type Topic } from '../../../src/ui/notify.ts'
 import type { Board, LabSettings, Proposal } from 'boardlab-core/shared/types.ts'
-import { age, Confirm, fmtAt, Icon, model, slotOf, upper, useUI, Who } from '../kit.tsx'
+import { age, Confirm, copyText, fmtAt, Icon, model, slotOf, upper, useUI, Who } from '../kit.tsx'
 import { AddDevicePanel, DiscoverBoardDialog, DiscoverLabDialog } from '../discover.tsx'
 import { sizeText } from '../flashmap.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
@@ -186,7 +186,7 @@ function Seg<T extends string>({ value, options, onChange }: { value: T, options
 function Identity({ you, onSaved }: { you: string, onSaved: () => void }) {
   const ui = useUI()
   const [name, setName] = useState(identity.get())
-  const save = () => { if (name && !/^[A-Za-z0-9_.@-]{1,40}$/.test(name)) return ui.fail('名字不对', '只能用字母、数字和 . _ - @'); identity.set(name.trim()); ui.toast(name.trim() ? `现在是 ${name.trim()}` : '用回 boardd 本机的用户'); onSaved() }
+  const save = () => { if (name && !/^[A-Za-z0-9_.@-]{1,40}$/.test(name)) return ui.fail('名字不对', '只能用字母、数字和 . _ - @', true); identity.set(name.trim()); ui.toast(name.trim() ? `现在是 ${name.trim()}` : '用回 boardd 本机的用户'); onSaved() }
   return (
     <section className="panel"><h2><Icon name="user" />我是谁</h2>
       <p className="lead">锁和排队按名字区分。现在是 <Who id={you} you="" full />。几个人用同一个页面时，各自填自己的名字；留空用 boardd 所在机器的用户。</p>
@@ -211,14 +211,34 @@ function Appearance({ theme, onTheme }: { theme: Theme, onTheme: (t: Theme) => v
 }
 
 export function NotifyPrefs() {
+  const ui = useUI()
   const [p, setP] = useState(prefs.get())
   const [granted, setGranted] = useState(permission())
   useEffect(() => onPrefs(setP), [])
   const can = support()
+  const insecure = insecureHelp()
   return (
     <div className="prefs-grid">
       <div className="toggle"><span><b>系统通知</b><br /><span className="sub small">{!can.ok ? can.why : granted === 'granted' ? '已允许：页面在后台也会提醒' : '还没允许；没允许时只在页面里提醒'}</span></span>
         {can.ok && granted !== 'granted' && <button className="pill sm dark" onClick={async () => setGranted(await ask())}>允许</button>}</div>
+      {insecure && <div className="hint-box"><b><Icon name="warn" />这个页面是 http，浏览器不给通知和剪贴板</b>
+        <p>浏览器只在 https 或 localhost 的页面上放开系统通知和写剪贴板。这台 boardd 用的是 http，要把<b>这个地址</b>告诉浏览器，让它当成安全页面：</p>
+        {insecure.firefox
+          ? <ol>
+            <li>地址栏打开 <code>about:config</code>，接受风险提示</li>
+            <li>把 <code>security.insecure_origin_as_secure.allowlist</code> 设成 <code>{insecure.origin}</code></li>
+            <li>重启浏览器，回到这个页面再点「允许」</li>
+          </ol>
+          : <ol>
+            <li>地址栏打开 <code>{insecure.page}</code></li>
+            <li>在 <code>Insecure origins treated as secure</code> 里填 <code>{insecure.origin}</code>，选 Enabled</li>
+            <li>点右下角 <b>Relaunch</b> 重启浏览器，回到这个页面再点「允许」</li>
+          </ol>}
+        <button className="pill sm" onClick={() => void copyText(ui, insecure.origin, '复制了地址')}><Icon name="copy" />复制地址</button>
+        <span className="sub small" style={{ display: 'block', marginTop: 6 }}>{insecure.firefox
+          ? '注：Firefox 用 about:config 里的这个设置；Chrome 和 Edge 用 chrome://flags（两个地址是同一套开关）。改了之后要重启浏览器。'
+          : '注：Chrome 和 Edge 用同一个开关（chrome://flags 和 edge://flags 是同一套）；Firefox 在 about:config 里把 security.insecure_origin_as_secure.allowlist 设成这个地址。改了之后要重启浏览器。'}</span>
+      </div>}
       {(Object.keys(TOPICS) as Topic[]).map(t => <div key={t} className="toggle"><span>{TOPICS[t]}</span><button className={`sw${p.enabled[t] ? ' on' : ''}`} aria-label={TOPICS[t]} onClick={() => prefs.topic(t, !p.enabled[t])} /></div>)}
       <div className="sub small">关注的板子：{p.watched.length ? <span className="chips" style={{ display: 'inline-flex', marginLeft: 4 }}>{p.watched.map(n => <span key={n} className="chip">{upper(n)}<button aria-label="不再关注" onClick={() => prefs.watch(n, false)}><Icon name="x" /></button></span>)}</span> : '还没有。在板子卡片上点铃铛。'}</div>
     </div>

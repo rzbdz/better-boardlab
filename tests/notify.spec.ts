@@ -1,7 +1,7 @@
 /** What the page tells a person about, from two successive states: the rules every frontend's notifications follow. */
 import { describe, expect, it } from 'vitest'
 import type { Board, Lease, Waiter } from 'boardlab-core/shared/types.ts'
-import { changes } from '../src/ui/notify.ts'
+import { changes, show, prefs } from '../src/ui/notify.ts'
 
 const lease = (holder: string, purpose = '调试'): Lease => ({ id: holder, board: 'b', holder, purpose, startedAt: '2026-11-10T00:00:00Z', status: 'held', endedAt: null, endReason: null })
 const waiter = (holder: string): Waiter => ({ id: holder, board: 'b', holder, purpose: '等', queuedAt: '2026-11-10T00:00:00Z' })
@@ -38,5 +38,36 @@ describe('notifications', () => {
       { topic: 'attention', board: 'k1', title: 'k1：需要你操作', body: '按 RESET，然后点我已完成' },
     ])
     expect(changes([waiting], [waiting], me, [])).toEqual([])                                  // still the same request
+  })
+
+  it('two failures are two notes in the operating system, while a board asking again replaces its own', () => {
+    const made: Array<{ title: string, options: { tag?: string } }> = []
+    class FakeNotification { static permission = 'granted'; onclick: (() => void) | null = null; constructor(title: string, options: { tag?: string }) { made.push({ title, options }) } close() {} }
+    const globals = globalThis as unknown as Record<string, unknown>
+    const before = { Notification: globals.Notification, localStorage: globals.localStorage, window: globals.window, isSecureContext: Object.getOwnPropertyDescriptor(globalThis, 'isSecureContext') }
+    globals.window = { isSecureContext: true, focus: () => {}, Notification: FakeNotification }
+    const saved = new Map<string, string>()
+    globals.localStorage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value) }, removeItem: (key: string) => { saved.delete(key) } }
+    globals.Notification = FakeNotification
+    Object.defineProperty(globalThis, 'isSecureContext', { value: true, configurable: true })
+    prefs.set({ ...prefs.get(), enabled: { ...prefs.get().enabled, failed: true, attention: true } })
+    try {
+      show({ topic: 'failed', board: 'page', title: '拿不到 k3 的锁', body: '正被 bob 使用' })
+      show({ topic: 'failed', board: 'page', title: '复位失败', body: '串口没回应' })
+      expect(made[0]!.options.tag).not.toBe(made[1]!.options.tag)
+      // The same failure again wears the same tag: it replaces the earlier note rather than piling up.
+      show({ topic: 'failed', board: 'page', title: '拿不到 k3 的锁', body: '正被 bob 使用' })
+      expect(made[2]!.options.tag).toBe(made[0]!.options.tag)
+      // One board asking twice is one note.
+      show({ topic: 'attention', board: 'k3', title: 'k3：需要你操作', body: '按 RESET' })
+      show({ topic: 'attention', board: 'k3', title: 'k3：需要你操作', body: '按 RESET 再按一次' })
+      expect(made[4]!.options.tag).toBe(made[3]!.options.tag)
+    } finally {
+      globals.Notification = before.Notification
+      globals.localStorage = before.localStorage
+      globals.window = before.window
+      if (before.isSecureContext) Object.defineProperty(globalThis, 'isSecureContext', before.isSecureContext)
+      else delete (globalThis as { isSecureContext?: boolean }).isSecureContext
+    }
   })
 })

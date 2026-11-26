@@ -95,6 +95,25 @@ describe('the human inbox', () => {
     expect(Date.now() - started).toBeLessThan(2000)
   })
 
+  it('follows a board\'s name, and tells the board when a relay ask is answered', async () => {
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'human.sqlite')), modules: [human()] })
+    // The board stops for a person: the backend's attention files one ask, keyed by the board.
+    lab.relay.attend('k3-a', 'ACTION NEEDED: press RESET', 'req-9')
+    const filed = (await call(lab, 'GET', '/api/human/requests?status=open')).items[0]
+    expect(filed).toMatchObject({ source: 'relay', subject: 'board:k3-a', context: { request: 'req-9' } })
+    // A person renames the board while it waits: the ask follows, so closing it under the new name still closes it.
+    lab.boards.rename('k3-a', 'bench-1')
+    expect((await call(lab, 'GET', '/api/human/requests?status=open')).items[0]).toMatchObject({ subject: 'board:bench-1' })
+    // Marking it done on the human page also tells the board, with the request the board is waiting on.
+    const confirmed: Array<[string, string | null]> = []
+    const relay = lab.relay as unknown as { confirm: (board: string, actor: string, note: string, request: string | null) => Promise<string> }
+    relay.confirm = async (board: string, _actor: string, _note: string, request: string | null) => { confirmed.push([board, request]); return '已确认' }
+    const done = await call(lab, 'POST', '/api/human/resolve', { id: filed.id, status: 'done' }, 'user:dana')
+    expect(confirmed).toEqual([['bench-1', 'req-9']])
+    expect(done.message).toContain('已确认')
+    expect((await call(lab, 'GET', '/api/human/requests?status=open')).items).toHaveLength(0)
+  })
+
   it('keeps what was asked across a restart', async () => {
     const file = join(dir, 'human.sqlite')
     const before = new BoardLab({ db: openDatabase(file), modules: [human()] })

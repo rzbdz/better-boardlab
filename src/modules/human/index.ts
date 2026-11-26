@@ -3,89 +3,57 @@
  * POST /api/human/ask) — plug or unplug a cable, connect a board, press a button, put the board into download mode —
  * and waits; the page shows the request to whoever is there, and they mark it done or say they could not. Requests
  * live in boardd's database, so they survive restarts and updates, and the state carries the open ones to the page.
+ *
+ * A board whose backend stops and waits for a person (`ACTION NEEDED: press RESET …`) files the same kind of request
+ * from the relay's attention event, through the same archive (history.ts): the page shows one history however the ask
+ * was made. That is the seam a lab's own helpdesk uses too -- it files asks through `HumanArchive`, not a table of
+ * its own.
  */
 import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
-import { str, type Row } from 'boardlab-core/core/text.ts'
 import type { State } from 'boardlab-core/shared/types.ts'
+import { cleaned, humanArchive, isStatus, oneLine, STATUSES, type HumanArchive, type HumanInbox, type HumanRequest, type HumanStatus } from './history.ts'
 
-export const STATUSES = ['open', 'done', 'canceled'] as const
-export type HumanStatus = typeof STATUSES[number]
-
-/** One thing an agent needs a person to do. */
-export interface HumanRequest {
-  id: number
-  at: string
-  updatedAt: string
-  /** Who asked (`claude:…`, `user:…`). */
-  actor: string
-  /** A short label for the kind of work (plug, unplug, connect, press, …), free text. */
-  kind: string
-  title: string
-  /** What to do, in the agent's words: which cable, which board, what to watch for. */
-  body: string
-  /** Whatever the agent attached: JSON, or null. */
-  context: unknown | null
-  status: HumanStatus
-  /** How it ended, and who ended it. */
-  resolution: string | null
-  resolvedAt: string | null
-  resolvedBy: string | null
-}
-
-/** The open requests, for the page and `GET /api/human/requests`. */
-export interface HumanInbox { open: number, items: HumanRequest[] }
-
-const toRequest = (row: Row): HumanRequest => ({
-  id: Number(row.id), at: String(row.at), updatedAt: String(row.updated_at), actor: String(row.actor),
-  kind: String(row.kind), title: String(row.title), body: String(row.body),
-  context: row.context === null || row.context === undefined ? null : JSON.parse(String(row.context)),
-  status: row.status as HumanStatus,
-  resolution: str(row.resolution), resolvedAt: str(row.resolved_at), resolvedBy: str(row.resolved_by),
-})
-
-const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
-const cleaned = (text: string) => text.replace(/\r\n?/g, '\n').trim()
-const isStatus = (value: string): value is HumanStatus => (STATUSES as readonly string[]).includes(value)
+export { STATUSES, type HumanStatus, type HumanRequest, type HumanInbox, type HumanArchive }
 
 export interface HumanOptions {
   /** How many open requests the page state carries (the API lists more on request). */
   openShown?: number
 }
 
-export function human(options: HumanOptions = {}): Module<{ inbox(): HumanInbox, list(): HumanRequest[], find(id: number): HumanRequest }> {
+export function human(options: HumanOptions = {}): Module<{ inbox(): HumanInbox, list(): HumanRequest[], find(id: number): HumanRequest, archive: HumanArchive }> {
   const shown = options.openShown ?? 50
   return {
     id: 'human',
     title: '人工请求',
     setup(lab) {
-      lab.kernel.schema(`
-        CREATE TABLE IF NOT EXISTS human_requests (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          at TEXT NOT NULL, updated_at TEXT NOT NULL, actor TEXT NOT NULL,
-          kind TEXT NOT NULL DEFAULT 'task', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
-          context TEXT, task_key TEXT, status TEXT NOT NULL DEFAULT 'open',
-          resolution TEXT, resolved_at TEXT, resolved_by TEXT
-        );
-        CREATE INDEX IF NOT EXISTS human_requests_status ON human_requests(status, id);
-        CREATE UNIQUE INDEX IF NOT EXISTS human_requests_key ON human_requests(actor, task_key)
-          WHERE task_key IS NOT NULL AND status = 'open';
-      `)
-      const rows = (status: HumanStatus | null, limit: number) => (status
-        ? lab.kernel.db.prepare('SELECT * FROM human_requests WHERE status=? ORDER BY id DESC LIMIT ?').all(status, limit)
-        : lab.kernel.db.prepare('SELECT * FROM human_requests ORDER BY id DESC LIMIT ?').all(limit)) as Row[]
-      const count = () => Number((lab.kernel.db.prepare(`SELECT count(*) AS n FROM human_requests WHERE status='open'`).get() as Row | undefined)?.n ?? 0)
-      const list = (status: HumanStatus | null = 'open', limit = 100): HumanRequest[] => rows(status, limit).map(toRequest)
-      const inbox = (): HumanInbox => ({ open: count(), items: list('open', shown) })
+      const archive = humanArchive(lab.kernel)
+      const inbox = (): HumanInbox => archive.inbox(shown)
+      const list = (status: HumanStatus | null = 'open', limit = 100): HumanRequest[] => archive.list(status, limit)
       const find = (id: number): HumanRequest => {
-        const row = lab.kernel.db.prepare('SELECT * FROM human_requests WHERE id=?').get(id) as Row | undefined
-        if (!row) throw new BoardError('not-found', `没有这条人工请求：#${id}`)
-        return toRequest(row)
+        const item = archive.find(id)
+        if (!item) throw new BoardError('not-found', `没有这条人工请求：#${id}`)
+        return item
       }
-      const openWithKey = (actor: string, key: string): HumanRequest | null => {
-        const row = lab.kernel.db.prepare(`SELECT * FROM human_requests WHERE actor=? AND task_key=? AND status='open' ORDER BY id DESC LIMIT 1`).get(actor, key) as Row | undefined
-        return row ? toRequest(row) : null
-      }
+
+      // A board whose backend waits for a person files one ask per board, keyed by the board: the same "press RESET"
+      // said again updates it, and the board no longer asking closes it. The ask is the same row `boardlab ask`
+      // writes, so the page's history is one list.
+      lab.kernel.events.on('event', event => {
+        const e = event as { type?: string, board?: string, message?: string | null, holder?: string | null }
+        if (e.type === 'renamed') {
+          const { from, to } = e as { from: string, to: string }
+          archive.rename(from, to)
+          return
+        }
+        if (e.type !== 'attention' || !e.board) return
+        const subject = `board:${e.board}`
+        if (!e.message) { archive.close(subject, 'done', 'user:boardd', '板子不再等人了'); return }
+        // No kind: the attention event says what the board waits for in its own words, and a board's reset button is
+        // not the only thing it can wait for (a cable, a switch, a jumper). Labelling every ask "按键" would be this
+        // module inventing something the backend did not say.
+        archive.file({ actor: e.holder ?? 'user:boardd', title: `${e.board}：等人操作`, body: e.message, subject, source: 'relay', context: { request: (e as { request?: string | null }).request ?? null } })
+      })
 
       lab.addState(() => ({ human: inbox() }) as unknown as Partial<State>)
       lab.api.add('human', [
@@ -97,28 +65,23 @@ export function human(options: HumanOptions = {}): Module<{ inbox(): HumanInbox,
             const title = (typeof body?.title === 'string' ? oneLine(body.title) : '').slice(0, 200)
               || oneLine(text.split('\n')[0] ?? '').slice(0, 120)
             if (!title) throw new BoardError('invalid', '缺少 title：一句话说清要人做什么（或者写在 body 的第一行）')
-            const kind = (typeof body?.kind === 'string' && body.kind.trim() ? oneLine(body.kind) : 'task').slice(0, 40)
-            const context = body?.context === undefined || body?.context === null ? null : JSON.stringify(body.context)
-            const key = typeof body?.key === 'string' && body.key.trim() ? body.key.trim().slice(0, 120) : null
-            if (key) {
-              const existing = openWithKey(caller.holder, key)
-              if (existing) return existing           // a retry of the same ask: one request, not two
-            }
-            const now = lab.kernel.iso()
-            const result = lab.kernel.db.prepare('INSERT INTO human_requests(at, updated_at, actor, kind, title, body, context, task_key) VALUES(?,?,?,?,?,?,?,?)')
-              .run(now, now, caller.holder, kind, title, text, context, key)
-            lab.kernel.changed(null)
-            return find(Number(result.lastInsertRowid))
+            return archive.file({
+              actor: caller.holder, title, body: text,
+              kind: typeof body?.kind === 'string' ? body.kind : undefined,
+              context: body?.context,
+              key: typeof body?.key === 'string' ? body.key : null,
+              source: 'ask',
+            })
           },
         },
         {
           method: 'GET', path: '/api/human/requests',
-          about: '看人工请求：status=open|done|canceled|all（默认 open）、limit（默认 100）',
+          about: '看人工请求（也是历史）：status=open|done|canceled|all（默认 open）、limit（默认 100）；每条带 source（ask、relay、模块 id）和 subject（关于哪块板，若有）',
           handle: ({ query }) => {
             const status = query.get('status') ?? 'open'
             if (status !== 'all' && !isStatus(status)) throw new BoardError('invalid', 'status 要是 open、done、canceled 或 all')
             const limit = Math.min(1000, Math.max(1, Number(query.get('limit') ?? 100) || 100))
-            return { open: count(), items: list(status === 'all' ? null : status, limit) }
+            return { open: archive.count(), items: archive.list(status === 'all' ? null : status, limit) }
           },
         },
         {
@@ -140,23 +103,27 @@ export function human(options: HumanOptions = {}): Module<{ inbox(): HumanInbox,
         {
           method: 'POST', path: '/api/human/resolve',
           about: '处理一条人工请求：id、status=done|canceled|open（open 是重新打开）、note（说明，可选，例如「插好了」「线不够长」）',
-          handle: ({ body, caller }) => {
+          handle: async ({ body, caller }) => {
             const id = Number(body?.id)
             if (!Number.isInteger(id) || id <= 0) throw new BoardError('invalid', '缺少 id')
             const status = String(body?.status ?? 'done')
             if (!isStatus(status)) throw new BoardError('invalid', `status 要是 ${STATUSES.join('、')}`)
             const before = find(id)
             const note = typeof body?.note === 'string' && body.note.trim() ? cleaned(String(body.note)) : null
-            const now = lab.kernel.iso()
-            const open = status === 'open'
-            lab.kernel.db.prepare('UPDATE human_requests SET status=?, resolution=?, resolved_at=?, resolved_by=?, updated_at=? WHERE id=?')
-              .run(status, open ? null : note ?? before.resolution, open ? null : now, open ? null : caller.holder, now, id)
-            lab.kernel.changed(null)
-            return { message: `#${id} ${open ? '重新打开' : status === 'done' ? '做好了' : '做不了'}`, item: find(id) }
+            const done = archive.resolve(id, status, caller.holder, note)
+            // A board that stopped for a person has to be told too, or it stays '等人操作' with its run still waiting for
+            // an answer nobody will give. The request it waits on is the one it filed (`context.request`).
+            const board = before.source === 'relay' && before.subject?.startsWith('board:') ? before.subject.slice(6) : null
+            let delivered: string | null = null
+            if (board && status !== 'open') {
+              const request = (before.context as { request?: string | null } | null)?.request ?? null
+              delivered = await lab.relay.confirm(board, caller.holder, note ?? '', request).catch((error: unknown) => `板子那边没确认上：${(error as Error).message}`)
+            }
+            return { message: `#${id} ${status === 'open' ? '重新打开' : status === 'done' ? '做好了' : '做不了'}${delivered ? `；${delivered}` : ''}`, item: done }
           },
         },
       ])
-      return { inbox, list: () => list('open', 1000), find }
+      return { inbox, list: () => archive.list('open', 1000), find, archive }
     },
   }
 }

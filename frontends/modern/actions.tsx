@@ -90,7 +90,7 @@ export function useBoardActions(board: Board) {
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),
     discoverSlot: () => {
       const lab = current.labs.find(item => item.id === labId)
-      if (!lab) return ui.fail('不能发现', '这块板子的实验室不在了')
+      if (!lab) return ui.fail('不能发现', '这块板子的实验室不在了', true)
       ui.layer(close => <DiscoverBoardDialog lab={lab} host={host} slot={`${host}/${slotOf(board).slot}`} close={close} />)
     },
     rediscover: () => ask(`重新发现 ${host}`, <>保留在用的板子，忘掉串口不见的（比如 <b>{name}</b>），给新接上的串口建槽位并在空闲串口上找板子。只会复位没人用的复位线。</>,

@@ -4,6 +4,8 @@
  */
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Board, Busy } from 'boardlab-core/shared/types.ts'
+import { boardArt } from './art.ts'
+import { insecureHelp, show } from '../../src/ui/notify.ts'
 
 // ---------- icons ----------
 const P: Record<string, string> = {
@@ -67,6 +69,22 @@ export function Who({ id, you, full = false, max = 18, tag = true }: { id: strin
 export function slotOf(b: Board) { const p = (b.slotRef ?? '').split('/'); return p.length === 3 ? { lab: p[0]!, host: p[1]!, slot: p[2]! } : { lab: 'local', host: '本机', slot: b.slot != null ? `槽位 ${b.slot}` : '—' } }
 export const where = (b: Board) => { const { host, slot } = slotOf(b); return `${host} · ${slot}` }
 
+/** A board's drawing for a card's background, when this frontend has one (see art.ts); the card fades it into its tile. */
+export function CardArt({ board }: { board: Board }) {
+  const art = boardArt(board.product)
+  return art ? <div className="art" style={{ backgroundImage: `url(${art.large})` }} aria-hidden="true" /> : null
+}
+/**
+ * The small drawing beside a name that has no card of its own (a list row, a page title, the switcher). A board whose
+ * model this frontend has no drawing for gets a generic board glyph, so every name keeps the same leading mark.
+ */
+export function ArtIcon({ board, className = 'bart' }: { board: Board, className?: string }) {
+  const art = boardArt(board.product)
+  return art
+    ? <span className={className} style={{ backgroundImage: `url(${art.icon})` }} aria-hidden="true" />
+    : <svg className={`i ${className === 'bart' ? 'bart bart-generic' : className}`} viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M9 7h6M9 10.5h6" /><circle cx="12" cy="16" r="1.6" /></svg>
+}
+
 // ---------- time ----------
 export function age(iso: string | null | undefined) {
   if (!iso) return '—'
@@ -116,21 +134,48 @@ export function model(b: Board, you: string): Model {
 interface Toast { id: number, title: string, body?: string, error?: boolean, action?: { label: string, run: () => void } }
 interface UI {
   toast(title: string, body?: string, action?: Toast['action']): void
-  fail(title: string, error: unknown): void
+  /** An action that failed: a toast, and (unless `quiet`) the operating system's notification centre. */
+  fail(title: string, error: unknown, quiet?: boolean): void
+  /** Called with every note kept for the drawer (a failure the page reported), so the shell can log it too. */
+  onNote(listener: ((note: { topic: 'failed', board: string, title: string, body: string, at: string }) => void) | null): void
   /** A dialog (or the drawer); `render` gets a close function. */
   layer(render: (close: () => void) => ReactNode, kind?: 'dialog' | 'wide' | 'drawer'): void
   close(): void
 }
+/** Whether this key has not been told in the last minute: the same failure stays one notification. */
+const told = new Map<string, number>()
+function due(key: string): boolean {
+  const now = Date.now(), last = told.get(key)
+  if (last !== undefined && now - last < 60_000) return false
+  told.set(key, now)
+  // The map only holds what failed lately; drop the old keys as it grows.
+  if (told.size > 200) for (const [k, at] of told) if (now - at >= 60_000) told.delete(k)
+  return true
+}
+
 const Ctx = createContext<UI>(null!)
 export const useUI = () => useContext(Ctx)
 let seq = 0
+let noteListener: ((note: { topic: 'failed', board: string, title: string, body: string, at: string }) => void) | null = null
 export function UIProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [layer, setLayer] = useState<{ render: (close: () => void) => ReactNode, kind: string } | null>(null)
   const drop = (id: number) => setToasts(list => list.filter(t => t.id !== id))
   const ui: UI = {
     toast(title, body, action) { const id = ++seq; setToasts(list => [...list.slice(-3), { id, title, body, action }]); window.setTimeout(() => drop(id), action ? 8000 : 4000) },
-    fail(title, error) { const id = ++seq; setToasts(list => [...list.slice(-3), { id, title, body: error instanceof Error ? error.message : String(error), error: true }]) },
+    fail(title, error, quiet = false) {
+      const body = error instanceof Error ? error.message : String(error)
+      // A failure also reaches the operating system, so a person who is not looking at the page still sees it (`quiet`
+      // is for what went nowhere but is not a failure: a name that is not allowed, a lock someone else just took). The
+      // same failure within a minute is one notification (a poll that keeps failing is not a stream of them); the
+      // page's toast still shows every one. The topic has its own switch in the notification settings.
+      const one = !quiet && due(`fail|${title}|${body}`)
+      if (one) show({ topic: 'failed', board: 'page', title, body })
+      // The drawer keeps a failure too, at most one a minute per failure, so it can be read again.
+      if (one) noteListener?.({ topic: 'failed', board: 'page', title, body, at: new Date().toISOString() })
+      const id = ++seq; setToasts(list => [...list.slice(-3), { id, title, body, error: true }])
+    },
+    onNote(listener) { noteListener = listener },
     layer(render, kind = 'dialog') { setLayer({ render, kind }) },
     close() { setLayer(null) },
   }
@@ -196,5 +241,21 @@ export function useRun() {
 }
 
 export const copyText = async (ui: UI, text: string, ok: string) => {
-  try { await navigator.clipboard.writeText(text); ui.toast(ok, text) } catch { ui.fail('复制不了', `浏览器不让写剪贴板（页面不是 https 时常见），手动复制：${text}`) }
+  try { await navigator.clipboard.writeText(text); ui.toast(ok, text) } catch {
+    // An insecure page, or a browser that wants a click of its own: offer the same text through the old way, then
+    // say how to make copy work without asking.
+    const area = document.createElement('textarea')
+    area.value = text; area.setAttribute('readonly', ''); area.style.cssText = 'position:fixed;top:-1000px;opacity:0'
+    document.body.appendChild(area); area.select()
+    let copied = false
+    try { copied = document.execCommand('copy') } catch {}
+    area.remove()
+    if (copied) { ui.toast(ok, text); return }
+    const help = insecureHelp()
+    ui.fail('复制不了', help
+      ? (help.firefox
+        ? `浏览器不给 http 页面写剪贴板。让浏览器把这个地址当成安全页面后就能复制：about:config 里把 security.insecure_origin_as_secure.allowlist 设成 ${help.origin}，重启浏览器。现在是：${text}`
+        : `浏览器不给 http 页面写剪贴板。让浏览器把这个地址当成安全页面后就能复制：地址栏打开 ${help.page}，在 Insecure origins treated as secure 里填 ${help.origin}，重启浏览器。现在是：${text}`)
+      : `浏览器不让写剪贴板，手动复制：${text}`)
+  }
 }

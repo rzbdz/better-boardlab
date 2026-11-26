@@ -125,7 +125,7 @@ function PickBoard({ state, market, entry, close }: { state: PageState, market: 
       setBusy(target.board)
       try {
         const got = await api.lock(target.board, `刷机 ${entry.name}`.slice(0, 120))
-        if (got.queued) { ui.fail(`${upper(target.board)} 刚被人拿走了`, `已经帮你排队，第 ${got.queued.position} 位`); setBusy(null); return }
+        if (got.queued) { ui.fail(`${upper(target.board)} 刚被人拿走了`, `已经帮你排队，第 ${got.queued.position} 位`, true); setBusy(null); return }
         ui.toast(`拿到了 ${upper(target.board)}`, '锁会一直是你的，刷完记得释放')
         await refreshNow().catch(() => {})
       } catch (error) { ui.fail(`拿不到 ${upper(target.board)} 的锁`, error); setBusy(null); return }

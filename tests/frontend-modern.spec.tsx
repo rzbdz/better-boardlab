@@ -813,7 +813,8 @@ describe('Modern frontend', () => {
     const dialog = await screen.findByRole('dialog', {}, wait)
     const input = dialog.querySelector('input') as HTMLInputElement
     expect(input.value).toBe('bsp-k3-deb1')
-    expect(dialog.textContent).toContain('自动带上 bsp- 前缀')
+    // What a person types is the name; no lab prefix is added for them.
+    expect(dialog.textContent).toContain('不会自动加 bsp- 前缀')
     fireEvent.change(input, { target: { value: 'k3-deb1r' } })
     fireEvent.click(await button('改名', dialog))
     await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board/rename')?.body).toEqual({ board: 'bsp-k3-deb1', name: 'k3-deb1r' }), wait)

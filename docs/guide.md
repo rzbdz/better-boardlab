@@ -63,6 +63,8 @@ Home Assistant 控制器管不到的板子（例如接在米家插座上、靠�
 
 没人拿锁时串口是放开的，直接用 `smtty` 也能输入。闸门需要支持 `input-gate` 的 serial-mux；遇到旧版，拿锁照样成功，但板子卡片上会显示「闸门未生效」，并记进操作记录，不会悄悄放过。serial-mux 守护进程重启后闸门会丢，boardd 在恢复串口、应用扫描结果和自身启动时会按锁重新设置。
 
+默认页面上的串口打开时停在最新输出，离开这块板子再回来还是停在最新输出：正在读旧输出时不会被新输出拽走，往上翻会出现「滚到最新输出」按钮（可拖动，位置会记住）。
+
 ## 内存启动
 
 `boardlab boot <板子>[.<die>] <文件>...` 通过这颗芯片的下载口按顺序加载启动文件，通常是 FSBL、U-Boot/OpenSBI、内核 FIT：每个文件 `stage` 后 `continue`，再等下载口重新出现才加载下一个（第一个之后先等 8 秒，之后 3 秒，最多再等 20 秒；没回来就停下并报出是第几个文件）。每个参数是绝对路径，或 boardd 自带固件的名字（见下一节）；boardd 加载前算 sha256，每一步连同文件路径记进操作记录。只改内核时：`boardlab boot <板子> fsbl u-boot-opensbi /path/Image.itb`。要持锁，先用 `boardlab fastboot` 让板子进下载模式。加载命令不主动刷写镜像、`saveenv` 或改启动脚本；但 FSBL 的 DDR training 可能写 SPI NOR，启动后的系统也可能写存储，因此整个过程不保证没有持久影响。
@@ -171,7 +173,7 @@ scripts/install-client.sh me@build-server --remote ssh://boardlab@boardd-host --
 
 用 install.sh 装的 boardd 也可以在网页上做这件事：设置 →「客户端配置」→「添加机器」，填机器地址、那边的普通用户（不能是 root）和这台 boardd 的地址，密码可选、只用一次（之后用 boardd 自己的密钥）。boardd 把自己运行的版本传过去，以那个用户装在 `~/.local` 下（那边的 Node 低于 24、架构又相同时，带上 boardd 自己的 Node），让那台机器的 ssh 密钥只能经隧道用户转发到 boardd 的端口，再 `boardlab remote set`、`boardlab status` 检查。boardd 以 root 运行时隧道用户默认是 `boardlab`（没有就建一个不能登录的），否则是 boardd 自己的用户；boardd 改不了那个用户的 `authorized_keys` 时，会给出要在它的机器上运行的命令。列表里每台机器显示装的版本、连不连得上（每半小时看一次，也可以点「检查」）；「更新」用这台 boardd 的版本重装，「删除」让那边不再连过来、收回隧道授权，可以连命令行一起卸掉。boardd 的机器要允许隧道用户 ssh 登录和 TCP 转发（`AllowTcpForwarding`）。
 
-设置存在 `~/.config/boardlab/remote.json`（权限 600；老版本写在 `~/.config/boards/` 的照样读），也可以用环境变量 `BOARDS_REMOTE`（加 `BOARDS_USER`、`BOARDS_PASSWORD`）临时指定；`boardlab remote show` 看当前用的是哪个，`boardlab remote clear` 改回本机。远程时你在 boardd 那边是 `user:<登录名>`（ssh 方式是 `--user` 或本机的 `$USER`），agent 照常用 `BOARDS_HOLDER=claude:<会话>`，代表的就是这个人。远程拿到的锁凭证存在同一目录的 `tokens.json`。`boardlab boot` 给的本机文件会由 CLI 直接 `scp` 到 boardd 所在机器的一个临时上传路径（`POST /api/files/ticket`），boardd 只收一个很小的 adopt 请求并核对 sha256，同一个文件只传一次，3 天没用的删掉；本机 boardd 用硬链接或复制，同样不经过 HTTP 请求体。网页上传已禁用，因为 RISC-V 上 Node 处理大请求体会崩溃；网页只能用刷机包链接。所以在构建服务器上编完直接 `boardlab boot <板子> fsbl u-boot-opensbi ./Image.itb` 就行。
+设置存在 `~/.config/boardlab/remote.json`（权限 600；老版本写在 `~/.config/boards/` 的照样读），也可以用环境变量 `BOARDS_REMOTE`（加 `BOARDS_USER`、`BOARDS_PASSWORD`）临时指定；`boardlab remote show` 看当前用的是哪个，`boardlab remote clear` 改回本机。远程时你在 boardd 那边是 `user:<登录名>`（ssh 方式是 `--user` 或本机的 `$USER`），agent 照常用 `BOARDS_HOLDER=claude:<会话>`，代表的就是这个人。远程拿到的锁凭证存在同一目录的 `tokens.json`。`boardlab boot` 给的本机文件会由 CLI 直接 `scp` 到 boardd 所在机器的一个临时上传路径（`POST /api/files/ticket`），boardd 只收一个很小的 adopt 请求并核对 sha256，同一个文件只传一次，3 天没用的删掉；本机 boardd 用硬链接或复制，同样不经过 HTTP 请求体。网页的「上传文件」走 boardd 自己的分片上传（见[「镜像市场」](#镜像市场)），每片最多 8 MiB，边收边写盘。所以在构建服务器上编完直接 `boardlab boot <板子> fsbl u-boot-opensbi ./Image.itb` 就行。
 
 ## 放在反向代理后面
 

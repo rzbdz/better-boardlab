@@ -150,13 +150,16 @@ function Shell() {
   }, [where_.page, full])
   useEffect(() => { document.body.classList.toggle('console-full', where_.page === 'board' && full) }, [where_.page, full])
 
+  // A failure the page reports is kept in the bell's list too, so it can be read again after the toast is gone.
+  useEffect(() => ui.onNote(note => setNotes(list => [{ ...note, read: false }, ...list].slice(0, 100))), [ui])
+
   const openNotes = () => {
     setNotes(list => list.map(n => ({ ...n, read: true })))
     ui.layer(close => <>
       <header><h2>通知</h2><span className="acts"><button className="pill sm icon" aria-label="关闭" onClick={close}><Icon name="x" /></button></span></header>
       <div className="list">{notes.length ? notes.map((n, i) => (
-        <button key={i} className={`note${n.read ? '' : ' unread'}`} onClick={() => { close(); go(`#/board/${encodeURIComponent(n.board)}`) }}>
-          <span className={`ic ${n.topic}`}><Icon name={{ granted: 'lock', attention: 'hand', stolen: 'warn', free: 'bell' }[n.topic]} /></span><div><b>{n.title}</b><p>{n.body}</p><time>{hhmm(n.at)}</time></div>
+        <button key={i} className={`note${n.read ? '' : ' unread'}`} onClick={() => { close(); if (!n.board.startsWith('page') && !n.board.startsWith('human-')) go(`#/board/${encodeURIComponent(n.board)}`) }}>
+          <span className={`ic ${n.topic}`}><Icon name={{ granted: 'lock', attention: 'hand', stolen: 'warn', free: 'bell', failed: 'warn' }[n.topic]} /></span><div><b>{n.title}</b><p>{n.body}</p><time>{hhmm(n.at)}</time></div>
         </button>
       )) : <p className="sub" style={{ padding: 16 }}>没有通知。</p>}</div>
       <div className="prefs"><NotifyPrefs /></div>

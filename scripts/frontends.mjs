@@ -28,7 +28,15 @@ for (const { name } of list.frontends.filter(item => !only || item.name === only
     entryPoints: [join(src, 'page.tsx')], outfile: join(dest, 'main.js'), bundle: true, format: 'esm', platform: 'browser',
     target: 'es2022', minify: true, sourcemap: true, define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning',
   })
-  for (const file of await readdir(src)) if (file === 'index.html' || file.endsWith('.css')) await copyFile(join(src, file), join(dest, file))
+  for (const file of await readdir(src, { recursive: true })) {
+    // The page itself, its styles and the pictures beside it; `assets/` keeps its own directory.
+    const path = join(src, file)
+    if (file.endsWith('.css') || file.endsWith('.png') || file.endsWith('.webp') || file.endsWith('.svg')) {
+      await mkdir(dirname(join(dest, file)), { recursive: true })
+      await copyFile(path, join(dest, file))
+    }
+  }
+  for (const file of await readdir(src)) if (file === 'index.html') await copyFile(join(src, file), join(dest, file))
   // Every frontend has the serial console, drawn with xterm.
   await copyFile(require.resolve('@xterm/xterm/css/xterm.css'), join(dest, 'xterm.css'))
   // Its assets with a hash of what they hold: an update changes every URL, so a page (or a proxy in front of it) can

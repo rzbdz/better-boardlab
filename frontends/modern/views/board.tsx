@@ -12,7 +12,7 @@ import { prefs } from '../../../src/ui/notify.ts'
 import type { Board, BoardChannels, BoardDetail } from 'boardlab-core/shared/types.ts'
 import { canRediscover, useBoardActions } from '../actions.tsx'
 import { FlashDialog } from '../flash.tsx'
-import { age, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
+import { age, ArtIcon, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
 import { usePicker } from '../../../src/ui/picker.ts'
 import { LogPanel, type LogQuery } from './logs.tsx'
@@ -116,7 +116,7 @@ function BoardSwitch({ state, board }: { state: PageState, board: Board }) {
       {/* The heading holds the button, not the other way round: a button's content is not read as a heading. */}
       <h1 className="bname">
         <span className="bswitch-t" {...p.triggerProps} title={`${upper(board.name)} · 换一块板子`} aria-label={`${upper(board.name)}，换一块板子`}>
-          {upper(board.name)}<Icon name="chev" />
+          <ArtIcon board={board} className="bart big" />{upper(board.name)}<Icon name="chev" />
         </span>
       </h1>
       {p.open && <div className="pop">
@@ -125,7 +125,7 @@ function BoardSwitch({ state, board }: { state: PageState, board: Board }) {
           {p.shown.map((x, i) => (
             <li key={x.b.name} {...p.optionProps(x, i)}>
               <span className={`dot ${x.m.tone}`} />
-              <span className="bs-name">{upper(x.b.name)}</span>
+              <span className="bs-name"><ArtIcon board={x.b} />{upper(x.b.name)}</span>
               <span className="bs-sub">{where(x.b)} · {x.m.word}</span>
               {x.b.name === board.name && <Icon name="check" />}
             </li>
@@ -320,6 +320,7 @@ function RenameDialog({ board, close }: { board: Board, close: () => void }) {
   const ui = useUI()
   const [to, setTo] = useState(board.name)
   const [busy, setBusy] = useState(false)
+  // The brief hint under the field: a lab board keeps its device name at the lab, and the name here is what a person sees.
   const prefix = board.lab ? `${board.lab.id}-` : ''
   const wanted = to.trim()
   const submit = async () => {
@@ -338,7 +339,7 @@ function RenameDialog({ board, close }: { board: Board, close: () => void }) {
     <h2>给板子改名</h2>
     <p className="lead"><b>{upper(board.name)}</b> · 板子的名字、串口名、锁、队列和历史会一起改，别人的页面也会跟着变。</p>
     <label className="field">新名字<input className="input" autoFocus value={to} onChange={event => setTo(event.target.value)} /></label>
-    {prefix && <span className="sub small" style={{ display: 'block', marginTop: 6 }}>实验室里的板子会自动带上 {prefix} 前缀，填不带前缀的名字也行。</span>}
+    {prefix && <span className="sub small" style={{ display: 'block', marginTop: 6 }}>改成什么就叫什么，不会自动加 {prefix} 前缀；实验室那边仍记它自己的名字。</span>}
     <div className="foot"><button type="button" className="pill" onClick={close}>取消</button>
       <button className="pill dark" disabled={busy || !wanted || wanted === board.name}>{busy ? <span className="spin" /> : <Icon name="check" />}改名</button></div>
   </form>

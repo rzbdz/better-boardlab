@@ -18,12 +18,17 @@ interface HumanRequest {
   resolution: string | null
   resolvedAt: string | null
   resolvedBy: string | null
+  /** Where it came from: boardlab ask, a board stopping for a person (relay), a module. */
+  source: string
+  /** The board it is about, when it is about one (`board:<name>`). */
+  subject: string | null
 }
 
 interface Inbox { open: number, items: HumanRequest[] }
 
 const STATUS: Record<string, string> = { open: '等人处理', done: '做好了', canceled: '做不了' }
-const line = (item: HumanRequest) => `#${item.id}  [${item.kind}] ${item.title}\n    ${item.actor}，${new Date(item.at).toLocaleString()} · ${STATUS[item.status] ?? item.status}${item.resolution ? `：${item.resolution}` : ''}${item.body ? `\n    ${item.body.replace(/\n/g, '\n    ')}` : ''}`
+const SOURCE: Record<string, string> = { ask: 'boardlab ask', relay: '板子等人操作' }
+const line = (item: HumanRequest) => `#${item.id}  [${item.kind}] ${item.title}\n    ${item.actor}，${new Date(item.at).toLocaleString()} · ${STATUS[item.status] ?? item.status} · 来自${SOURCE[item.source] ?? item.source}${item.resolution ? `：${item.resolution}` : ''}${item.body ? `\n    ${item.body.replace(/\n/g, '\n    ')}` : ''}`
 
 const ask: Command = {
   name: 'ask', noBoard: true,

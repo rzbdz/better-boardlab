@@ -1,6 +1,8 @@
 /**
- * The serial console for every frontend: a live xterm on a chip's port, streamed from boardd. Kept per board while the
- * page is open, so switching boards and back shows it as it was. `className` styles its box in the frontend's look.
+ * The serial console: a live xterm on a chip's port, streamed from boardd. Kept per board while the page is open, so
+ * switching boards and back shows it as it was. `className` styles its box in the frontend's look. A frontend that uses
+ * this gets the newest output on opening and a view that stays where its person put it; one that draws its own xterm
+ * shares only the session (`console-session.ts`).
  *
  * A console that drops (the port went away, boardd restarted, the network hiccuped) connects again by itself, sooner at
  * first and then every few seconds, and at once when it is opened again or `reconnect` is called (a frontend's button).
@@ -32,6 +34,8 @@ interface Live {
   clear(): void
   /** Go to the newest output and type there again. */
   bottom(): void
+  /** The console's box was (re)placed on the page: measure it and show the newest output. */
+  show(): void
   /** Whether the view is scrolled up from the newest output, and how many lines arrived since. */
   away: { up: boolean, unseen: number }
   onAway: (away: { up: boolean, unseen: number }) => void
@@ -104,12 +108,19 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
         if (!el.isConnected || !el.clientWidth || !el.clientHeight) return
         const next = fit.proposeDimensions()
         if (next && Number.isFinite(next.cols) && Number.isFinite(next.rows) && (next.cols !== term.cols || next.rows !== term.rows)) term.resize(Math.max(next.cols, 2), Math.max(next.rows, 1))
+        // A console that was taken off the page and put back (another board, the log tab, back) comes back with a
+        // scroll area xterm never re-measured: its viewport then reads every scroll as line 0, and one flick sends
+        // the whole view to the oldest line. `settle()` puts the measurement and the place right after every fit.
+        settle()
       })
     },
     focus() { term.focus() },
     reconnect() { session.reconnect() },
-    clear() { term.clear(); boots.reset(); term.focus() },
-    bottom() { term.scrollToBottom(); term.focus() },
+    clear() { term.clear(); boots.reset(); settle(true); term.focus() },
+    bottom() { following = true; settle(true); term.focus() },
+    // A console is opened on the newest output, and opened again on it after the page put it back (another board,
+    // the log tab): a person entering a board wants its console where it is now, not where they last left the scroll.
+    show() { following = true; settle(true) },
     away: { up: false, unseen: 0 }, onAway: () => {},
     search(text, options, direction) {
       if (!text) { finder.clearDecorations(); live.onResults({ index: -1, count: 0 }); return false }
@@ -122,9 +133,34 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     onOpenSearch: () => {},
     boots, marks: [],
     view() { const buffer = term.buffer.active; return { first: 0, count: buffer.length, current: buffer.viewportY + Math.floor(term.rows / 2) } },
-    scrollTo(line) { term.scrollToLine(Math.max(0, line - 2)) },
+    scrollTo(line) { following = false; if (!usable()) settle(); term.scrollToLine(Math.max(0, line - 2)) },
     onView: new Set(),
     dispose() { session.dispose(); term.dispose(); el.remove(); lives.delete(key) },
+  }
+  // Whether the view follows the newest output. xterm has a flag of its own, but it only knows what the scrollbar
+  // told it: a viewport whose scroll area is not measured yet reports every scroll as line 0 and calls it a person
+  // scrolling up. Ours is kept from what the person does to a viewport that can answer (`usable()`), and the view
+  // is put back where it should be whenever that answer cannot be trusted.
+  let following = true
+  /** Whether the viewport can say where in the buffer it is: a pinned scrollbar (a bar not yet measured, or a
+   *  console whose rows all fit) has no position to report, so it can be neither read nor believed. */
+  const usable = () => { const vp = el.querySelector('.xterm-viewport'); return !!vp && vp.scrollHeight > vp.clientHeight + 1 }
+  /** Put the view where it belongs after the box or the console's place on the page changed: a scroll area that
+   *  cannot show the buffer's height is one xterm never measured on this page (a console put back after another
+   *  board or the log tab), so it is measured again — one row down and back is the public way to do that, and it is
+   *  done at most every few fits so a window being dragged does not reflow the buffer on every frame. A following view
+   *  then goes to the newest output, where a person coming back to a console expects to be. */
+  let nudged = 0
+  const settle = (toBottom = false) => {
+    // However the person left it, the bar is made trustworthy again: a scroll that arrives before that would read as
+    // line 0 and take a person reading scrollback to the top, which is the complaint this fixes.
+    if (term.buffer.active.length > term.rows + 1 && !usable() && Date.now() - nudged > 250) {
+      nudged = Date.now()
+      const rows = term.rows
+      term.resize(term.cols, rows + 1)
+      term.resize(term.cols, rows)
+    }
+    if (toBottom || following) term.scrollToBottom()
   }
   // Scrolled up means the viewport is above the newest line. New output while away is counted (in lines it moved the
   // bottom by), so the button can say how much is waiting below.
@@ -133,15 +169,27 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     if (next.up === live.away.up && next.unseen === live.away.unseen) return
     live.away = next; live.onAway(next)
   }
+  // A correction made from inside a scroll event fires another one: the flag keeps that one from correcting again.
+  let fixing = false
   const look = () => {
     live.onView.forEach(fn => fn())
     const buffer = term.buffer.active
-    const up = buffer.viewportY < buffer.baseY
+    if (usable()) following = buffer.viewportY >= buffer.baseY
+    // A scroll the bar could not describe: nobody can have scrolled a pinned bar, so this is xterm reading line 0 out
+    // of it. A following view is put back on the newest output; a person reading scrollback is left where they are.
+    else if (following && !fixing) {
+      fixing = true
+      try { term.scrollToBottom() } finally { fixing = false }
+    }
+    const up = following ? false : buffer.viewportY < buffer.baseY
     const grew = Math.max(0, buffer.baseY - base); base = buffer.baseY
     tell({ up, unseen: up ? live.away.unseen + (live.away.up ? grew : 0) : 0 })
   }
   term.onScroll(look)
-  term.onWriteParsed(look)
+  term.onWriteParsed(() => {
+    if (following) term.scrollToBottom()
+    look()
+  })
   // -1 as the index: more matches than are highlighted.
   finder.onDidChangeResults(({ resultIndex, resultCount }) => live.onResults({ index: resultIndex, count: resultCount }))
   session = createConsoleSession({
@@ -305,7 +353,7 @@ export function SerialConsole({ board, die, dark, onStatus, className = 'bl-term
     host.current!.appendChild(live.el)
     const observer = new ResizeObserver(() => live.fit())
     observer.observe(host.current!)
-    live.fit(); requestAnimationFrame(() => live.focus())
+    live.fit(); live.show(); requestAnimationFrame(() => live.focus())
     onStatus?.(live.status, live.reason)
     return () => { observer.disconnect(); live.el.remove(); live.onStatus = () => {}; setCurrent(null) }
   }, [board, die])

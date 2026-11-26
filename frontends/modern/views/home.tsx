@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { api, type PageState } from '../../../src/ui/api.ts'
 import { prefs } from '../../../src/ui/notify.ts'
 import type { Board } from 'boardlab-core/shared/types.ts'
-import { age, clock, holder, Icon, middle, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
+import { age, ArtIcon, CardArt, clock, holder, Icon, model, slotOf, Ticking, upper, useUI, Who, type Model } from '../kit.tsx'
 import { canRediscover, useBoardActions } from '../actions.tsx'
 import { viewsFor } from '../render.tsx'
 
@@ -127,7 +127,11 @@ function Card({ board, m, you, watched, open }: { board: Board, m: Model, you: s
   return (
     <article className={`card ${m.key}${m.mine ? ' is-mine' : ''}${by?.agent ? ` by-agent k-${by.kind}` : ''}`} tabIndex={0} data-board={board.name} aria-label={`${name}，${m.word}`}
       onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(board.name) }} onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(board.name) }}>
-      <div className="hd"><div><div className={`nm${name.length > 18 ? ' long' : ''}`} title={name}>{middle(name, 22)}</div><div className="wh">{host} · {slot}{product}</div></div>
+      <CardArt board={board} />
+      {/* Where the board is, above the name: the small, quiet line reads first, and the name below it gets two lines
+          to say a long one whole instead of cutting it. */}
+      <div className="hd"><div><div className="wh">{host} · {slot}{product}</div>
+        <div className={`nm${name.length > 18 ? ' long' : ''}`} title={name}>{name}</div></div>
         {board.soc && <span className="soc">{board.soc.toUpperCase()}</span>}</div>
       <div className="mid"><div className="st">{m.flags.busy && <span className="spin" />}{m.word}{m.flags.pct != null && <span className="pct">{m.flags.pct}%</span>}</div><div className="ln">{l1}</div><div className="ln">{l2}</div></div>
       <div className="ft"><Actions board={board} m={m} watched={watched} open={open} /></div>
@@ -140,7 +144,7 @@ function Row({ board, m, you, watched, open }: { board: Board, m: Model, you: st
   const { host, slot } = slotOf(board)
   return (
     <div className={`lrow ${m.key}`} tabIndex={0} data-board={board.name} onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(board.name) }} onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(board.name) }}>
-      <span className={`dot ${m.tone}`} /><span className="nm" title={upper(board.name)}>{m.lock === 'empty' ? `${host} / ${slot}`.toUpperCase() : upper(board.name)}</span>
+      <span className={`dot ${m.tone}`} /><span className="nm" title={upper(board.name)}><ArtIcon board={board} />{m.lock === 'empty' ? `${host} / ${slot}`.toUpperCase() : upper(board.name)}</span>
       <span className="mono sub">{host} · {slot}</span><span>{m.flags.busy && <span className="spin" />}{m.word}{m.flags.pct != null ? ` ${m.flags.pct}%` : ''}</span>
       <span>{m.holder ? <Who id={m.holder} you={you} max={18} /> : <span className="faint">—</span>}</span>
       <span className="sub">{m.since ? <Ticking fn={() => age(m.since)} /> : ''}</span><span className="sub">{m.flags.attn ?? m.purpose ?? ''}</span>

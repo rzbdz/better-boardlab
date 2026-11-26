@@ -139,9 +139,11 @@ body.console-full .detail{height:100vh}
 .card:hover,.card:focus-visible{transform:translateY(-2px);box-shadow:var(--shadow)}
 .card .hd{display:flex;align-items:flex-start;gap:8px}
 .card .hd>div{min-width:0;flex:1}
-.card .nm{font-size:14px;font-weight:650;letter-spacing:.02em;line-height:1.25;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the name takes up to two lines and wraps a long one, so a board is never called by a cut-off name */
+.card .nm{font-size:14px;font-weight:650;letter-spacing:.02em;line-height:1.22;text-transform:uppercase;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;margin-top:2px}
 .card .nm.long{font-size:12.5px}
-.card .wh{font:500 10.5px var(--mono);letter-spacing:.05em;color:var(--sub);margin-top:4px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the quiet line above it: where the board is, in small mono, trimmed to one line if it is very long */
+.card .wh{font:500 10.5px var(--mono);letter-spacing:.05em;color:var(--sub);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .soc{font:600 10px var(--mono);letter-spacing:.05em;padding:2px 7px;border-radius:999px;background:var(--elev);color:var(--sub)}
 .card .mid{align-self:end;display:grid;grid-template-rows:auto 18px 18px;row-gap:1px;padding-bottom:12px}
 .card .st{font-size:22px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
@@ -182,6 +184,29 @@ body.console-full .detail{height:100vh}
 .card.empty{background:transparent;box-shadow:inset 0 0 0 1.5px var(--line);background-image:repeating-linear-gradient(135deg,transparent 0 9px,var(--tile) 9px 10px)}
 .card.empty .st{color:var(--faint)}
 .card.proposal{background:transparent;box-shadow:inset 0 0 0 1.5px var(--blue);cursor:default}
+/* a card whose board has a drawing: the product photo in the corner, faded into the tile so it reads as texture, not a
+   picture. It sits under everything the card says and never takes the pointer. The state still colours the card, so the
+   photo only ever shifts its tone (a lab's amber, an agent's hue, yours in ink) instead of hiding it. */
+.card .art{position:absolute;z-index:0;right:-34px;bottom:-22px;width:66%;aspect-ratio:4/3;background-size:contain;background-repeat:no-repeat;background-position:right bottom;transform:rotate(-8deg);opacity:.30;filter:saturate(.9);pointer-events:none;-webkit-mask-image:linear-gradient(205deg,#000 22%,rgba(0,0,0,.55) 58%,rgba(0,0,0,0) 88%);mask-image:linear-gradient(205deg,#000 22%,rgba(0,0,0,.55) 58%,rgba(0,0,0,0) 88%)}
+.card>*:not(.art){position:relative;z-index:1}
+.card.free .art{opacity:.36}
+.card.gone .art{opacity:.16;filter:grayscale(.7)}
+.card.mine .art{opacity:.30;filter:saturate(.35) brightness(2.1)}
+.card.attn .art{opacity:.16;filter:sepia(.4) saturate(.7)}
+.card.by-agent .art{opacity:.24;filter:grayscale(.35) sepia(.25) saturate(1.4) hue-rotate(-8deg)}
+.card.empty .art{display:none}
+:root.dark .card .art{opacity:.34;filter:saturate(1) brightness(.92)}
+:root.dark .card.free .art{opacity:.42}
+:root.dark .card.mine .art{opacity:.26;filter:saturate(.5) brightness(1.5)}
+:root.dark .card.attn .art{opacity:.18}
+/* a small drawing beside a name, where the name is not on a card of its own: a list row, a page title, the switcher */
+.bart{width:22px;height:22px;border-radius:6px;flex:none;background-size:contain;background-repeat:no-repeat;background-position:center}
+.bart.big{width:26px;height:26px}
+/* the generic board glyph a name wears when this frontend has no drawing for its model */
+.bart-generic{background:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;color:var(--faint);padding:2px}
+.bs-name{display:flex;align-items:center;gap:7px}
+.bs-name .bart{width:16px;height:16px}
+.lrow .nm .bart{width:20px;height:20px}
 .card.proposal .st{color:var(--blue)}
 .card.flash{animation:flash 1.2s ease}
 @keyframes flash{30%{box-shadow:0 0 0 3px var(--blue)}}
@@ -200,7 +225,7 @@ body.console-full .detail{height:100vh}
 .lrow:last-child{border-bottom:0}
 .lrow>*{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .lrow:hover,.lrow:focus-visible{background:var(--tile-2)}
-.lrow .nm{font-weight:650;text-transform:uppercase}
+.lrow .nm{font-weight:650;text-transform:uppercase;display:flex;align-items:center;gap:8px}
 .lrow .ft{display:flex;gap:5px;justify-content:flex-end;overflow:visible}
 .lrow .ft .sp{display:none}
 .lrow .pill,.lrow .queued{height:28px;font-size:12px}.lrow .pill.icon{width:28px}
@@ -673,3 +698,12 @@ label.check input{width:15px;height:15px;accent-color:var(--fg)}
 .usage-bar{height:6px;border-radius:3px;background:var(--tile-2);overflow:hidden}
 .usage-bar i{display:block;height:100%;background:var(--fg);border-radius:3px}
 .usage-bar.hot i{background:var(--warn)}
+
+/* a coaching box: what to change outside the page, and how (the notify page, the copy failure) */
+.hint-box{padding:11px 13px;border-radius:12px;background:color-mix(in srgb,var(--warn) 9%,var(--tile));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 22%,transparent);font-size:12.5px;line-height:1.55;max-width:560px}
+.hint-box b{display:flex;align-items:center;gap:6px;color:var(--warn);font-weight:600}
+.hint-box b svg.i{width:15px;height:15px}
+.hint-box p{margin:6px 0}
+.hint-box ol{margin:6px 0 9px;padding-left:20px}
+.hint-box li{margin:3px 0}
+.hint-box code{font:11.5px var(--mono);padding:1px 5px;border-radius:5px;background:var(--elev);box-shadow:inset 0 0 0 1px var(--line);overflow-wrap:anywhere}

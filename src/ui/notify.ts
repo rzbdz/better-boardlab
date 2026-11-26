@@ -9,19 +9,28 @@
  */
 import type { Board, DatabaseRestore } from 'boardlab-core/shared/types.ts'
 
-export type Topic = 'free' | 'granted' | 'stolen' | 'attention'
+export type Topic = 'free' | 'granted' | 'stolen' | 'attention' | 'failed'
 export const TOPICS: Record<Topic, string> = {
   free: '关注的板子空闲了',
   granted: '排队轮到我、拿到锁',
   stolen: '我的锁被抢',
   attention: '板子等人操作（按 RESET 等）',
+  failed: '操作失败（拿锁、复位、刷机…）',
 }
 
 export interface Note { topic: Topic, board: string, title: string, body: string }
 
+/**
+ * What identifies a note in the OS notification centre: the same topic on the same board replaces the earlier note
+ * (a board asking again, or a lock handed over twice, is one thing to look at), but two different failures are two
+ * notes — a failure has no board to tell them apart, so its own words do.
+ */
+const tagOf = (note: Note) => note.topic === 'failed' ? `boardlab-failed-${hash(`${note.title}\0${note.body}`)}` : `boardlab-${note.topic}-${note.board}`
+const hash = (text: string) => { let h = 0; for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0; return (h >>> 0).toString(36) }
+
 interface Prefs { enabled: Record<Topic, boolean>, watched: string[] }
 const KEY = 'boardlab.notify'
-const DEFAULTS: Prefs = { enabled: { free: true, granted: true, stolen: true, attention: true }, watched: [] }
+const DEFAULTS: Prefs = { enabled: { free: true, granted: true, stolen: true, attention: true, failed: true }, watched: [] }
 
 export const prefs = {
   get(): Prefs {
@@ -64,6 +73,19 @@ export function changes(before: Board[], after: Board[], you: string, watched: s
   return notes
 }
 
+/**
+ * How to let this page notify (and copy) when it is served over plain http on a lab host: a browser refuses both
+ * outside a secure page, and the way around it is to treat this origin as secure. Each browser has its own switch:
+ * `page` is where to open it (null for a browser whose switch is a setting, not a page, such as Firefox), `origin` is
+ * the value to add there, and `firefox` says whether that is the way this browser takes. Null on a secure page.
+ */
+export const insecureHelp = (): { origin: string, page: string | null, firefox: boolean } | null => {
+  if (typeof window === 'undefined' || window.isSecureContext) return null
+  const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  const firefox = /firefox|fxios/i.test(agent) && !/seamonkey/i.test(agent)
+  return { origin: window.location.origin, firefox, page: firefox ? null : 'chrome://flags/#unsafely-treat-insecure-origin-as-secure' }
+}
+
 /** Whether this page can notify, and if not, why. */
 export function support(): { ok: true } | { ok: false, why: string } {
   if (!('Notification' in window)) return { ok: false, why: '这个浏览器不支持系统通知' }
@@ -81,7 +103,7 @@ export const ask = async () => ('Notification' in window ? Notification.requestP
  */
 export function show(note: Note, onClick?: () => void): boolean {
   if (!prefs.get().enabled[note.topic] || support().ok === false || Notification.permission !== 'granted') return false
-  const shown = new Notification(note.title, { body: note.body, tag: `boardlab-${note.topic}-${note.board}`, requireInteraction: note.topic === 'attention' || note.topic === 'granted' })
+  const shown = new Notification(note.title, { body: note.body, tag: tagOf(note), requireInteraction: note.topic === 'attention' || note.topic === 'granted' })
   shown.onclick = () => { window.focus(); onClick?.(); shown.close() }
   return true
 }
