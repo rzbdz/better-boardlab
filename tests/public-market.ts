@@ -7,12 +7,15 @@
  * and a module whose page part no longer loads is a test failure here, not a page that silently lost a tab.
  */
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { join, resolve } from 'node:path'
 import type { ModuleUi } from '../src/ui/contract.ts'
 
-/** Where the public market is on this machine (`BOARDLAB_PUB_MARKET` overrides it, as the chain test's does). */
-export const PUB_MARKET = process.env.BOARDLAB_PUB_MARKET ?? '/root/workspace/boardlab-modules-pub'
+/**
+ * Where the public market is: beside this checkout, as a sibling directory, or wherever `BOARDLAB_PUB_MARKET` names it
+ * (the chain test reads the same). By the test run's own directory, since a frontend test's `import.meta.url` is the
+ * runner's served URL, not a path.
+ */
+export const PUB_MARKET = process.env.BOARDLAB_PUB_MARKET ?? resolve(process.cwd(), '..', 'boardlab-modules-pub')
 
 /** The modules of that market the frontend tests draw, and the page part each one brings. */
 export const MARKET_PAGES = [

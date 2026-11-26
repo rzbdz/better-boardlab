@@ -11,12 +11,12 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { marketsOf, syncMarket, writeRecords } from 'boardlab-core/server/markets.ts'
 
-const market = process.env.BOARDLAB_PUB_MARKET ?? '/root/workspace/boardlab-modules-pub'
+const market = process.env.BOARDLAB_PUB_MARKET ?? resolve(process.cwd(), '..', 'boardlab-modules-pub')
 const sdk = join(process.cwd(), 'dist/sdk.js')
 // Built by `pnpm run build`: a market module resolves `boardlab` to it, and moving the modules is what the build is for.
 const usable = existsSync(sdk) && existsSync(join(market, 'market.json'))
