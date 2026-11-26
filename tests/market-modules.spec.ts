@@ -29,6 +29,12 @@ async function stateWithMarket(): Promise<string> {
   return state
 }
 
+/**
+ * Each case clones the market again, and that is a network read: a suite that passes locally can wait longer than the
+ * default timeout for it. The tests that use it say so.
+ */
+const CLONE_MS = 60_000
+
 /** Every module that left this distribution: the market offers it, and this build has no copy of its source. */
 const MOVED = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'sftp-images', 'terminal', 'boardlab', 'clients']
 /** Those of them with a page of their own: the rest are configured on another module's page (an image market), only
@@ -112,7 +118,7 @@ describe.skipIf(!usable)('a module from the public market', () => {
     const tabs = WITH_PAGE.includes(id)
     expect(answer.pages.some(([, slot]: [string, string]) => slot === 'page')).toBe(tabs)
     if (offered.ui) expect(answer.pages.length).toBeGreaterThan(0)
-  }, 60_000)
+  }, CLONE_MS)
 
   it.each(WITH_PAGE)('%s: brings the page part and help pages its manifest names', async (id) => {
     const offered = marketsOf(await stateWithMarket())[0]!.modules.find(item => item.id === id)!
@@ -122,7 +128,7 @@ describe.skipIf(!usable)('a module from the public market', () => {
     const ui = readFileSync(join(offered.uiDir!, offered.ui!.slice(offered.ui!.lastIndexOf("/") + 1)), 'utf8')
     expect(ui).toMatch(/from\s*["']boardlab\/ui["']/)
     for (const page of offered.docs) expect(existsSync(page.file)).toBe(true)
-  })
+  }, CLONE_MS)
 
   it.each(MOVED)('%s: is gone from this distribution, so one module has one owner', (id) => {
     // The move is the point: a module in a market moves, it is not copied, or two boardds could load two of it.
