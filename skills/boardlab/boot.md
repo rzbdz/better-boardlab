@@ -12,7 +12,7 @@
 ## 启动文件从哪来
 
 - 内核、DTB、initrd 和改过的 FSBL、U-Boot/OpenSBI 来自这次任务的构建产物目录。先找产物目录里的 `boot-manifest.toml`，有就按它选文件、核对 sha256、照它的加载顺序和 FIT 配置；没有就在报告里写明查过哪里。manifest 里的 `boot-tested` 是历史记录，不代表这次能起来。
-- 只改了内核：FSBL 和 U-Boot/OpenSBI 用 boardd 自带的 `fsbl` 和 `u-boot-opensbi`（`boardlab firmware` 列出，来源见仓库的 `firmware/README.md`），只有内核用这次编的。
+- 只改了内核：FSBL 和 U-Boot/OpenSBI 用 boardd 已有的 `fsbl` 和 `u-boot-opensbi`（`boardlab firmware` 列出它们从哪来：发行版的 `firmware/` 或一个模块带来的），只有内核用这次编的。
 - 改了 OpenSBI 或 U-Boot：必须用这次编出来的，不能拿旧的顶替。
 - 按任务和板子选文件，不要只挑最新的。没指定构建的冒烟测试，选一套互相兼容的并说明选了什么、有什么局限；能起来不等于验证了某个没指定的改动。
 - fastboot 的内核要打成 FIT（`Image.itb`：内核加各板的 DTB），见下一节。
