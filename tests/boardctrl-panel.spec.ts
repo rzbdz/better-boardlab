@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { RawReply } from 'boardlab-core/core/api.ts'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
-import { bsp } from '../src/modules/bsp/index.ts'
-import { panelTarget } from '../src/modules/bsp/panel.ts'
+import { boardctrl } from '../src/modules/boardctrl/index.ts'
+import { panelTarget } from '../src/modules/boardctrl/panel.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -42,8 +42,8 @@ async function fakeBspd() {
 }
 
 async function labWith(url: string) {
-  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ stateDir: join(dir, 'state'), sdk: { run: async () => 0 } as never })] })
-  await lab.backends.add('user:alice', 'host1', 'bsp')
+  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ stateDir: join(dir, 'state'), sdk: { run: async () => 0 } as never })] })
+  await lab.backends.add('user:alice', 'host1', 'boardctrl')
   await lab.backends.configure('user:alice', 'host1', { enabled: true, url, username: '', password: 'host-secret', devices: '' })
   const call = (method: 'GET' | 'POST', path: string, holder = 'user:alice', body: Record<string, unknown> = {}) => {
     const url_ = new URL(path, 'http://boardd')
@@ -68,18 +68,18 @@ describe('a board host\'s page through boardd', () => {
   it('passes the page, tool calls and event streams on, with the lab\'s token added and the browser\'s own left out', async () => {
     const bspd = await fakeBspd()
     const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
-    const page = await call('GET', '/api/bsp/hosts/host1/panel/')
+    const page = await call('GET', '/api/boardctrl/hosts/host1/panel/')
     expect(page.status).toBe(200)
     expect(await text(page)).toContain('static/style.css')
-    const tool = await call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_list', 'user:alice', { all: true })
+    const tool = await call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_list', 'user:alice', { all: true })
     expect(JSON.parse(await text(tool))).toEqual({ ok: true, got: { all: true } })
-    const events = await call('GET', '/api/bsp/hosts/host1/panel/api/v1/events')
+    const events = await call('GET', '/api/boardctrl/hosts/host1/panel/api/v1/events')
     const chunks: string[] = []
     for await (const chunk of events.body ?? []) chunks.push(chunk.toString())
     expect(chunks.join('')).toBe('data: one\n\ndata: two\n\n')
     expect(chunks.length).toBeGreaterThan(1)                                       // streamed, not buffered
     const forwarded = bspd.seen.filter(item => item.url !== '/api/v1/health')
-    expect(forwarded.every(item => item.auth === 'Bearer host-secret' && item.prefix === '/api/bsp/hosts/host1/panel')).toBe(true)
+    expect(forwarded.every(item => item.auth === 'Bearer host-secret' && item.prefix === '/api/boardctrl/hosts/host1/panel')).toBe(true)
   })
 
   it('only reads while someone else holds a board of the lab: its lines are theirs', async () => {
@@ -87,29 +87,29 @@ describe('a board host\'s page through boardd', () => {
     const { lab, call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
     lab.kernel.db.prepare("INSERT INTO boards(name, slot, product, soc, source, lab, lab_device) VALUES('host1-dut1', 's1', '', 'soc-a', 'lab', 'host1', 'dut1')").run()
     lab.locks.grant('host1-dut1', 'user:bob', '调试')
-    await expect(call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).rejects.toMatchObject({ code: 'forbidden', message: expect.stringMatching(/host1-dut1 正被 user:bob 使用/) })
+    await expect(call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).rejects.toMatchObject({ code: 'forbidden', message: expect.stringMatching(/host1-dut1 正被 user:bob 使用/) })
     expect(bspd.seen.some(item => item.url.includes('gpio_set'))).toBe(false)
     // Looking is still allowed, and the holder may change what is theirs.
-    expect((await call('GET', '/api/bsp/hosts/host1/panel/')).status).toBe(200)
-    expect((await call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:bob', { line: 5 })).status).toBe(200)
+    expect((await call('GET', '/api/boardctrl/hosts/host1/panel/')).status).toBe(200)
+    expect((await call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:bob', { line: 5 })).status).toBe(200)
     // Once it is let go, anyone may.
     lab.locks.end(lab.locks.held('host1-dut1')!, 'released', 'done')
-    expect((await call('POST', '/api/bsp/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).status).toBe(200)
+    expect((await call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).status).toBe(200)
   })
 
   it('is for people only, and only for bsp labs', async () => {
     const bspd = await fakeBspd()
     const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
-    await expect(call('GET', '/api/bsp/hosts/host1/panel/', 'claude:task-1')).rejects.toThrow(/只给人用/)
-    await expect(call('GET', '/api/bsp/hosts/nope/panel/')).rejects.toThrow(/没有 bsp 实验室 nope/)
+    await expect(call('GET', '/api/boardctrl/hosts/host1/panel/', 'claude:task-1')).rejects.toThrow(/只给人用/)
+    await expect(call('GET', '/api/boardctrl/hosts/nope/panel/')).rejects.toThrow(/没有 boardctrl 实验室 nope/)
     expect(bspd.seen).toEqual([])
   })
 })
 
 describe('host models', () => {
   it('lists the host models bsp has a header map for, by id and name', async () => {
-    const { hostBoards } = await import('../src/modules/bsp/index.ts')
-    const boards = hostBoards(join(import.meta.dirname, '../externals/bsp'))
+    const { hostBoards } = await import('../src/modules/boardctrl/index.ts')
+    const boards = hostBoards(join(import.meta.dirname, '../externals/boardctrl'))
     expect(boards.length).toBeGreaterThanOrEqual(2)
     expect(boards.find(item => item.id === 'spacemit-k1x-deb1')?.name).toBe('SpacemiT K1-x deb1 (Banana Pi BPI-F3)')
     expect(hostBoards(null)).toEqual([])

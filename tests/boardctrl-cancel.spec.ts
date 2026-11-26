@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CancelledError } from 'boardlab-core/core/errors.ts'
 import type { BoardTarget, LabConfig } from 'boardlab-core/core/backend.ts'
-import { bspLab, jobIn, runCli, type BspRunner } from '../src/modules/bsp/driver.ts'
+import { boardctrlLab, jobIn, runCli, type BoardctrlRunner } from '../src/modules/boardctrl/driver.ts'
 
 const on = (device: string, lease: string | null = null): BoardTarget => ({ board: `bsp-${device}`, device, lease, die: 'die0', usbPath: null, port: null, gate: null })
 const config: LabConfig = { url: 'http://registry.test:8765', username: '', password: 'tok', jump: '' }
@@ -36,19 +36,19 @@ const until = async (test: () => boolean, ms = 5000) => {
 describe('cancelling bsp jobs', () => {
   it('reports a job that ended cancelled (exit 4, error.code cancelled) as cancelled, not as done or failed', async () => {
     const bin = script(`echo '${cancelledEnvelope}'; exit 4`)
-    const lab = bspLab({ bin })
+    const lab = boardctrlLab({ bin })
     const flashing = lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {})
     await expect(flashing).rejects.toBeInstanceOf(CancelledError)
     await expect(flashing).rejects.toThrow(/^已取消：bsp dut flash：job flash-1-1 cancelled/)
     // Either sign alone is enough: an older CLI's exit code, or the envelope.
-    const coded = bspLab({ run: async () => ({ code: 4, stdout: '', stderr: '' }) })
+    const coded = boardctrlLab({ run: async () => ({ code: 4, stdout: '', stderr: '' }) })
     await expect(coded.builds!.boot(config, on('k3-a'), { sdk: 's', method: 'load', variant: null }, () => {})).rejects.toBeInstanceOf(CancelledError)
   })
 
   it('tells the host to stop the job its progress named, and follows the job to its end instead of killing the CLI', async () => {
     const calls: string[][] = []
     let finish!: () => void
-    const run: BspRunner = (args, { onStderr, signal }) => {
+    const run: BoardctrlRunner = (args, { onStderr, signal }) => {
       const rest = after(args)
       calls.push(rest)
       const command = routed(rest)
@@ -60,7 +60,7 @@ describe('cancelling bsp jobs', () => {
         signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'killed' }), { once: true })
       })
     }
-    const lab = bspLab({ run })
+    const lab = boardctrlLab({ run })
     const stop = new AbortController()
     const booting = lab.builds!.boot(config, on('k3-a', 'T1'), { sdk: 'k3-sdk', method: 'load', variant: null }, () => {}, stop.signal)
     await until(() => calls.length === 1)
@@ -75,7 +75,7 @@ describe('cancelling bsp jobs', () => {
   it('cancels under the lease the board holds when the cancel comes, not the one it started with', async () => {
     const calls: string[][] = []
     let finish!: () => void
-    const run: BspRunner = (args, { onStderr, signal }) => {
+    const run: BoardctrlRunner = (args, { onStderr, signal }) => {
       const command = routed(after(args))
       calls.push(command)
       if (command[0] === 'job' || (command[0] === 'dut' && command[1] === 'cancel')) return Promise.resolve({ code: 0, stdout: JSON.stringify({ ok: true, result: {} }), stderr: '' })
@@ -89,7 +89,7 @@ describe('cancelling bsp jobs', () => {
     let token = 'T1'
     const target = { ...on('k3-a'), get lease() { return token } }
     const stop = new AbortController()
-    const flashing = bspLab({ run }).builds!.flash!(config, target, { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, stop.signal)
+    const flashing = boardctrlLab({ run }).builds!.flash!(config, target, { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, stop.signal)
     await until(() => calls.length === 1)
     token = 'T2'
     stop.abort(new CancelledError('已取消：k3-a 的刷机'))
@@ -103,7 +103,7 @@ describe('cancelling bsp jobs', () => {
     const calls: string[][] = []
     let finish!: () => void
     const refused = { code: 1, stdout: JSON.stringify({ ok: false, error: { code: 'forbidden', message: 'DUT k3-a is not leased; mutating operations need a lease' } }), stderr: '' }
-    const run: BspRunner = (args, { onStderr, signal }) => {
+    const run: BoardctrlRunner = (args, { onStderr, signal }) => {
       const command = routed(after(args))
       calls.push(command)
       if (command[0] === 'job' || (command[0] === 'dut' && command[1] === 'cancel')) return Promise.resolve(refused)
@@ -113,7 +113,7 @@ describe('cancelling bsp jobs', () => {
         signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'killed' }), { once: true })
       })
     }
-    const lab = bspLab({ run, cancelGraceMs: 30 })
+    const lab = boardctrlLab({ run, cancelGraceMs: 30 })
     const stop = new AbortController()
     const flashing = lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, stop.signal)
     await until(() => calls.length === 1)
@@ -128,8 +128,8 @@ describe('cancelling bsp jobs', () => {
 
   it('kills a CLI whose lock ended at once, and one with no job yet when cancelled', async () => {
     let killed = 0
-    const run: BspRunner = (args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => { killed++; resolve({ code: null, stdout: '', stderr: '' }) }, { once: true }))
-    const lab = bspLab({ run })
+    const run: BoardctrlRunner = (args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => { killed++; resolve({ code: null, stdout: '', stderr: '' }) }, { once: true }))
+    const lab = boardctrlLab({ run })
     const stop = new AbortController()
     const staging = lab.download.stage(config, on('k3-a', 'T1'), { path: '/f', sha256: 'x' }, 1000, stop.signal)
     stop.abort(new CancelledError('已取消：加载'))

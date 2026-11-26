@@ -1,6 +1,6 @@
-[submodule "externals/bsp"]
-	path = externals/bsp
-	url = https://github.com/rzbdz/boardctrl.git
 [submodule "core"]
 	path = core
 	url = https://github.com/rzbdz/boardlab-core.git
+[submodule "externals/boardctrl"]
+	path = externals/boardctrl
+	url = https://github.com/rzbdz/boardctrl.git

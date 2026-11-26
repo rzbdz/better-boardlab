@@ -144,7 +144,7 @@ printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOA
 OFFER="system clients"
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
-    printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "clients": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
+    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true } } }' > "$STATE/boardd.json"
     OFFERED=$OFFER; return 0
   fi
   for m in $OFFER; do

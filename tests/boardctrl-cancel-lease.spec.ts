@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
 import { CancelledError } from 'boardlab-core/core/errors.ts'
-import { bsp } from '../src/modules/bsp/index.ts'
-import { bspLab, type BspRunner } from '../src/modules/bsp/driver.ts'
+import { boardctrl } from '../src/modules/boardctrl/index.ts'
+import { boardctrlLab, type BoardctrlRunner } from '../src/modules/boardctrl/driver.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -36,7 +36,7 @@ function fakeHost() {
     if (given !== host.lease.token) return `DUT k3-a is leased by ${host.lease.holder}; wrong or missing lease token`
     return null
   }
-  const run: BspRunner = async (args, { onStderr, signal }) => {
+  const run: BoardctrlRunner = async (args, { onStderr, signal }) => {
     let rest = args.slice(args.indexOf('--stateless') + 1)
     if (rest[0] === '-r') rest = rest.slice(2)
     const [group, verb] = rest
@@ -79,8 +79,8 @@ function fakeHost() {
 
 async function setup() {
   const { host, run } = fakeHost()
-  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ sdk: { run: async () => 0 } as never, instances: [] })] })
-  lab.backends.register('live', bspLab({ run, cancelGraceMs: 50 }))
+  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ sdk: { run: async () => 0 } as never, instances: [] })] })
+  lab.backends.register('live', boardctrlLab({ run, cancelGraceMs: 50 }))
   await lab.backends.configure('user:alice', 'live', { enabled: true, url: 'http://registry.test:8765', username: '', password: 'tok', devices: '' })
   const call = (path: string, holder: string, body: Record<string, unknown>) =>
     Promise.resolve().then(() => lab.api.match('POST', path)!.endpoint.handle({ body, query: new URLSearchParams(), params: {}, caller: { holder, local: true }, signal: new AbortController().signal, upload: null } as never))
@@ -131,8 +131,8 @@ describe('cancelling a bsp flash whose lock ended', () => {
 
 describe('removing a bsp lab', () => {
   it('is refused while the lab is being installed, and the uninstall that removes it is not refused by its own run', async () => {
-    const lab = new BoardLab({ db: openDatabase(join(dir, 'u.sqlite')), modules: [bsp({ stateDir: join(dir, 'state'), sdk: { run: async () => 0 } as never, instances: [] })] })
-    lab.backends.add('user:alice', 'host1', 'bsp')
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'u.sqlite')), modules: [boardctrl({ stateDir: join(dir, 'state'), sdk: { run: async () => 0 } as never, instances: [] })] })
+    lab.backends.add('user:alice', 'host1', 'boardctrl')
     const call = (path: string, body: Record<string, unknown>) =>
       Promise.resolve().then(() => lab.api.match('POST', path)!.endpoint.handle({ body, query: new URLSearchParams(), params: {}, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null } as never))
     let installed!: () => void
@@ -140,7 +140,7 @@ describe('removing a bsp lab', () => {
     await expect(call('/api/labs/remove', { id: 'host1' })).rejects.toThrow(/正在安装/)
     installed(); await installing
     // Not installed over ssh: uninstalling only forgets the lab, as its own run on the lab.
-    expect(await call('/api/bsp/uninstall', { id: 'host1' })).toEqual({ ok: true })
+    expect(await call('/api/boardctrl/uninstall', { id: 'host1' })).toEqual({ ok: true })
     expect(lab.backends.labSettings().map(item => item.id)).not.toContain('host1')
   })
 })

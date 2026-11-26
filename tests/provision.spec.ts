@@ -8,8 +8,8 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Hosts } from '../src/modules/hosts/ssh.ts'
-import { installHost } from '../src/modules/bsp/provision.ts'
-import { hostArch, readHostTools } from '../src/modules/bsp/host-tools.ts'
+import { installHost } from '../src/modules/boardctrl/provision.ts'
+import { hostArch, readHostTools } from '../src/modules/boardctrl/host-tools.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()

@@ -14,8 +14,8 @@ export let state = mockState()
 export function resetMock() { state = mockState(); calls.length = 0; debugRunning.clear(); document.cookie = 'boardlab-frontend=; max-age=0' }
 
 const history = {
-  actions: [{ id: 1, at: state.now, actor: 'user:bob', board: 'bsp-k3-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode' }],
-  leases: [{ id: 'l1', board: 'bsp-k3-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: state.now, status: 'held', endedAt: null, endReason: null }],
+  actions: [{ id: 1, at: state.now, actor: 'user:bob', board: 'boardctrl-k3-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode' }],
+  leases: [{ id: 'l1', board: 'boardctrl-k3-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: state.now, status: 'held', endedAt: null, endReason: null }],
   scans: [],
 }
 
@@ -59,14 +59,14 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   if (path === '/api/history') return reply(history)
   if (path === '/api/board') return reply({ board: state.boards.find(b => b.name === url.searchParams.get('name')), actions: [], leases: [] })
   if (path === '/api/frontends') return reply({ default: 'modern', current: 'modern', frontends: [{ name: 'modern', title: 'Modern' }, { name: 'troy-mitchell-default', title: 'TroyMitchellDefault' }] })
-  if (path === '/api/bsp/site') return reply(site)
+  if (path === '/api/boardctrl/site') return reply(site)
   // A board's debug path, as its backend reports it; starting the session makes it live until it is stopped, so a
   // page that re-reads the path after either sees what the host would say.
   if (path === '/api/debug' && method === 'POST') {
     const action = body?.action ?? 'path'
     const live = debugRunning.get(body?.board as string) ?? false
     const swd = { provider: 'my-swd', title: 'SWD over GPIO', about: '两颗 GPIO 位操作出来的链路。', kinds: ['halt', 'run', 'step', 'regs', 'trace'] }
-    if (action === 'path') return reply({ debug: body.board === 'bsp-k1-musecard'
+    if (action === 'path') return reply({ debug: body.board === 'boardctrl-k1-musecard'
       ? { ...swd, running: live, endpoint: live ? '127.0.0.1:3334' : null } : null })
     if (action === 'start') { debugRunning.set(body.board as string, true); return reply({ debug: { ...swd, running: true, endpoint: '127.0.0.1:3334' } }) }
     if (action === 'stop') { debugRunning.set(body.board as string, false); return reply({ debug: { message: '调试会话已停止' } }) }
@@ -91,7 +91,7 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     return reply({ id: upload[1], name: at.name, size: at.size, received: at.received })
   }
   if (path.startsWith('/api/files/')) return reply({ sha256: path.slice('/api/files/'.length), present: false })
-  if (/^\/api\/bsp\/hosts\/[^/]+\/cache$/.test(path)) return reply([
+  if (/^\/api\/boardctrl\/hosts\/[^/]+\/cache$/.test(path)) return reply([
     { host: 'host-a', cache: { path: '/var/cache/a', used: 46 * 2 ** 30, entries: 12, held: 1, max_bytes: 50 * 2 ** 30, ttl_s: 7 * 86400, min_free_bytes: 5 * 2 ** 30, free: 80 * 2 ** 30 }, error: null },
     { host: 'host-b', cache: null, error: null },
   ])
@@ -135,14 +135,14 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     const tree: Array<[string, string, string]> = [['soc-a', 'folder', 'soc-a'], ['soc-a/new.zip', 'image', 'new.zip'], ['soc-a/old', 'folder', 'soc-a/old'], ['soc-a/old/deep.zip', 'image', 'deep.zip'], ['soc-b', 'folder', 'soc-b'], ['soc-b/disk.iso', 'image', 'disk.iso']]
     const entries = words === 'nothing' ? [] : tree.filter(([at, kind, name]) => kind === 'image' ? name.includes(words) : tree.some(([below, k2]) => k2 === 'image' && below.startsWith(`${at}/`) && below.split('/').at(-1)!.includes(words)))
       .map(([at, kind, name]) => ({ path: at, name, kind, soc: 'k3', ...(kind === 'image' ? { size: 2 << 20, modified: '2026-11-20T08:00:00Z' } : {}) }))
-    if (url.searchParams.get('board')) for (const entry of entries) if (entry.kind === 'image') (entry as Record<string, unknown>).refused = entry.name.endsWith('zip') ? null : 'bsp-k3-deb1 的后端刷不了这种包'
+    if (url.searchParams.get('board')) for (const entry of entries) if (entry.kind === 'image') (entry as Record<string, unknown>).refused = entry.name.endsWith('zip') ? null : 'boardctrl-k3-deb1 的后端刷不了这种包'
     // A market searched by an index that stopped short says so; the shelf answers whole.
     return reply({ market: 'shelf', text: words, entries, folders: 3, by: 'index', partial: false, readAt: state.now })
   }
   if (path === '/api/markets/shelf/targets') return reply([
-    { board: 'bsp-k3-deb1', soc: 'k3', mine: true, free: false, why: null },
-    { board: 'bsp-k1-pico', soc: 'k1', mine: false, free: true, why: null },
-    { board: 'bsp-k3-cm1', soc: 'k3', mine: false, free: false, why: 'user:bob 在用' },
+    { board: 'boardctrl-k3-deb1', soc: 'k3', mine: true, free: false, why: null },
+    { board: 'boardctrl-k1-pico', soc: 'k1', mine: false, free: true, why: null },
+    { board: 'boardctrl-k3-cm1', soc: 'k3', mine: false, free: false, why: 'user:bob 在用' },
   ])
   // What a package would write: streamed like the backend fetching it, then its plan.
   if (path === '/api/flash/plan' && method === 'POST') {

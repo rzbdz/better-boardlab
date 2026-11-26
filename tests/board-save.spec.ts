@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
 import type { Backend } from 'boardlab-core/core/backend.ts'
-import { bsp } from '../src/modules/bsp/index.ts'
+import { boardctrl } from '../src/modules/boardctrl/index.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -36,7 +36,7 @@ function recordingBsp(choices: Record<string, unknown>) {
 }
 
 async function setup(choices: Record<string, unknown>) {
-  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [bsp({ sdk: { run: async () => 0 } as never })] })
+  const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ sdk: { run: async () => 0 } as never })] })
   const { backend, saved } = recordingBsp(choices)
   lab.backends.register('live', backend)
   await lab.backends.configure('user:alice', 'live', { enabled: true, url: 'http://h1:8765', username: '', password: '', devices: '' })
@@ -44,7 +44,7 @@ async function setup(choices: Record<string, unknown>) {
   // The dialog saves under the board's lock: the test's person holds it.
   await lab.locks.lock('live-k1-a', 'user:alice', '改登记')
   const call = async (body: Record<string, unknown>): Promise<{ message: string, error?: string }> => {
-    const found = lab.api.match('POST', '/api/bsp/board')!
+    const found = lab.api.match('POST', '/api/boardctrl/board')!
     try {
       const reply = await found.endpoint.handle({ query: new URLSearchParams(), params: found.params, body,
         headers: {}, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null } as never)

@@ -1,5 +1,5 @@
 /**
- * The bsp CLI as boardd runs it: each command the leader of a process group of its own, so stopping it stops the ssh
+ * The boardctrl CLI as boardd runs it: each command the leader of a process group of its own, so stopping it stops the ssh
  * and scp it started too, and the jobs a command starts on a host, as its progress names them.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -13,7 +13,7 @@ export const CANCEL_GRACE_MS = 10 * 60_000
 /** boardctrl's exit code for a job that was cancelled. */
 export const EXIT_CANCELLED = 4
 
-export interface BspResult { code: number | null, stdout: string, stderr: string }
+export interface BoardctrlResult { code: number | null, stdout: string, stderr: string }
 
 /** Stop a process and everything it started: it leads its own process group (it was spawned detached). */
 export function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
@@ -25,7 +25,7 @@ export function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM
  * Run the CLI as the leader of a process group of its own, so killing it (a timeout, `signal`) also stops the ssh and
  * scp it started, which otherwise stay behind holding the host.
  */
-export function runCli(bin: string, args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }): Promise<BspResult> {
+export function runCli(bin: string, args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }): Promise<BoardctrlResult> {
   const { env, timeoutMs, onStderr, signal } = options
   return new Promise(resolve => {
     const LIMIT = 16 * 1024 * 1024
@@ -68,7 +68,7 @@ export function runCli(bin: string, args: string[], options: { env: NodeJS.Proce
   })
 }
 
-/** A job a bsp command started, as its progress names it (`[h1] probing (job probe-17-3)`, `k3-a @ h1: … job boot-17-4`). */
+/** A job a boardctrl command started, as its progress names it (`[h1] probing (job probe-17-3)`, `k3-a @ h1: … job boot-17-4`). */
 export function jobIn(line: string): { id: string, host: string | null } | null {
   const found = line.match(/\bjob ([a-z][a-z_]*-\d+-\d+)\b/)
   if (!found) return null
@@ -77,7 +77,7 @@ export function jobIn(line: string): { id: string, host: string | null } | null 
 }
 
 /**
- * Run one bsp command under `signal`. A cancel (the signal's reason is a CancelledError) tells the host to stop what
+ * Run one boardctrl command under `signal`. A cancel (the signal's reason is a CancelledError) tells the host to stop what
  * the command started — `stop`, the command that cancels it there, and every job its progress named (`tell`, with
  * `jobArgs`: the board's lease, which a board's job needs) — and keeps following the job until it has ended, so the
  * board's state is known. Each ask is handed to the cancel (`CancelledError.answer`): when the host refuses every one,
@@ -85,9 +85,9 @@ export function jobIn(line: string): { id: string, host: string | null } | null 
  * that does not end within `graceMs` of an accepted cancel, is killed (`attempt`'s signal); so is one stopped for any
  * other reason (its lock ended). Progress lines go on to `onStderr`.
  */
-export async function cancellable(attempt: (onLine: ((line: string) => void) | undefined, kill: AbortSignal | undefined) => Promise<BspResult>,
+export async function cancellable(attempt: (onLine: ((line: string) => void) | undefined, kill: AbortSignal | undefined) => Promise<BoardctrlResult>,
   tell: (what: string[], host: string | null) => Promise<unknown>,
-  options: { onStderr?: (line: string) => void, signal?: AbortSignal, stop?: () => string[], jobArgs?: () => string[], graceMs?: number }): Promise<BspResult> {
+  options: { onStderr?: (line: string) => void, signal?: AbortSignal, stop?: () => string[], jobArgs?: () => string[], graceMs?: number }): Promise<BoardctrlResult> {
   // `stop` and `jobArgs` are read when the cancel comes: the board's lease may have been taken again since the start.
   const { onStderr, signal, stop } = options
   if (!signal) return attempt(onStderr, undefined)
@@ -124,7 +124,7 @@ export async function cancellable(attempt: (onLine: ((line: string) => void) | u
   finally { signal.removeEventListener('abort', aborted); if (grace) clearTimeout(grace) }
 }
 
-/** Start a long-lived bsp command (`dut pipe`, `watch`): its stdin and stdout are the stream; closing it stops all of it. */
+/** Start a long-lived boardctrl command (`dut pipe`, `watch`): its stdin and stdout are the stream; closing it stops all of it. */
 export function spawnPipe(bin: string, args: string[], env: NodeJS.ProcessEnv): { stream: Duplex, stderr: () => string } {
   const child = spawn(bin, args, { env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
   let stderr = ''

@@ -127,7 +127,7 @@ export class SerialMux {
 
 /**
  * A serial-mux session over a stream that speaks its protocol: the daemon's Unix socket, or a pipe to a daemon on
- * another machine (`bsp dut pipe`). Closing the session ends the stream.
+ * another machine (`boardctrl dut pipe`). Closing the session ends the stream.
  */
 export function muxSession(stream: Duplex, name: string, options: { token?: string | null, timeoutMs?: number } = {}): Promise<ConsoleSession> {
   const timeoutMs = options.timeoutMs ?? 5000

@@ -1,7 +1,7 @@
 /**
  * The `bsp` module, boardlab's wrapper of bsp: bsp board hosts become a backend (boards, leases, relay, download,
  * consoles, builds, discovery, free ports, news), and bsp's SDK work and its registry's catalog are offered to boardlab's
- * clients (`boardlab sdk`, `boardlab registry`, `boardlab bsp`), all through the bsp CLI on boardd's machine. The site
+ * clients (`boardlab sdk`, `boardlab registry`, `boardlab boardctrl`), all through the boardctrl CLI on boardd's machine. The site
  * every host reads (SoC facts, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
  */
 import { createReadStream, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -11,7 +11,7 @@ import { BoardError } from 'boardlab-core/core/errors.ts'
 import { sha256File } from 'boardlab-core/core/files.ts'
 import type { BoardLab as Lab } from 'boardlab-core/core/lab.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
-import { bspLab, FDL_STRATEGIES, type BspBackend, type BspBoardChange } from './driver.ts'
+import { boardctrlLab, FDL_STRATEGIES, type BoardctrlBackend, type BoardctrlBoardChange } from './driver.ts'
 import { hostsFor } from '../hosts/ssh.ts'
 import { installHost, uninstallHost } from './provision.ts'
 import { forgetBootMarks } from './logs.ts'
@@ -21,35 +21,35 @@ import { readMarkets } from './markets.ts'
 import { siteEndpoints } from './site-api.ts'
 import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkReach, type SdkRunner, type SdkStream } from './sdk.ts'
 
-export interface BspApi {
+export interface BoardctrlApi {
   /**
-   * `boardlab sdk <args>`: run `bsp sdk <args>` for the caller. Arguments `@sha256:<hex>` stand for a file the CLI sent
+   * `boardlab sdk <args>`: run `boardctrl sdk <args>` for the caller. Arguments `@sha256:<hex>` stand for a file the CLI sent
    * (for `put`); `-o @download` has the output saved here and handed back as a sent file (for `get`), whose sha256 the
    * result carries.
    */
   sdk(holder: string, args: string[], options: { json: boolean, group?: SdkGroup, onOutput: (stream: SdkStream, text: string) => void, signal?: AbortSignal }): Promise<{ code: number, download: string | null }>
 }
 
-/** `tree`: the bsp source this distribution carries (externals/bsp), shipped to the hosts it sets up. */
-export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner, instances?: string[], tree?: string | null } = {}): Module<BspApi> {
+/** `tree`: the bsp source this distribution carries (externals/boardctrl), shipped to the hosts it sets up. */
+export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkRunner, instances?: string[], tree?: string | null } = {}): Module<BoardctrlApi> {
   return {
-    id: 'bsp',
-    title: 'bsp 板卡主机',
+    id: 'boardctrl',
+    title: 'boardctrl 板卡主机',
     setup(lab) {
       const hosts = options.stateDir ? hostsFor(options.stateDir) : null
       const sshKey = hosts?.keyFile
-      for (const id of options.instances ?? ['bsp']) lab.backends.register(id, bspLab({ bin: options.bin, sshKey, stateDir: options.stateDir }))
+      for (const id of options.instances ?? ['boardctrl']) lab.backends.register(id, boardctrlLab({ bin: options.bin, sshKey, stateDir: options.stateDir }))
       // A bsp lab is one board host: added on the page, set up there by installing bspd on the host over ssh.
-      lab.backends.offer({ kind: 'bsp', title: 'bsp 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 bspd 并接入', create: () => bspLab({ bin: options.bin, sshKey, stateDir: options.stateDir }) })
+      lab.backends.offer({ kind: 'boardctrl', title: 'boardctrl 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 boardctrld 并接入', create: () => boardctrlLab({ bin: options.bin, sshKey, stateDir: options.stateDir }) })
       const access = (body: Record<string, unknown>) => {
         const address = String(body.address ?? '').trim()
         if (!address) throw new BoardError('invalid', '要填主机地址：IP、域名或 ssh 配置里的名字')
         return { address, user: String(body.user ?? '').trim() || undefined, port: body.sshPort ? Number(body.sshPort) : undefined, password: typeof body.password === 'string' && body.password ? body.password : undefined, jump: String(body.jump ?? '').trim() || undefined }
       }
       // The site every host gets (SoC facts, the SDK catalog, hooks, images), kept here: see site.ts.
-      // Its images are fetched with the same bsp CLI as everything else.
-      const site = options.stateDir ? new Site(join(options.stateDir, 'bsp', 'site'), lab.kernel.settings('bsp.site'), {
-        tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BSP ?? 'bsp',
+      // Its images are fetched with the same boardctrl CLI as everything else.
+      const site = options.stateDir ? new Site(join(options.stateDir, 'boardctrl', 'site'), lab.kernel.settings('boardctrl.site'), {
+        tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BOARDCTRL ?? 'bsp',
       }) : null
       // The image markets the site sets up (markets/<id>.yaml): read now and again after every change to the site's files.
       // A file that is not a market, or a market its driver refuses, is listed with what is wrong; the rest still load.
@@ -83,13 +83,13 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
         return { bundle, revision: () => revision }
       }
       const runner = options.sdk ?? (options.stateDir ? bspSdk({ bin: options.bin, stateDir: options.stateDir }) : null)
-      const api: BspApi = {
+      const api: BoardctrlApi = {
         async sdk(holder, args, run) {
-          if (!runner) throw new BoardError('invalid', '这个 boardd 没有 bsp 命令行，不能做 SDK 操作')
+          if (!runner) throw new BoardError('invalid', '这个 boardd 没有 boardctrl 命令行，不能做 SDK 操作')
           const group = run.group ?? 'sdk'
           if (group === 'raw') {
             const words = args.filter(arg => !arg.startsWith('-'))
-            if (!words.length) throw new BoardError('invalid', '要给 bsp 命令，例如 boardlab bsp hosts')
+            if (!words.length) throw new BoardError('invalid', '要给 bsp 命令，例如 boardlab boardctrl hosts')
             if (RAW_REFUSED.has(words[0]!) || (words[0] === 'catalog' && words[1] === 'export')) throw new BoardError('forbidden', `bsp ${words[0]} 会改 boardd 所在机器自己的配置，不能经 boardlab 跑`)
           } else {
             const allowed = group === 'catalog' ? CATALOG_ACTIONS : SDK_ACTIONS
@@ -117,13 +117,13 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           return { code, download: sha }
         },
       }
-      lab.api.add('bsp', [{
-        method: 'POST', path: '/api/bsp/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token；主机上有任务在跑时安装等它跑完，等不到就不装，force=true 时不等、直接重启，那些任务会中断）：ssh 过去装 bspd，接入实验室，输出边装边推送',
+      lab.api.add('boardctrl', [{
+        method: 'POST', path: '/api/boardctrl/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token；主机上有任务在跑时安装等它跑完，等不到就不装，force=true 时不等、直接重启，那些任务会中断）：ssh 过去装 bspd，接入实验室，输出边装边推送',
         handle: ({ body, caller }) => {
           if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 bsp，不能装主机')
           const id = String(body.id ?? '')
           const lab_ = lab.backends.get(id)
-          if (lab_.kind !== 'bsp') throw new BoardError('invalid', `${id} 不是 bsp 实验室`)
+          if (lab_.kind !== 'boardctrl') throw new BoardError('invalid', `${id} 不是 boardctrl 实验室`)
           const how = access(body)
           return new EventStream(async (emit, end) => {
             try {
@@ -161,7 +161,7 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           })
         },
       }, {
-        method: 'POST', path: '/api/bsp/uninstall', about: '从主机上卸掉 bspd（id；purge=true 连它的数据一起删），并删掉实验室',
+        method: 'POST', path: '/api/boardctrl/uninstall', about: '从主机上卸掉 bspd（id；purge=true 连它的数据一起删），并删掉实验室',
         handle: async ({ body, caller }) => {
           if (!hosts) throw new BoardError('invalid', '这个 boardd 不能连主机')
           const id = String(body.id ?? '')
@@ -185,17 +185,17 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           return { ok: true }
         },
       }, {
-        method: 'POST', path: '/api/bsp/board', about: '改一块 bsp 板子的登记（要拿锁）：型号、SoC、下载口、SDK、复位线、怎么进下载模式（fdl：strapped 复位就进，button 按 FDL 线，unset 还不知道）、FDL 线',
+        method: 'POST', path: '/api/boardctrl/board', about: '改一块 boardctrl 板子的登记（要拿锁）：型号、SoC、下载口、SDK、复位线、怎么进下载模式（fdl：strapped 复位就进，button 按 FDL 线，unset 还不知道）、FDL 线',
         handle: async ({ body, caller }) => {
           const name = lab.boards.resolve(String(body.board ?? ''))
           const route = lab.backends.route(name)
-          if (!route.isBoard || !('change' in route.backend)) throw new BoardError('invalid', `${name} 不是 bsp 板子`)
+          if (!route.isBoard || !('change' in route.backend)) throw new BoardError('invalid', `${name} 不是 boardctrl 板子`)
           if (lab.boards.get(name).lab?.empty) throw new BoardError('invalid', `${name} 是空槽位，还没有板子可改`)
           const held = lab.locks.authorize(name, { holder: caller.holder, token: typeof body.token === 'string' ? body.token : null })
           // The dialog submits the whole form; only what changed is validated and sent. An untouched field that is
           // merely unavailable right now (the download port is enumerated in download mode only) must not fail a
           // save that does not touch it.
-          const current = await (route.backend as BspBackend).boardConfig(route.config, route.target.device, true)
+          const current = await (route.backend as BoardctrlBackend).boardConfig(route.config, route.target.device, true)
           const text = (key: string) => typeof body[key] === 'string' && body[key].trim() ? body[key].trim() as string : undefined
           const fdl = text('fdl')
           if (fdl && !(FDL_STRATEGIES as readonly string[]).includes(fdl)) throw new BoardError('invalid', `fdl 只能是 ${FDL_STRATEGIES.join('、')}`)
@@ -212,47 +212,47 @@ export function bsp(options: { bin?: string, stateDir?: string, sdk?: SdkRunner,
           if (usbChanged && usb && !current.ports.some(item => item.value === usb) && usb !== current.usb)
             throw new BoardError('invalid', `这个下载口不在主机当前检测到的列表里：${usb}`)
           if (socChanged && soc && !current.socs.some(item => item.value === soc))
-            throw new BoardError('invalid', `bsp 的 SDK 目录里没有这个 SoC：${soc}`)
+            throw new BoardError('invalid', `boardctrl 的 SDK 目录里没有这个 SoC：${soc}`)
           // `sdks`: an array, or the comma list the CLI passes; empty means every SDK of the SoC's board.
           const sdks = Array.isArray(body.sdks) ? body.sdks.map(String).filter(Boolean)
             : typeof body.sdks === 'string' ? String(body.sdks).split(',').map((item: string) => item.trim()).filter(Boolean) : undefined
           const sdksChanged = sdks !== undefined && sdks.join(',') !== (current.sdks ?? []).join(',')
           const unknown = (sdksChanged ? sdks ?? [] : []).filter((id: string) => !current.sdkOptions.some(item => item.value === id))
-          if (unknown.length) throw new BoardError('invalid', `bsp 的 SDK 目录里没有这些 SDK：${unknown.join('、')}`)
-          const change: BspBoardChange = {
+          if (unknown.length) throw new BoardError('invalid', `boardctrl 的 SDK 目录里没有这些 SDK：${unknown.join('、')}`)
+          const change: BoardctrlBoardChange = {
             board: text('model'), soc: socChanged ? soc : undefined, description: text('description'),
             usb: usbChanged ? usb : undefined, resetPin: resetChanged ? resetPin : undefined,
             pulseMs: typeof body.pulseMs === 'number' && body.pulseMs > 0 ? body.pulseMs : undefined,
-            fdl: fdl as BspBoardChange['fdl'], fdlPin: fdlPinChanged ? fdlPin : undefined,
+            fdl: fdl as BoardctrlBoardChange['fdl'], fdlPin: fdlPinChanged ? fdlPin : undefined,
             ...(sdksChanged ? { sdks } : {}),
           }
           const changed = await lab.kernel.doing([name], 'configure', '修改中', caller.holder, () =>
-            (route.backend as BspBackend).change(route.config, route.target.device, route.target.lease, change), { lease: held.id })
-          lab.kernel.record(caller.holder, name, 'bsp-board', changed.join(','), true)
+            (route.backend as BoardctrlBackend).change(route.config, route.target.device, route.target.lease, change), { lease: held.id })
+          lab.kernel.record(caller.holder, name, 'boardctrl-board', changed.join(','), true)
           await lab.backends.sync(route.id, caller.holder).catch(() => {})
           return { message: `改了 ${changed.join('、')}` }
         },
       }, {
-        method: 'GET', path: '/api/bsp/board', about: '这块 bsp 板子的登记和改登记可选项：SoC、SDK、所在主机实际的 GPIO 和下载口',
+        method: 'GET', path: '/api/boardctrl/board', about: '这块 boardctrl 板子的登记和改登记可选项：SoC、SDK、所在主机实际的 GPIO 和下载口',
         handle: async ({ query }) => {
           const name = lab.boards.resolve(String(query.get('board') ?? ''))
           const route = lab.backends.route(name)
-          if (!('boardConfig' in route.backend)) throw new BoardError('invalid', `${name} 不是 bsp 板子`)
-          return (route.backend as BspBackend).boardConfig(route.config, route.target.device)
+          if (!('boardConfig' in route.backend)) throw new BoardError('invalid', `${name} 不是 boardctrl 板子`)
+          return (route.backend as BoardctrlBackend).boardConfig(route.config, route.target.device)
         },
       }, {
-        method: 'GET', path: '/api/bsp/hosts/:id/cache', about: '一个 bsp 实验室每台主机的产物缓存：用了多少、上限、留多久、磁盘还剩多少（主机太旧时 cache 为 null）',
+        method: 'GET', path: '/api/boardctrl/hosts/:id/cache', about: '一个 bsp 实验室每台主机的产物缓存：用了多少、上限、留多久、磁盘还剩多少（主机太旧时 cache 为 null）',
         handle: async ({ params }) => {
           const id = String(params.id ?? '')
           const backend = lab.backends.get(id)
-          if (!('caches' in backend.backend)) throw new BoardError('invalid', `${id} 不是 bsp 实验室`)
-          return (backend.backend as BspBackend).caches(lab.backends.config(id))
+          if (!('caches' in backend.backend)) throw new BoardError('invalid', `${id} 不是 boardctrl 实验室`)
+          return (backend.backend as BoardctrlBackend).caches(lab.backends.config(id))
         },
       }, {
-        method: 'GET', path: '/api/bsp/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',
+        method: 'GET', path: '/api/boardctrl/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',
         handle: () => ({ boards: hostBoards(options.tree ?? null) }),
       }, {
-        method: 'GET', path: '/api/bsp/key', about: 'boardd 登录主机用的公钥（放到主机的 authorized_keys 里，就不用密码）',
+        method: 'GET', path: '/api/boardctrl/key', about: 'boardd 登录主机用的公钥（放到主机的 authorized_keys 里，就不用密码）',
         handle: async () => ({ key: hosts ? await hosts.publicKey() : null }),
       }, {
         method: 'POST', path: '/api/sdk', about: '跑 bsp sdk|catalog|任意 bsp 命令（group），输出边跑边推送',
@@ -300,7 +300,7 @@ function namedHost(args: string[]): { host: string | null, url: string | null } 
  */
 function reachOf(lab: Lab, args: string[]): SdkReach | null {
   const { host, url } = namedHost(args)
-  const labs = lab.backends.list().filter(instance => instance.kind === 'bsp' && instance.configurable)
+  const labs = lab.backends.list().filter(instance => instance.kind === 'boardctrl' && instance.configurable)
   const named = url
     ? labs.filter(instance => { try { return lab.backends.config(instance.id).url.endsWith(url) } catch { return false } })
     : host && host.trim().toLowerCase() !== 'all'

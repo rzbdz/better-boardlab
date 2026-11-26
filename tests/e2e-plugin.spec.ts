@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(__dirname, '..')
-const BSP = join(ROOT, 'externals/bsp')
+const BSP = join(ROOT, 'externals/boardctrl')
 const CLI = join(ROOT, 'dist/cli.js')
 const PYTHON = process.env.BOARDLAB_E2E_PYTHON ?? '/root/workspace/bspvenv/bin/python'
 /** One holder throughout the test: the CLI takes the lock, and a request to boardd acts as the same holder. */
@@ -28,6 +28,15 @@ const HOLDER = 'agent:e2e-plugin'
 const SERVED_LINE = 'pc 0x00001000  sp 0x20001000'
 /** The plugin host's API token (its `server.auth_token` in the site config written below). */
 const HOST_TOKEN = 'plugin-token'
+
+/**
+ * A request to boardd that never rides a connection another test left behind. fetch's global pool is per process, and
+ * under vitest other files' requests share it; an idle socket the CLI's child processes reused and closed makes a POST
+ * fail with `other side closed` (one run in several, only when the files run together). `Connection: close` makes every
+ * request here its own connection, which is what a page's request is not — but what a test's must be to be repeatable.
+ */
+const postOnce = (url: string, body: string, headers: Record<string, string>) =>
+  fetch(url, { method: 'POST', body, headers: { ...headers, connection: 'close' } })
 
 /** The bytes an SSE stream carried, in order: every `data:` frame is base64 of what the provider sent. */
 const decoded = (text: string) => text.split('\n').filter(line => line.startsWith('data: '))
@@ -281,12 +290,12 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
     const boarddPort = await freePort()
     const stateDir = join(dir, 'boardd')
     mkdirSync(stateDir, { recursive: true })
-    writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { bsp: {} } }, null, 2))
+    writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { boardctrl: {} } }, null, 2))
     // The bsp boardd drives is this checkout's, not whatever `bsp` happens to be on the machine's PATH: a stale
     // install elsewhere has neither the rename nor the providers this test is about.
     const boarddChild = spawn(process.execPath, ['--no-warnings', CLI, 'serve', '--port', String(boarddPort), '--state-dir', stateDir, '--no-ui'], {
       cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, BOARDS_BSP: join(BSP, 'bin', 'bsp'), PATH: `${join(BSP, 'bin')}:${process.env.PATH}` },
+      env: { ...process.env, BOARDS_BOARDCTRL: join(BSP, 'bin', 'bsp'), PATH: `${join(BSP, 'bin')}:${process.env.PATH}` },
     })
     const served = { url: `http://127.0.0.1:${boarddPort}`, process: boarddChild }
     boardd = served
@@ -299,12 +308,12 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
       await new Promise(done => setTimeout(done, 250))
     }
     const call = async (path: string, body: Record<string, unknown>) => {
-      const response = await fetch(`${served.url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const response = await postOnce(`${served.url}${path}`, JSON.stringify(body), { 'content-type': 'application/json' })
       const text = await response.text()
       if (!response.ok) throw new Error(`${path} answered ${response.status}: ${text.slice(0, 300)}`)
       return JSON.parse(text) as Record<string, unknown>
     }
-    await call('/api/labs/add', { id: 'plug-host', kind: 'bsp' })
+    await call('/api/labs/add', { id: 'plug-host', kind: 'boardctrl' })
     await call('/api/labs', { id: 'plug-host', enabled: true, url: `bspd+${host.url}`, password: token })
     const tested = await call('/api/labs/test', { id: 'plug-host' }) as { verifyOk?: boolean, verifyMessage?: string }
     expect(tested.verifyOk, tested.verifyMessage).toBe(true)
@@ -322,11 +331,8 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
    * does the same with `x-boards-holder` and the lock's token, so the two can be the same holder throughout.
    */
   const request = async (path: string, body: Record<string, unknown>, holder = HOLDER, token?: string) => {
-    const response = await fetch(`${boardd!.url}${path}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-boards-holder': holder },
-      body: JSON.stringify(token ? { ...body, token } : body),
-    })
+    const response = await postOnce(`${boardd!.url}${path}`, JSON.stringify(token ? { ...body, token } : body),
+      { 'content-type': 'application/json', 'x-boards-holder': holder })
     return { response, text: await response.text() }
   }
   const post = async (body: Record<string, unknown>, token?: string) => {
@@ -425,10 +431,8 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
     await post({ board: BOARD, action: 'start' }, token)
     // The socket the trace pane reads is the console provider's, served by the host: it must exist before the
     // stream opens, or the pipe has nothing to carry (the host starts a non-serial console itself).
-    const st = await (await fetch(`${host!.url}/api/v1/tools/dut_status`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-bsp-token': HOST_TOKEN },
-      body: JSON.stringify({ dut: 'plug-board' }),
-    })).json() as { result?: { console_socket?: string, console_up?: boolean } }
+    const st = await (await postOnce(`${host!.url}/api/v1/tools/dut_status`, JSON.stringify({ dut: 'plug-board' }),
+      { 'content-type': 'application/json', 'x-bsp-token': HOST_TOKEN })).json() as { result?: { console_socket?: string, console_up?: boolean } }
     expect(st.result?.console_up, JSON.stringify(st)).toBe(true)
     expect(existsSync(String(st.result?.console_socket))).toBe(true)
     const reply = await fetch(`${boardd!.url}/api/debug/stream?board=${encodeURIComponent(BOARD)}`, {

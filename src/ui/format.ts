@@ -30,7 +30,7 @@ export const ACTIONS: Record<string, string> = {
   'lab-rebuild': '重建主机', 'lab-ports': '接线变化', confirm: '确认人工操作', 'console-input': '串口交互',
   flash: '刷机', sdk: 'SDK 操作', relay: '继电器', refresh: '重新读取', 'lab-slot': '槽位换板',
   yield: '让给 AI', 'yield-request': 'AI 请求让出', cancel: '取消操作', 'lab-install': '装板卡主机', 'lab-remove': '删板卡主机',
-  'bsp-board': '改板子登记', update: '升级 boardlab', catalog: 'SDK 目录', bsp: '主机命令', 'lab-sync-host': '同步站点',
+  'boardctrl-board': '改板子登记', update: '升级 boardlab', catalog: 'SDK 目录', boardctrl: '主机命令', 'lab-sync-host': '同步站点',
   'lab-compose': '手工登记板子',
   'flash-package': '刷机包', configure: '改操作',
 }

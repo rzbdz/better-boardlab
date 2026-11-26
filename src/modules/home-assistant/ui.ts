@@ -43,7 +43,7 @@ export const ui: ModuleUi = {
           submit: action('save', '保存并验证', async input => { const next = await haApi.configure(String(input.url), String(input.token ?? '')); return plain(verdict(next)) }, { intent: 'primary' }),
           secondary: [action('test', '重新验证', async () => plain(verdict(await haApi.test())), { blocked: ha.hasToken ? undefined : '还没有令牌' })],
           note: ha.verifiedAt ? [verdict(ha), ' · ', { time: ha.verifiedAt }, ha.verifyOk ? ` · 控制器 ${slots} 个槽位` : ''] : undefined,
-        }] : [notice('关闭时 boardd 不读也不按 HA 控制器。只用实验室（例如 bsp）时关掉。', 'neutral')]),
+        }] : [notice('关闭时 boardd 不读也不按 HA 控制器。只用实验室（例如 boardctrl）时关掉。', 'neutral')]),
       ],
     }]
   },

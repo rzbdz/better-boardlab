@@ -1,6 +1,6 @@
 /**
- * Setting up a bsp board host from boardd: reach it over ssh (any way in that works; see the hosts library), ship the
- * bsp tree this distribution carries, and run its `deploy/bspd-install.sh`, which makes bspd's config from what the
+ * Setting up a boardctrl board host from boardd: reach it over ssh (any way in that works; see the hosts library), ship the
+ * boardctrl tree this distribution carries, and run its `deploy/bspd-install.sh`, which makes boardctrld's config from what the
  * machine is. The lab then drives that bspd through an ssh tunnel to its loopback port (on boardd's own machine,
  * that port directly), with the token made here.
  * Installing again updates it in place; uninstalling takes it away. The site boardd keeps (site.ts) goes along, and
@@ -224,7 +224,7 @@ async function takeSite(exec: Executor, sudo: string, port: number, reloads: boo
     const reloaded = await ask(exec, sudo, port, 'site_reload')
     if (reloaded.ok) {
       const result = (reloaded.result ?? {}) as { sdks?: string[], socs?: string[] }
-      const read = `bspd 重新读了站点：${result.sdks?.length ?? 0} 个 SDK，${result.socs?.length ?? 0} 个 SoC`
+      const read = `boardctrld 重新读了站点：${result.sdks?.length ?? 0} 个 SDK，${result.socs?.length ?? 0} 个 SoC`
       // New provider code is new Python: the host has to start again to run it (`site.reload` is data only).
       if (!newProviders) { await keepSite(exec, sudo); return read }
       progress('站点的 provider 代码变了：重启 bspd 让新代码生效…')
@@ -284,7 +284,7 @@ export async function syncHost(hosts: Hosts, url: string | null | undefined, bun
 
 /**
  * `site`: makes the site bundle in the directory given, or says there is none to ship; shipped before bspd starts.
- * `hostTools`: the host tools this distribution carries (host-tools.ts), beside the bsp tree; none when it is absent.
+ * `hostTools`: the host tools this distribution carries (host-tools.ts), beside the boardctrl tree; none when it is absent.
  */
 export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetup, token: string | null, progress: (line: string) => void, site?: (dir: string) => Promise<string | null>, hostTools = join(bspTree, '../../host-tools'), siteHosts?: SiteHostConfig | null): Promise<Installed> {
   if (!existsSync(join(bspTree, 'deploy/bspd-install.sh'))) throw new Error(`这个 boardlab 没带 bsp（${bspTree}/deploy/bspd-install.sh 不在）`)
@@ -293,15 +293,15 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
   const sudo = await root(exec)
   const facts = await exec.run('uname -m; tr -d "\\0" < /proc/device-tree/model 2>/dev/null; echo; python3 -V 2>&1')
   progress(`那台机器：${facts.stdout.trim().replace(/\n+/g, '，')}`)
-  const dir = mkdtempSync(join(tmpdir(), 'boardlab-bsp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'boardlab-boardctrl-'))
   try {
-    const bundle = join(dir, 'bsp.tgz')
-    progress('打包 bsp…')
+    const bundle = join(dir, 'boardctrl.tgz')
+    progress('打包 boardctrl…')
     await tar(bspTree, bundle)
-    const remote = `/tmp/boardlab-bsp-${randomBytes(4).toString('hex')}`
+    const remote = `/tmp/boardlab-boardctrl-${randomBytes(4).toString('hex')}`
     progress('传过去…')
     await exec.run(`mkdir -p ${remote}`)
-    await exec.put(bundle, `${remote}/bsp.tgz`)
+    await exec.put(bundle, `${remote}/boardctrl.tgz`)
     await shipHostTools(exec, sudo, hostTools, facts.stdout.split('\n')[0] ?? '', remote, progress)
     // The network's certificate, if this distribution carries one: put beside the bundle, installed by bspd-install.
     let ca = ''
@@ -328,7 +328,7 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
     let stage: string | null = null
     const run = await exec.run(
-      `set -e; cd ${remote}; tar -xzf bsp.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg} ${setup.force === true ? '--force' : ''}; cd /; rm -rf ${remote}`,
+      `set -e; cd ${remote}; tar -xzf boardctrl.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg} ${setup.force === true ? '--force' : ''}; cd /; rm -rf ${remote}`,
       {
         timeoutMs: 1_800_000, onLine: line => {
           if (!line.trim()) return

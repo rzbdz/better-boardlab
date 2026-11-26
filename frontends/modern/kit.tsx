@@ -44,7 +44,7 @@ export function Icon({ name, className = '' }: { name: string, className?: strin
 /** Long text cut in the middle, so both ends stay readable. */
 export const middle = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, Math.ceil(max / 2) - 1)}…${text.slice(-Math.floor(max / 2))}`
 let prefix = ''
-/** Boards display in upper case; a backend prefix every board shares (`bsp-`) is dropped. */
+/** Boards display in upper case; a backend prefix every board shares (`boardctrl-`) is dropped. */
 export function setBoards(boards: Board[]) { const ps = new Set(boards.map(b => /^([a-z]+)-/.exec(b.name)?.[1])); prefix = ps.size === 1 && [...ps][0] ? `${[...ps][0]}-` : '' }
 export const upper = (name: string) => (prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name).toUpperCase()
 /** Agents name themselves `<kind>:<task>` (claude, codex, opencode, dsh, …); people are `user:<name>`. */

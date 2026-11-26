@@ -1,5 +1,5 @@
 /**
- * The bsp module's commands, boardlab's wrapper of the bsp CLI: SDK work (`sdk`), the registry's SDK catalog
+ * The bsp module's commands, boardlab's wrapper of the boardctrl CLI: SDK work (`sdk`), the registry's SDK catalog
  * (`registry`), and any bsp command (`bsp`), each run by the bsp on boardd's machine, so this one needs no bsp; and the
  * site boardd keeps for its board hosts (`site`).
  */
@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.ts'
-import { sdkCommand as sdkStream, sdkFollowing } from '../../shared/bsp-client.ts'
+import { sdkCommand as sdkStream, sdkFollowing } from '../../shared/boardctrl-client.ts'
 import { installedAgentSkills, noAgentsMessage } from 'boardlab-core/cli/agents.ts'
 import { write, type Command, type CommandContext, type CommandGroup } from 'boardlab-core/cli/command.ts'
 
@@ -33,7 +33,7 @@ async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out:
     else if (!arg.startsWith('-')) words.push(arg)
   }
   const [what] = words
-  const skills = async () => (await client.call<{ skills: SkillSummary[] }>('GET', '/api/bsp/site/skills')).skills ?? []
+  const skills = async () => (await client.call<{ skills: SkillSummary[] }>('GET', '/api/boardctrl/site/skills')).skills ?? []
   if (what === 'list') {
     const found = await skills()
     return out(found, () => { for (const skill of found) console.log(`${skill.id}${skill.layer === 'site' ? '' : `  （${skill.layer}）`}${skill.title && skill.title !== skill.id ? `  ${skill.title}` : ''}`) })
@@ -51,7 +51,7 @@ async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out:
   const id = what
   let found: SkillText
   try {
-    found = await client.call<SkillText>('GET', `/api/bsp/site/skill?id=${encodeURIComponent(id)}`)
+    found = await client.call<SkillText>('GET', `/api/boardctrl/site/skill?id=${encodeURIComponent(id)}`)
   } catch (error) {
     if (error instanceof BoardsApiError && error.status === 404) {
       const available = (await skills()).map(skill => skill.id)
@@ -164,7 +164,7 @@ const SITE_USAGE = `用法：
   boardlab site show [<种类> <id>]        来源、版本、问题、编译服务器和它们上面的 SDK；给出文档时打印它的 YAML
   boardlab site show skill <id>           打印站点里一个 SDK 的 skill（SKILL.md 原文）
   boardlab site pull | push               git 来源：拉取、推送
-  boardlab site sync [--lab <主机>]        把站点同步到所有 bsp 主机（或一台）
+  boardlab site sync [--lab <主机>]        把站点同步到所有 boardctrl 主机（或一台）
   boardlab site set <种类> <id> -f <YAML 文件|->
                                           添加或改写一个文档（- 从标准输入读）
   boardlab site set skill <id> -f <Markdown 文件|->
@@ -206,7 +206,7 @@ function printSite(site: SiteStatus) {
 function streamSync(client: BoardsClient, body: unknown, line: (text: string) => void): Promise<SyncExit> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body)
-    const req = client.open('POST', '/api/bsp/site/sync', { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Content-Length': String(Buffer.byteLength(payload)) })
+    const req = client.open('POST', '/api/boardctrl/site/sync', { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Content-Length': String(Buffer.byteLength(payload)) })
     req.on('response', response => {
       if ((response.statusCode ?? 500) >= 400) {
         const chunks: Buffer[] = []
@@ -246,22 +246,22 @@ async function siteCommand({ client, args, argv, flag, json, out }: CommandConte
   const shortFile = () => { const index = argv.indexOf('-f'); return index >= 0 ? argv[index + 1] : undefined }
   if (what === 'show' && word === 'skill') {
     if (!id) throw new BoardsApiError(400, `要给 skill 的 id\n${SITE_USAGE}`, 'invalid')
-    const found = await client.call<SkillText>('GET', `/api/bsp/site/skill?id=${encodeURIComponent(id)}`)
+    const found = await client.call<SkillText>('GET', `/api/boardctrl/site/skill?id=${encodeURIComponent(id)}`)
     return out(found, () => process.stdout.write(found.text.endsWith('\n') ? found.text : `${found.text}\n`))
   }
   if (what === 'show' && word) {
     const kind = siteKind(word)
-    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const site = await client.call<SiteStatus>('GET', '/api/boardctrl/site')
     const doc = site.docs.find(doc => doc.kind === kind && doc.id === id)
     if (!doc) throw new BoardsApiError(404, `站点里没有 ${word} ${id ?? ''}`.trim(), 'not-found')
     return out(doc, () => process.stdout.write(doc.text.endsWith('\n') ? doc.text : `${doc.text}\n`))
   }
   if (what === 'show') {
-    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const site = await client.call<SiteStatus>('GET', '/api/boardctrl/site')
     return out(site, () => printSite(site))
   }
   if (what === 'pull' || what === 'push') {
-    const result = await client.call<{ message: string }>('POST', `/api/bsp/site/${what}`, {})
+    const result = await client.call<{ message: string }>('POST', `/api/boardctrl/site/${what}`, {})
     return out(result, () => console.log(result.message))
   }
   if (what === 'sync') {
@@ -276,9 +276,9 @@ async function siteCommand({ client, args, argv, flag, json, out }: CommandConte
     if (!id || !file) throw new BoardsApiError(400, `要给 skill 的 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
     const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
     // Writing over the site's own skill of that id is an edit; otherwise it takes over from a platform's.
-    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const site = await client.call<SiteStatus>('GET', '/api/boardctrl/site')
     const original = site.skills?.some(skill => skill.id === id && skill.layer === 'site') ? id : undefined
-    const result = await client.call<{ file: string }>('POST', '/api/bsp/site/skill', { id, text, ...(original ? { original } : {}) })
+    const result = await client.call<{ file: string }>('POST', '/api/boardctrl/site/skill', { id, text, ...(original ? { original } : {}) })
     return out(result, () => console.log(`写好了 ${result.file}；boardlab sdk skill ${id} 可以装给 agent`))
   }
   if (what === 'set') {
@@ -287,20 +287,20 @@ async function siteCommand({ client, args, argv, flag, json, out }: CommandConte
     if (!id || !file) throw new BoardsApiError(400, `要给 id 和 -f <文件|->\n${SITE_USAGE}`, 'invalid')
     const text = readFileSync(file === '-' ? 0 : resolve(file), 'utf8')
     // Writing over the site's own document of that id is an edit; anything else adds one (or takes over from a platform's).
-    const site = await client.call<SiteStatus>('GET', '/api/bsp/site')
+    const site = await client.call<SiteStatus>('GET', '/api/boardctrl/site')
     const original = site.docs.some(doc => doc.kind === kind && doc.id === id && doc.layer === 'site') ? id : undefined
-    const result = await client.call<{ file: string }>('POST', '/api/bsp/site/doc', { kind, id, text, ...(original ? { original } : {}) })
+    const result = await client.call<{ file: string }>('POST', '/api/boardctrl/site/doc', { kind, id, text, ...(original ? { original } : {}) })
     return out(result, () => console.log(`写好了 ${result.file}；boardlab site sync 同步到主机`))
   }
   if (what === 'remove' && word === 'skill') {
     if (!id) throw new BoardsApiError(400, `要给 skill 的 id\n${SITE_USAGE}`, 'invalid')
-    const result = await client.call<{ message: string }>('POST', '/api/bsp/site/skill/remove', { id })
+    const result = await client.call<{ message: string }>('POST', '/api/boardctrl/site/skill/remove', { id })
     return out(result, () => console.log(result.message))
   }
   if (what === 'remove') {
     const kind = siteKind(word)
     if (!id) throw new BoardsApiError(400, `要给 id\n${SITE_USAGE}`, 'invalid')
-    const result = await client.call<{ message: string }>('POST', '/api/bsp/site/remove', { kind, id })
+    const result = await client.call<{ message: string }>('POST', '/api/boardctrl/site/remove', { kind, id })
     return out(result, () => console.log(result.message))
   }
   console.log(SITE_USAGE)
@@ -322,7 +322,7 @@ const registry: Command = {
 }
 
 const set: Command = {
-  name: 'set', usage: ['set <bsp 板子> [--soc <SoC>] [--usb <下载口>] [--fdl button|strapped|unset] [--model <型号>] [--sdks <a,b>] [--reset-pin <P33>] [--pulse-ms <毫秒>] [--fdl-pin <P12>] [--description <说明>]\t补齐或修改实验室里一块 bsp 板子的登记（型号、SoC、下载口、怎么进下载模式）；boardd 拿你持有的锁的那份租约去改，你不用、也拿不到 bsp 的 token'],
+  name: 'set', usage: ['set <boardctrl 板子> [--soc <SoC>] [--usb <下载口>] [--fdl button|strapped|unset] [--model <型号>] [--sdks <a,b>] [--reset-pin <P33>] [--pulse-ms <毫秒>] [--fdl-pin <P12>] [--description <说明>]\t补齐或修改实验室里一块 boardctrl 板子的登记（型号、SoC、下载口、怎么进下载模式）；boardd 拿你持有的锁的那份租约去改，你不用、也拿不到 bsp 的 token'],
   async run({ client, target, flag, out, token }) {
     const { board } = target()
     const body: Record<string, unknown> = { board, token: token(board) }
@@ -340,7 +340,7 @@ const set: Command = {
     }
     const given = Object.keys(body).filter(key => key !== 'board' && key !== 'token')
     if (!given.length) throw new Error('要给要改的字段，例如 boardlab set <板子> --soc k3 --usb usb:2-1.1.1 --fdl button')
-    const result = await client.call<{ message: string }>('POST', '/api/bsp/board', body)
+    const result = await client.call<{ message: string }>('POST', '/api/boardctrl/board', body)
     out(result, () => console.log(`${board}：${result.message}`))
   },
 }
@@ -355,7 +355,7 @@ const guidance: Command = {
   ],
   async run({ client, flag, flags, out }) {
     if (flags.has('list')) {
-      const got = await client.call<{ socs: string[], skills: string[], hints: string[] }>('GET', '/api/bsp/site/guidance')
+      const got = await client.call<{ socs: string[], skills: string[], hints: string[] }>('GET', '/api/boardctrl/site/guidance')
       return out(got, () => {
         for (const [label, items] of [['通用提示', got.hints], ['有笔记的 SoC', got.socs], ['有 skill 的 SDK', got.skills]] as const)
           console.log(`${label}：${items.length ? items.join('、') : '（没有）'}`)
@@ -376,17 +376,17 @@ const guidance: Command = {
       if (flag('soc')) query.set('soc', flag('soc')!)
       if (flag('sdk')) query.set('sdk', flag('sdk')!)
     }
-    const got = await client.call<{ blocks: unknown[], text: string }>('GET', `/api/bsp/site/guidance?${query}`)
+    const got = await client.call<{ blocks: unknown[], text: string }>('GET', `/api/boardctrl/site/guidance?${query}`)
     out(got, () => process.stdout.write(got.text.endsWith('\n') ? got.text : `${got.text}\n`))
   },
 }
 
 const bsp: Command = {
-  name: 'bsp', noBoard: true, usage: ['bsp <bsp 命令> …\t任何 bsp 命令，在 boardd 那边执行（本机不用装 bsp），例如 boardlab bsp hosts'],
+  name: 'boardctrl', noBoard: true, usage: ['bsp <bsp 命令> …\t任何 bsp 命令，在 boardd 那边执行（本机不用装 bsp），例如 boardlab boardctrl hosts'],
   async run({ client, argv, json }) {
     // Any bsp command, run by boardd's bsp: the whole lab without installing or configuring bsp here.
     const args = argv.filter(arg => arg !== '--json')
-    if (!args.length) return console.log('用法：boardlab bsp <bsp 的命令和参数>，例如 boardlab bsp hosts、boardlab bsp dut status <dut>、boardlab bsp job get <id> -r <主机>\n经 boardd 那边的 bsp 执行；拿板子请用 boardlab lock（直接在 bsp 里租的板子在 boardlab 里显示为实验室占用）。')
+    if (!args.length) return console.log('用法：boardlab boardctrl <boardctrl 的命令和参数>，例如 boardlab boardctrl hosts、boardlab boardctrl dut status <dut>、boardlab boardctrl job get <id> -r <主机>\n经 boardd 那边的 bsp 执行；拿板子请用 boardlab lock（直接在 bsp 里租的板子在 boardlab 里显示为实验室占用）。')
     const result = await sdkStream(client, args, json, write, 'raw')
     process.exitCode = result.code
   },

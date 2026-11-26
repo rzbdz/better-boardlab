@@ -153,7 +153,7 @@ OFFER="system clients feedback"
 if [ -f "$PREFIX/releases/$VERSION-$REV/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/releases/$VERSION-$REV/dist/modules.offered")"; fi
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
-    printf '%s\n' '{ "modules": { "bsp": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {} } }' > "$STATE/boardd.json"
+    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {} } }' > "$STATE/boardd.json"
     OFFERED=$OFFER; return 0
   fi
   for m in $OFFER; do

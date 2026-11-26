@@ -1,4 +1,4 @@
-/** Run an SDK, catalog or raw bsp command through boardd's streaming endpoint. */
+/** Run an SDK, catalog or raw boardctrl command through boardd's streaming endpoint. */
 import type { BoardsApiError, BoardsClient } from 'boardlab-core/shared/client.ts'
 
 type Output = (stream: 'stdout' | 'stderr', text: string) => void
@@ -19,7 +19,7 @@ function lost(error: unknown): boolean {
   return ['ECONNRESET', 'EPIPE', 'ECONNREFUSED', 'ENOENT'].includes(code ?? '') || /socket hang up|在命令结束前断开了/.test((error as Error).message)
 }
 
-/** The positional words of a bsp sdk command (options and their values left out). */
+/** The positional words of a boardctrl sdk command (options and their values left out). */
 function words(args: string[]): string[] {
   return args.filter((arg, index) => !arg.startsWith('-') && !(index > 0 && ['--timeout', '--lease', '--cwd', '-o', '--output'].includes(args[index - 1]!)))
 }
@@ -27,7 +27,7 @@ function words(args: string[]): string[] {
 /**
  * `sdk build` and `sdk job … --follow` through boardd. The build runs on the build server, not in boardd, so when the
  * stream drops (boardd restarting, a proxy cutting a long stream) the build goes on, and this follows it again by the
- * job id bsp printed (`build job <id> on …`) until it ends. A drop before that id is known is the caller's.
+ * job id boardctrl printed (`build job <id> on …`) until it ends. A drop before that id is known is the caller's.
  */
 export async function sdkFollowing(client: BoardsClient, args: string[], json: boolean, onOutput: Output, waits = REFOLLOW_MS) {
   const [verb, sdk, id] = words(args)

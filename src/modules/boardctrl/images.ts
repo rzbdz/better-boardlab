@@ -1,6 +1,6 @@
 /**
  * A site's images: the files its SoC facts and an SDK's boot steps stage (a boot ROM helper, a probe image), which
- * live in the copy's `.blobs/` by sha256 out of git. The `bsp` CLI fetches them (`bsp images sync`), and a host gets
+ * live in the copy's `.blobs/` by sha256 out of git. The `boardctrl` CLI fetches them (`boardctrl images sync`), and a host gets
  * them with the site. Kept out of `site.ts`: this is about the files, not the catalog.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -65,14 +65,15 @@ export function usedImages(site: ImagesSite): Set<string> {
 }
 
 /**
- * Fetch the images the SoC facts list into the copy's `.blobs/` with the bsp CLI (each way into git over ssh in
+ * Fetch the images the SoC facts list into the copy's `.blobs/` with the boardctrl CLI (each way into git over ssh in
  * turn while some fail), and say what is still not there. Never throws: what went wrong is in the result, and kept.
  */
 export async function fetchImages(site: ImagesSite, say: (line: string) => void = () => {}): Promise<ImagesState | null> {
   const bin = site.options.bin
   if (!bin) return null
   // This copy is the CLI's site; no user file of the CLI's, so no registry layer the hosts would not have.
-  const env = { BSP_SITE: site.dir, BSP_CONFIG: join(dirname(site.dir), 'no-remotes.json') }
+  const noRemotes = join(dirname(site.dir), 'no-remotes.json')
+  const env = { BSP_SITE: site.dir, BOARDCTRL_SITE: site.dir, BSP_CONFIG: noRemotes, BOARDCTRL_CONFIG: noRemotes }
   const answer = (run: Run): { ok?: boolean, result?: unknown, error?: { message?: string } } | null => { try { return JSON.parse(run.stdout) } catch { return null } }
   const ways = await site.sshCommands()
   const fetched = new Set<string>()

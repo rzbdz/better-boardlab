@@ -99,7 +99,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
   })
 
   it('a first bsp install the page left does not remove the lab boardd is still installing', async () => {
-    const { ui } = await import('../src/modules/bsp/ui.ts')
+    const { ui } = await import('../src/modules/boardctrl/ui.ts')
     const views = ui.views(state as never, {})
     const find = (elements: unknown[]): { submit: { id: string, start: Function, cancellable?: boolean } } | null => {
       for (const element of elements as Array<Record<string, unknown>>) {
@@ -116,8 +116,8 @@ describe('a job that cannot be stopped is not offered as one', () => {
     const original = globalThis.fetch
     const stop = new AbortController()
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (String(input).includes('api/bsp/install')) {
-        calls.push({ method: 'POST', path: 'api/bsp/install', body: null })
+      if (String(input).includes('api/boardctrl/install')) {
+        calls.push({ method: 'POST', path: 'api/boardctrl/install', body: null })
         return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }))
       }
       return original(input, init)
@@ -125,7 +125,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
     try {
       calls.length = 0
       const running = form!.submit.start({ id: 'newlab', address: 'host.test', user: 'root' }, { line: () => {}, progress: () => {} }, stop.signal) as Promise<unknown>
-      await waitFor(() => expect(calls.some(call => call.path === 'api/bsp/install')).toBe(true), wait)
+      await waitFor(() => expect(calls.some(call => call.path === 'api/boardctrl/install')).toBe(true), wait)
       stop.abort()
       await running.catch(() => {})
       expect(calls.some(call => call.path === 'api/labs/remove')).toBe(false)
@@ -137,8 +137,8 @@ describe('a board operation boardd cancelled', () => {
   it('in TroyMitchellDefault: is told in boardd\'s words, not as an error', async () => {
     const { outcome } = await import('../frontends/troy-mitchell-default/main.tsx')
     const { ApiError } = await import('../src/ui/api.ts')
-    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：bsp-k3-deb1 的启动被 user:alice 取消了', 'cancelled') }))
-      .toEqual({ text: '已取消：bsp-k3-deb1 的启动被 user:alice 取消了', error: false })
+    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', 'cancelled') }))
+      .toEqual({ text: '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', error: false })
     expect(await outcome('完成', async () => { throw new ApiError(502, '没有加载成功', 'hardware') })).toEqual({ text: '没有加载成功', error: true })
   })
 
@@ -156,12 +156,12 @@ describe('a board operation boardd cancelled', () => {
   it('in Modern: a neutral 已取消 toast, and the stop button says it is stopping, in boardd\'s words', async () => {
     const { useBoardActions } = await import('../frontends/modern/actions.tsx')
     const { UIProvider } = await import('../frontends/modern/kit.tsx')
-    const board = state.boards.find(item => item.name === 'bsp-k1-flash')!
+    const board = state.boards.find(item => item.name === 'boardctrl-k1-flash')!
     const original = globalThis.fetch
     globalThis.fetch = (async (input: string | URL | Request) => {
       const path = String(input)
-      if (path.includes('api/boot/sdk')) return new Response(JSON.stringify({ error: '已取消：bsp-k1-flash 的启动被 user:alice 取消了', code: 'cancelled' }), { status: 409, headers: { 'content-type': 'application/json' } })
-      if (path.includes('api/cancel')) return new Response(JSON.stringify({ message: '让 bsp-k1-flash 的刷机停下：正在做的那一步结束后就停', cancelled: true }), { headers: { 'content-type': 'application/json' } })
+      if (path.includes('api/boot/sdk')) return new Response(JSON.stringify({ error: '已取消：boardctrl-k1-flash 的启动被 user:alice 取消了', code: 'cancelled' }), { status: 409, headers: { 'content-type': 'application/json' } })
+      if (path.includes('api/cancel')) return new Response(JSON.stringify({ message: '让 boardctrl-k1-flash 的刷机停下：正在做的那一步结束后就停', cancelled: true }), { headers: { 'content-type': 'application/json' } })
       return original(input)
     }) as typeof fetch
     function Buttons() {
@@ -174,7 +174,7 @@ describe('a board operation boardd cancelled', () => {
       await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain('内存启动已取消'), wait)
       expect(document.querySelector('.toast.error')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: '停它' }))
-      await waitFor(() => expect(document.body.textContent).toContain('BSP-K1-FLASH 正在停下'), wait)
+      await waitFor(() => expect(document.body.textContent).toContain('BOARDCTRL-K1-FLASH 正在停下'), wait)
       expect(document.body.textContent).toContain('正在做的那一步结束后就停')
       expect(document.body.textContent).not.toContain('停下了')
     } finally { globalThis.fetch = original }
@@ -184,22 +184,22 @@ describe('a board operation boardd cancelled', () => {
 describe('a busy board has a stop button when what runs can be stopped', () => {
   it('in TroyMitchellDefault: shows 停止 on the card and asks boardd to cancel', async () => {
     const { BoardsTab } = await import('../frontends/troy-mitchell-default/views/boards.tsx')
-    const flash = state.boards.find(board => board.name === 'bsp-k1-flash')!
+    const flash = state.boards.find(board => board.name === 'boardctrl-k1-flash')!
     const run = async (_label: string, fn: () => Promise<unknown>) => { await fn() }
     // A boardd with only a lab opens on that lab's boards.
     const page = { ...state, boards: state.boards.filter(board => board.lab), slots: [], scan: null, ha: null } as never
     const drawn = render(createElement(BoardsTab, { state: page, busy: false, onPrompt: () => {}, onRun: run, onConsole: () => {}, onTab: () => {} }))
-    const card = await waitFor(() => { const el = document.querySelector('[data-board="bsp-k1-flash"]'); expect(el).toBeTruthy(); return el as HTMLElement }, wait)
+    const card = await waitFor(() => { const el = document.querySelector('[data-board="boardctrl-k1-flash"]'); expect(el).toBeTruthy(); return el as HTMLElement }, wait)
     expect(card.textContent).toContain('刷机中：flash rootfs')
     calls.length = 0
     fireEvent.click(within(card).getByRole('button', { name: '停止' }))
-    await waitFor(() => expect(calls.some(call => call.path === 'api/cancel' && (call.body as { target?: string }).target === 'bsp-k1-flash')).toBe(true), wait)
+    await waitFor(() => expect(calls.some(call => call.path === 'api/cancel' && (call.body as { target?: string }).target === 'boardctrl-k1-flash')).toBe(true), wait)
     // What cannot be stopped halfway has no button.
     drawn.unmount()
     flash.busy = { ...flash.busy!, cancellable: false }
     try {
       render(createElement(BoardsTab, { state: page, busy: false, onPrompt: () => {}, onRun: run, onConsole: () => {}, onTab: () => {} }))
-      const again = await waitFor(() => { const el = document.querySelector('[data-board="bsp-k1-flash"]'); expect(el).toBeTruthy(); return el as HTMLElement }, wait)
+      const again = await waitFor(() => { const el = document.querySelector('[data-board="boardctrl-k1-flash"]'); expect(el).toBeTruthy(); return el as HTMLElement }, wait)
       expect(within(again).queryByRole('button', { name: '停止' })).toBeNull()
     } finally { flash.busy = { ...flash.busy!, cancellable: true } }
   })
@@ -207,7 +207,7 @@ describe('a busy board has a stop button when what runs can be stopped', () => {
   it('in Modern: a cancellable busy entry of any kind offers 取消 to its holder, and none otherwise', async () => {
     const { canStop } = await import('../frontends/modern/views/board.tsx')
     const { model } = await import('../frontends/modern/kit.tsx')
-    const flash = state.boards.find(board => board.name === 'bsp-k1-flash')!
+    const flash = state.boards.find(board => board.name === 'boardctrl-k1-flash')!
     const as = (busy: typeof flash.busy, lease = flash.lease, you = flash.lease!.holder) => { const board = { ...flash, busy, lease }; return canStop(board, model(board, you)) }
     for (const kind of ['boot', 'reset', 'fastboot', 'refresh', 'discover', 'install']) expect(as({ ...flash.busy!, kind, cancellable: true })).toBe(true)
     expect(as({ ...flash.busy!, cancellable: false })).toBe(false)

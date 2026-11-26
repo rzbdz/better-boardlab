@@ -4,7 +4,7 @@
 
 ## 选方法
 
-- **SDK 的构建（首选）**：板子在能取构建产物的实验室里（bsp 主机，`boardlab list` 的卡片上列着能跑的 SDK）时，`boardlab boot <板子> --sdk <SDK>` 内存启动、`boardlab flash <板子> --sdk <SDK>` 刷机。SDK 的 load/download 配方是命令和步骤的序列；板子所在的主机按配方自己用 SSH/SCP 从构建服务器取产物，再执行 stage 或刷机 hook，不经过你这台机器，也不上传整份镜像。SDK 本身怎么编见 `boardlab sdk help`，流程怎么登记见 `boardlab registry help`。
+- **SDK 的构建（首选）**：板子在能取构建产物的实验室里（boardctrl 主机，`boardlab list` 的卡片上列着能跑的 SDK）时，`boardlab boot <板子> --sdk <SDK>` 内存启动、`boardlab flash <板子> --sdk <SDK>` 刷机。SDK 的 load/download 配方是命令和步骤的序列；板子所在的主机按配方自己用 SSH/SCP 从构建服务器取产物，再执行 stage 或刷机 hook，不经过你这台机器，也不上传整份镜像。SDK 本身怎么编见 `boardlab sdk help`，流程怎么登记见 `boardlab registry help`。
 - **URL / 板端已有文件**：`boardlab boot <板子> https://…/Image.itb` 让板端主机下载；`host:/绝对路径` 让它读自己已经有的文件（例如脚本预先 scp 到那里）。板端会计算 sha256；这些引用不经过 boardd。
 - **本机文件（scp）**：文件只在 workstation、又不能由 SDK 配方或 URL 提供时，按下面「fastboot 内存启动」加载。CLI 会用 scp 把文件复制到 registry/boardd 的上传路径，boardd 只做 sha256 校验；网页上传已禁用。不烧录。
 - **网络启动**：板子上的 U-Boot 从 TFTP 取内核，见最后一节。
@@ -67,7 +67,7 @@ boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚�
 
 `boardlab list` 里标着 `[实验室 …]` 的板子按上面同样的步骤内存启动，命令不变。不同的地方：
 
-- 下载口在实验室那边（例如 bsp 主机）。正常 SDK 启动/刷机由板端主机从构建服务器 scp 拉产物，不经过 workstation 或 boardd；URL / `host:/绝对路径` 也由板端自己取。只有本机文件兜底才由 boardd 传输到实验室主机。
+- 下载口在实验室那边（例如 boardctrl 主机）。正常 SDK 启动/刷机由板端主机从构建服务器 scp 拉产物，不经过 workstation 或 boardd；URL / `host:/绝对路径` 也由板端自己取。只有本机文件兜底才由 boardd 传输到实验室主机。
 - 板子 EEPROM 里的型号决定 U-Boot 选 FIT 里哪个 configuration；[boards.csv](fit/spacemit/k3/boards.csv) 里没有它，或内核里没有对应的 DTB 时，打出的 FIT 里就没有它，U-Boot 会用默认的第一项，设备树就不对：先问用户用哪个 DTB。
 - 卡片上有「继电器」的实验室板子，还能单独控制它的继电器和按钮（断电重启、按住 BOOT），见 `boardlab relay <板子>`。
 - 这些板子平时跑着自己的系统，别人也会用。用完先 `boardlab reset`，看到它自己系统的登录提示再放锁。

@@ -23,18 +23,18 @@ Home Assistant 控制器管不到的板子（例如接在米家插座上、靠�
 
 每个实验室是某个后端模块的一个实例，实例名写在 boardd 的配置里（见「模块和配置」），板子登记成 `<实例名>-<设备名>`。现在有的后端：
 
-- `bsp` 模块：bsp 管理的板卡主机（[boardctrl](https://github.com/rzbdz/boardctrl)，子模块 `externals/bsp`）。boardd 只通过 bsp 命令行（`--json --stateless`）操作它们：列表、租约、复位、进下载模式、`stage`、`boot` 都是 `bsp dut …` 命令，串口走 `bsp dut pipe`（在板卡主机上把 serial-mux 的协议原样转过来，boardd 用自己的 serial-mux 客户端读写）。一个实验室可以直接填 `bspd+http://<主机>:8765`，让 bsp 走主机的 HTTP API；网络只通 SSH 时填 `bspd+ssh://<用户>@<主机>:8765`。也可以经 bsp registry 的 rendezvous 找到主机，但 registry 不参与每次登记表读取。拿锁时 boardd 同时持有这块板的 bsp 租约（持有人 `boardlab:<你>`），每分钟续一次，锁转给别人时改名，放锁后归还；有人直接在 bsp 里租着板子时，卡片上显示「实验室占用」，拿锁会排队，等对方释放后自动交给排第一的人。`boot` 整个交给 `bsp dut boot --files`，由 bsp 的忙碌保护和日志覆盖整个过程。
+- `boardctrl` 模块：boardctrl 管理的板卡主机（[boardctrl](https://github.com/rzbdz/boardctrl)，子模块 `externals/boardctrl`）。boardd 只通过 boardctrl 命令行（`--json --stateless`）操作它们：列表、租约、复位、进下载模式、`stage`、`boot` 都是 `boardctrl dut …` 命令，串口走 `boardctrl dut pipe`（在板卡主机上把 serial-mux 的协议原样转过来，boardd 用自己的 serial-mux 客户端读写）。一个实验室可以直接填 `bspd+http://<主机>:8765`，让 boardctrl 走主机的 HTTP API；网络只通 SSH 时填 `bspd+ssh://<用户>@<主机>:8765`。也可以经 boardctrl registry 的 rendezvous 找到主机，但 registry 不参与每次登记表读取。拿锁时 boardd 同时持有这块板的 boardctrl 租约（持有人 `boardlab:<你>`），每分钟续一次，锁转给别人时改名，放锁后归还；有人直接在 boardctrl 里租着板子时，卡片上显示「实验室占用」，拿锁会排队，等对方释放后自动交给排第一的人。`boot` 整个交给 `boardctrl dut boot --files`，由 boardctrl 的忙碌保护和日志覆盖整个过程。
 
-在网页「设置」里开启实验室，填后台地址、账号和密码（`bsp` 实验室这三项都可以留空）；「只用这些板子」填设备名或带 `*` 的模式（例如 `sub0-* sub1-*`），留空列出全部。
+在网页「设置」里开启实验室，填后台地址、账号和密码（`boardctrl` 实验室这三项都可以留空）；「只用这些板子」填设备名或带 `*` 的模式（例如 `sub0-* sub1-*`），留空列出全部。
 
-- 开启时先验证后台，再列出板子；之后每分钟刷新一次，boardd 启动时也会刷新。每块板登记成 `<实验室>-<设备名>`（例如 `bsp-k3-a`），芯片的串口和下载口是实验室那边的。
-- 板卡主机接上或拔掉串口线、USB 线时，会马上告诉 bsp registry；boardd 一直跟着 registry 的消息（`bsp watch --registry`），收到后马上重新问空闲端口、刷新板子，网页弹出提示（「lab-1 新接上 /dev/ttyUSB3」）。这条消息流断了，下一次每分钟的刷新会重新接上。
+- 开启时先验证后台，再列出板子；之后每分钟刷新一次，boardd 启动时也会刷新。每块板登记成 `<实验室>-<设备名>`（例如 `boardctrl-k3-a`），芯片的串口和下载口是实验室那边的。
+- 板卡主机接上或拔掉串口线、USB 线时，会马上告诉 boardctrl registry；boardd 一直跟着 registry 的消息（`boardctrl watch --registry`），收到后马上重新问空闲端口、刷新板子，网页弹出提示（「lab-1 新接上 /dev/ttyUSB3」）。这条消息流断了，下一次每分钟的刷新会重新接上。
 - 实验室的板子不占用本机的数字槽位，不参加扫描，不导出 TOML，也不能手工删除：改范围或关掉实验室，它们就从清单里去掉。有人拿着锁的板子先留着，放锁后下次刷新再去掉；有锁时不能关实验室。
 - 串口「在线」指实验室那边的串口读取正常，来自最近一次刷新；打开控制台和输入时不看它，直接问实验室。有的实验室在板子断电重启后会读不到串口，boardd 每次复位和进下载模式后都会让它重新打开串口。
 - 实验室的串口没有 boardd 的输入闸门：能登录实验室后台的人都能输入，锁只约束经过 boardd 的操作。
-- **远程槽位**：bsp 主机上每个串口（插在某个物理 USB 口上的 USB 转串口）就是一个远程槽位，名字为 `<主机>/s<N>`，与本机的数字槽位无关。主机一看到串口就给它起一个 serial-mux 串口。复位线、下载口和板子都是后来挂到远程槽位上的。还没有板子的远程槽位在 boardlab 里是一张「空槽位」卡片：可以拿锁、打开串口看和输入，点「发现这块板」选一种实验室上报的方式（CLI 先 `boardlab lab methods bsp --slot <主机>/s4` 看方式，再 `boardlab lab discover bsp --method <方式> --slot <主机>/s4`）就在这个槽位上找板子，找到一块马上登记一块。每块板都有远程槽位名（卡片上的「槽位 host1/s3」），所有命令都能用它代替板名：`boardlab console host1/s4`、`boardlab lock host1/s3 --for …`。槽位里换了一块板子时不用删了重加：`boardlab refresh host1/s3 [--name <新名字> | --rename]`（卡片上的「重新读取」）重新读型号、SoC 和下载口；换了名字的板子还是这个槽位的记录，锁、排队和历史都跟着槽位走。重新理线以后，bsp 先试槽位以前用过的复位线。
-- **下载模式短接的板子**：复位总是停在下载模式的板子，后端有办法让它从板载介质启动时（bsp 的 SoC 配置里的 `media_boot`），`boardlab reset` 就从介质启动；卡片和 `boardlab list` 写着复位会怎样。
-- 后端的继电器控制器能单独控制板子的每根线时（bsp 主机的 gpio_relay），拿着锁可以直接断电重启、按住 BOOT：`boardlab relay <板子>` 列出这块板的继电器和按钮，`boardlab relay <板子> power pulse --ms 3000` 控制其中一个，网页卡片上是「继电器」。bsp 里别名在 `<板子>/` 下的线（`<板子>/reset`、`<板子>/power`……）都算这块板的。
+- **远程槽位**：boardctrl 主机上每个串口（插在某个物理 USB 口上的 USB 转串口）就是一个远程槽位，名字为 `<主机>/s<N>`，与本机的数字槽位无关。主机一看到串口就给它起一个 serial-mux 串口。复位线、下载口和板子都是后来挂到远程槽位上的。还没有板子的远程槽位在 boardlab 里是一张「空槽位」卡片：可以拿锁、打开串口看和输入，点「发现这块板」选一种实验室上报的方式（CLI 先 `boardlab lab methods boardctrl --slot <主机>/s4` 看方式，再 `boardlab lab discover boardctrl --method <方式> --slot <主机>/s4`）就在这个槽位上找板子，找到一块马上登记一块。每块板都有远程槽位名（卡片上的「槽位 host1/s3」），所有命令都能用它代替板名：`boardlab console host1/s4`、`boardlab lock host1/s3 --for …`。槽位里换了一块板子时不用删了重加：`boardlab refresh host1/s3 [--name <新名字> | --rename]`（卡片上的「重新读取」）重新读型号、SoC 和下载口；换了名字的板子还是这个槽位的记录，锁、排队和历史都跟着槽位走。重新理线以后，boardctrl 先试槽位以前用过的复位线。
+- **下载模式短接的板子**：复位总是停在下载模式的板子，后端有办法让它从板载介质启动时（boardctrl 的 SoC 配置里的 `media_boot`），`boardlab reset` 就从介质启动；卡片和 `boardlab list` 写着复位会怎样。
+- 后端的继电器控制器能单独控制板子的每根线时（boardctrl 主机的 gpio_relay），拿着锁可以直接断电重启、按住 BOOT：`boardlab relay <板子>` 列出这块板的继电器和按钮，`boardlab relay <板子> power pulse --ms 3000` 控制其中一个，网页卡片上是「继电器」。boardctrl 里别名在 `<板子>/` 下的线（`<板子>/reset`、`<板子>/power`……）都算这块板的。
 
 ## 锁
 
@@ -99,28 +99,48 @@ boardd 能做什么由它加载的模块决定：
 | `local` | 本机的板子：槽位、serial-mux 串口和输入闸门、本机 fastboot、一键扫描 | — |
 | `home-assistant` | Home Assistant 控制器上的槽位 | `local` |
 | `script-slots` | 脚本驱动的自定义槽位 | `local` |
-| `bsp` | bsp 板卡主机、`boardlab sdk`、`boardlab registry`、`boardlab bsp`（`instances`、`bin`） | — |
+| `boardctrl` | boardctrl 板卡主机、`boardlab sdk`、`boardlab registry`、`boardlab boardctrl`（`instances`、`bin`） | — |
 
-配置文件是状态目录里的 `boardd.json`（或 `--config`、`BOARDLAB_CONFIG`）。没有配置文件时装全部模块；`--modules a,b` 只装这几个。例如一台只接远程 bsp 主机的服务器：
+配置文件是状态目录里的 `boardd.json`（或 `--config`、`BOARDLAB_CONFIG`）。没有配置文件时装全部模块；`--modules a,b` 只装这几个。例如一台只接远程 boardctrl 主机的服务器：
 
 ```json
 {
-  "modules": { "bsp": { "instances": ["bsp"] } },
+  "modules": { "boardctrl": { "instances": ["boardctrl"] } },
   "timing": { "boot": { "firstMs": 8000, "laterMs": 3000, "waitMs": 20000 }, "console": { "watchIdleMs": 30000 }, "syncMs": 60000 }
 }
 ```
 
 没装的模块，它的接口、命令和网页上的部分都不存在。`GET /api` 列出所有接口和带来它的模块，别的程序和别的网页都用这套接口；`serve --ui <目录>` 换一个网页，`--no-ui` 只提供 `/api`。
 
+### 从模块市场装模块
+
+随 boardlab 发的模块之外，还可以从**模块市场**装：一个市场是一个 git 仓库，根上的 `market.json` 列出它提供哪些模块，每个模块是一个目录，入口文件默认是 `<模块>/module.js`。模块市场里的模块是普通的模块：同样在 boardd 配置里写它的名字，同样声明 `inject`/`provide`，同样随 boardd 启动装上。
+
+```sh
+boardlab market add pub git@github.com:rzbdz/boardlab-modules-pub.git
+boardlab market                          # 有哪些市场，各自提供什么
+boardlab market show pub                 # 一个市场的模块：id、说明、标签、要什么、给什么
+boardlab module search nexus             # 装了的和市场上有的，一起找
+boardlab market update --all             # 拉新版本，列出哪个模块的代码变了
+```
+
+市场克隆在 boardd 的状态目录里（`markets/<市场>`），boardd 启动时只 `import()` 配置选中的那几个，所以没有 `node_modules` 也能装。装什么由 `boardd.json` 说：
+
+```json
+{ "modules": { "boardctrl": {}, "nexus": { "base": "https://nexus.example.org" } } }
+```
+
+一个市场模块 `import 'boardlab'` 拿到的是 boardd 自己的那套（`BoardError`、`TextReply` 这些），所以它抛的错误和返回的回复，和随 boardlab 发的模块是同一套类。市场更新在**下次启动**生效：boardd 不会在运行中换掉已经装上的代码。两个市场提供同一个 id，或者市场提供了随 boardlab 发的 id，启动会拒绝并说出是哪个。
+
 ## 用 SDK 启动和刷机
 
-实验室的板子可以直接用 SDK 编好的产物启动：`boardlab boot <板子> --sdk <SDK> [--method load|download] [--variant V]`，刷机是 `boardlab flash <板子> --sdk <SDK>`；网页卡片上拿着锁时点「用 SDK 启动」。这是远程下载口这条路：板子所在的主机自己去构建服务器取产物、按 SDK 的启动流程加载或烧录（bsp 是 `bsp dut boot --sdk`），文件不经过 boardd，进度显示在卡片上。本机的板子走本机下载口，用 `boardlab boot <板子> <文件>…`。
+实验室的板子可以直接用 SDK 编好的产物启动：`boardlab boot <板子> --sdk <SDK> [--method load|download] [--variant V]`，刷机是 `boardlab flash <板子> --sdk <SDK>`；网页卡片上拿着锁时点「用 SDK 启动」。这是远程下载口这条路：板子所在的主机自己去构建服务器取产物、按 SDK 的启动流程加载或烧录（boardctrl 是 `boardctrl dut boot --sdk`），文件不经过 boardd，进度显示在卡片上。本机的板子走本机下载口，用 `boardlab boot <板子> <文件>…`。
 
 ## 镜像市场
 
 镜像市场是放刷机包的地方：一个 Nexus raw 仓库，或构建服务器上的几个输出目录。boardd 列出它们的目录，新的在前，可以按 SoC 筛；挑一个镜像就能刷到板子上，不用自己拼链接。
 
-市场在 bsp 站点的 `markets/` 里配，一个 yaml 文件一个市场，站点同步或编辑后 boardd 会重新读：
+市场在 boardctrl 站点的 `markets/` 里配，一个 yaml 文件一个市场，站点同步或编辑后 boardd 会重新读：
 
 ```yaml
 # markets/images.yaml：Nexus 的 raw 仓库（nexus-images 模块）
@@ -142,7 +162,7 @@ config:
     - { name: soc-a-daily, host: builder@build.example.org, dir: /srv/out/soc-a, glob: "*.zip", soc: soc-a }
 ```
 
-服务器地址、仓库、目录这些只在站点里，模块本身是通用的。boardd 要加载提供这种市场的模块（`nexus-images`、`sftp-images`）。
+服务器地址、仓库、目录这些只在站点里，模块本身是通用的。boardd 要加载提供这种市场的模块（`sftp-images` 随 boardlab 发；`nexus-images` 在公共模块市场 `boardlab-modules-pub` 里，`boardlab market add pub git@github.com:rzbdz/boardlab-modules-pub.git`）。
 
 - **网页**：顶栏的「镜像」列出市场和它的目录树。选一个镜像看大小、时间、sha256，点「刷机…」：boardd 列出后端收这种包、SoC 对得上的板子，你拿着的在前，空闲的会替你拿锁（锁一直是你的）。板子页的「刷机」（W）也能从市场里挑。
 - **找镜像**：网页上「镜像」页和刷机对话框的搜索框一输入就会读整个市场，只留下名字对得上的镜像和通往它们的目录，整棵树展开；没有对得上的目录就不显示。命令行是 `boardlab images <市场> --find <文字> [--soc S]`。没找完时（市场太大、太慢，或有目录读不了）会说明可能有遗漏。
@@ -153,7 +173,7 @@ config:
 
 ## SDK：在构建服务器上开发
 
-`boardlab sdk <操作> …` 由 boardd 那边的 bsp 执行（`bsp sdk …`，用 boardd 所在机器的 bsp site 和它到构建服务器的 ssh），开发机上不用装 bsp、不用配 site：租源码树（`acquire --task`、`release`）、编译（`build`，输出实时传回）、跑命令（`exec -- …`）、读写文件（`get … -o 本机文件`、`put … 本机文件`，文件经 boardd 中转）。每个持有人在 boardd 上有自己的 bsp 配置目录，SDK 租约凭证互不相混。boardd 所在用户要能免密 ssh 到 site 里写的构建服务器账号。
+`boardlab sdk <操作> …` 由 boardd 那边的 boardctrl 执行（`boardctrl sdk …`，用 boardd 所在机器的 boardctrl site 和它到构建服务器的 ssh），开发机上不用装 boardctrl、不用配 site：租源码树（`acquire --task`、`release`）、编译（`build`，输出实时传回）、跑命令（`exec -- …`）、读写文件（`get … -o 本机文件`、`put … 本机文件`，文件经 boardd 中转）。每个持有人在 boardd 上有自己的 boardctrl 配置目录，SDK 租约凭证互不相混。boardd 所在用户要能免密 ssh 到 site 里写的构建服务器账号。
 
 ## 在别的机器上用 boardlab
 
@@ -165,7 +185,7 @@ boardlab remote set https://example.org/boardlab/ --user <名字> --password-std
 boardlab list
 ```
 
-装到一台机器上用 `scripts/install-client.sh`（在这个仓库里、构建过以后运行）：它装 `boardlab`（目标机的 Node 低于 24 时带一份过去，目标机不用联网）、连上 boardd。skill 由 agent 工作的目录自己装：在那个目录里运行 `boardlab install`，写出 `SKILL.md`（和 bsp install 一样；原来的 SKILL.md 不是 boardlab 的会备份成 SKILL.md.bak）。开发机上不装 bsp：板子和 SDK 都经 boardlab，bsp 命令行只在 boardd 所在机器上。只通 ssh 的网络里，`--grant <管理员>@<boardd 主机>` 把目标机的 ssh 公钥加给 boardd 主机上的隧道账号（默认 `boardlab`），这把钥匙只能转发到 boardd 的端口，不能登录：
+装到一台机器上用 `scripts/install-client.sh`（在这个仓库里、构建过以后运行）：它装 `boardlab`（目标机的 Node 低于 24 时带一份过去，目标机不用联网）、连上 boardd。skill 由 agent 工作的目录自己装：在那个目录里运行 `boardlab install`，写出 `SKILL.md`（和 boardctrl install 一样；原来的 SKILL.md 不是 boardlab 的会备份成 SKILL.md.bak）。开发机上不装 boardctrl：板子和 SDK 都经 boardlab，boardctrl 命令行只在 boardd 所在机器上。只通 ssh 的网络里，`--grant <管理员>@<boardd 主机>` 把目标机的 ssh 公钥加给 boardd 主机上的隧道账号（默认 `boardlab`），这把钥匙只能转发到 boardd 的端口，不能登录：
 
 ```sh
 scripts/install-client.sh me@build-server --remote ssh://boardlab@boardd-host --grant root@boardd-host

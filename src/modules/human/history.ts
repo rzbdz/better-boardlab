@@ -20,7 +20,7 @@ export interface HumanRequest {
   id: number
   at: string
   updatedAt: string
-  /** Who asked (`claude:…`, `user:…`, a source such as `bsp`). */
+  /** Who asked (`claude:…`, `user:…`, a source such as `boardctrl`). */
   actor: string
   /** A short label for the kind of work (plug, unplug, connect, press, …), free text. */
   kind: string

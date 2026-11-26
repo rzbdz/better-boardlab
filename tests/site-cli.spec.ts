@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BoardsClient } from 'boardlab-core/shared/client.ts'
 import type { CommandContext } from 'boardlab-core/cli/command.ts'
-import { commands } from '../src/modules/bsp/cli.ts'
+import { commands } from '../src/modules/boardctrl/cli.ts'
 
 const doc = (kind: string, id: string, fields: Record<string, string>, layer = 'site') =>
   ({ kind, id, file: `${kind}/${id}.yaml`, layer, text: `id: ${id}\n`, fields })
@@ -42,15 +42,15 @@ function answer(req: IncomingMessage, res: ServerResponse) {
     const body = text ? JSON.parse(text) : undefined
     requests.push({ method: req.method!, url: req.url!, body })
     const json = (status: number, value: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    if (req.method === 'GET' && req.url === '/api/bsp/site') return json(200, site)
-    if (req.method === 'GET' && req.url === '/api/bsp/site/skills') return json(200, { skills: site.skills })
-    if (req.method === 'GET' && req.url?.startsWith('/api/bsp/site/skill?')) {
+    if (req.method === 'GET' && req.url === '/api/boardctrl/site') return json(200, site)
+    if (req.method === 'GET' && req.url === '/api/boardctrl/site/skills') return json(200, { skills: site.skills })
+    if (req.method === 'GET' && req.url?.startsWith('/api/boardctrl/site/skill?')) {
       const id = new URL(req.url, 'http://x').searchParams.get('id') ?? ''
       const found = site.skills.find(skill => skill.id === id)
       return found ? json(200, { id, layer: found.layer, text: skillText[id] ?? '' }) : json(404, { error: `站点里没有 SDK 的 skill：${id}` })
     }
-    if (req.url === '/api/bsp/site/pull') return json(200, { message: '拉取了 2 个提交' })
-    if (req.method === 'GET' && req.url?.startsWith('/api/bsp/site/guidance')) {
+    if (req.url === '/api/boardctrl/site/pull') return json(200, { message: '拉取了 2 个提交' })
+    if (req.method === 'GET' && req.url?.startsWith('/api/boardctrl/site/guidance')) {
       const query = new URL(req.url, 'http://x').searchParams
       const soc = query.get('soc'), sdk = query.get('sdk')
       const blocks = soc ? [{ name: `${soc}/notes.md`, layer: 'site', text: `${soc}: reset holds 100 ms` }]
@@ -58,11 +58,11 @@ function answer(req: IncomingMessage, res: ServerResponse) {
           : [{ name: 'hints/general.md', layer: 'site', text: 'general: use the lock' }]
       return json(200, { blocks, text: blocks.map(block => `## ${block.name} (${block.layer})\n${block.text}`).join('\n\n'), socs: ['soc-a'], skills: ['sdk-a'], hints: ['hints/general.md'] })
     }
-    if (req.url === '/api/bsp/site/doc') return json(200, { file: `${body.kind}/${body.id}.yaml` })
-    if (req.url === '/api/bsp/site/skill') return json(200, { file: `skills/${body.id}.md` })
-    if (req.url === '/api/bsp/site/skill/remove') return json(200, { message: `删掉了 ${body.id}` })
-    if (req.url === '/api/bsp/site/remove') return json(body.id === 'sdk-a' ? 409 : 200, body.id === 'sdk-a' ? { error: 'sdk-a 还在用' } : { message: `删了 ${body.id}` })
-    if (req.url === '/api/bsp/site/sync') {
+    if (req.url === '/api/boardctrl/site/doc') return json(200, { file: `${body.kind}/${body.id}.yaml` })
+    if (req.url === '/api/boardctrl/site/skill') return json(200, { file: `skills/${body.id}.md` })
+    if (req.url === '/api/boardctrl/site/skill/remove') return json(200, { message: `删掉了 ${body.id}` })
+    if (req.url === '/api/boardctrl/site/remove') return json(body.id === 'sdk-a' ? 409 : 200, body.id === 'sdk-a' ? { error: 'sdk-a 还在用' } : { message: `删了 ${body.id}` })
+    if (req.url === '/api/boardctrl/site/sync') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' })
       res.write(`event: out\ndata: ${JSON.stringify({ text: 'host-a: 同步中' })}\n\n`)
       res.end(`event: exit\ndata: ${JSON.stringify({ ok: syncOk, message: syncOk ? '都同步了' : 'host-a 没同步上' })}\n\n`)
@@ -149,7 +149,7 @@ describe('boardlab site', () => {
     writeFileSync(file, 'id: sdk-a\nserver: build-1\n')
     await run(['set', 'sdk', 'sdk-a'], { file })
     await run(['set', 'sdk', 'packed'], { file })
-    const posts = requests.filter(r => r.url === '/api/bsp/site/doc').map(r => r.body)
+    const posts = requests.filter(r => r.url === '/api/boardctrl/site/doc').map(r => r.body)
     expect(posts).toEqual([
       { kind: 'instances', id: 'sdk-a', text: 'id: sdk-a\nserver: build-1\n', original: 'sdk-a' },
       { kind: 'instances', id: 'packed', text: 'id: sdk-a\nserver: build-1\n' },
@@ -173,21 +173,21 @@ describe('boardlab site', () => {
     writeFileSync(file, '# New skill\n')
     await run(['set', 'skill', 'sdk-a'], { file })
     await run(['set', 'skill', 'packed-skill', '-f', file])
-    const posts = requests.filter(r => r.url === '/api/bsp/site/skill').map(r => r.body)
+    const posts = requests.filter(r => r.url === '/api/boardctrl/site/skill').map(r => r.body)
     expect(posts).toEqual([
       { id: 'sdk-a', text: '# New skill\n', original: 'sdk-a' },
       { id: 'packed-skill', text: '# New skill\n' },
     ])
     expect(lines).toContain('写好了 skills/sdk-a.md；boardlab sdk skill sdk-a 可以装给 agent')
     await run(['remove', 'skill', 'packed-skill'])
-    expect(requests.at(-1)).toMatchObject({ url: '/api/bsp/site/skill/remove', body: { id: 'packed-skill' } })
+    expect(requests.at(-1)).toMatchObject({ url: '/api/boardctrl/site/skill/remove', body: { id: 'packed-skill' } })
     expect(lines.at(-1)).toBe('删掉了 packed-skill')
     await expect(run(['set', 'skill', 'sdk-a'])).rejects.toThrow(/要给 skill 的 id 和 -f/)
   })
 
   it('streams a sync and fails when a host did not take it', async () => {
     await run(['sync'], { lab: 'host-a' })
-    expect(requests.at(-1)).toMatchObject({ url: '/api/bsp/site/sync', body: { lab: 'host-a' } })
+    expect(requests.at(-1)).toMatchObject({ url: '/api/boardctrl/site/sync', body: { lab: 'host-a' } })
     expect(lines).toEqual(['host-a: 同步中', '都同步了'])
     expect(process.exitCode).toBeUndefined()
     syncOk = false

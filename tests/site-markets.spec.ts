@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readMarkets } from '../src/modules/bsp/markets.ts'
+import { readMarkets } from '../src/modules/boardctrl/markets.ts'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'boardlab-site-markets-')); mkdirSync(join(dir, 'markets')) })

@@ -18,9 +18,9 @@ const tab = async (label: string) => fireEvent.click(await screen.findByRole('ta
 describe('TroyMitchellDefault frontend', () => {
   it('shows a card per board: this machine\'s first, a lab\'s under its tab', async () => {
     expect(await screen.findByText('desk-k1', {}, wait)).toBeTruthy()
-    await tab('实验室 bsp')
-    expect(await screen.findByText('bsp-k1-musecard', {}, wait)).toBeTruthy()
-    expect(screen.getByText('bsp-k3-cm1')).toBeTruthy()
+    await tab('实验室 boardctrl')
+    expect(await screen.findByText('boardctrl-k1-musecard', {}, wait)).toBeTruthy()
+    expect(screen.getByText('boardctrl-k3-cm1')).toBeTruthy()
   })
 
   it('draws the modules\' settings from their views, and offers the other frontend', async () => {
@@ -38,9 +38,9 @@ describe('TroyMitchellDefault frontend', () => {
 
   const emptyCard = async () => {
     await tab('板子')
-    await tab('实验室 bsp')
-    await waitFor(() => expect(document.querySelector('[data-board=\"bsp-host-b-s6\"]')).toBeTruthy(), wait)
-    return document.querySelector('[data-board=\"bsp-host-b-s6\"]') as HTMLElement
+    await tab('实验室 boardctrl')
+    await waitFor(() => expect(document.querySelector('[data-board=\"boardctrl-host-b-s6\"]')).toBeTruthy(), wait)
+    return document.querySelector('[data-board=\"boardctrl-host-b-s6\"]') as HTMLElement
   }
 
   it('offers automatic or manual discovery on an empty board card', async () => {
@@ -61,7 +61,7 @@ describe('TroyMitchellDefault frontend', () => {
     fireEvent.change(port!, { target: { value: 'ttyUSB8' } })
     fireEvent.click(within(form).getByRole('button', { name: '开始' }))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body).toEqual({
-      id: 'bsp', confirmed: true, method: 'bind', host: 'host-b', slot: 'host-b/s6', values: { usb: '1-1.3', console: 'ttyUSB8', soc: 'k3' } }), wait)
+      id: 'boardctrl', confirmed: true, method: 'bind', host: 'host-b', slot: 'host-b/s6', values: { usb: '1-1.3', console: 'ttyUSB8', soc: 'k3' } }), wait)
   })
 
   it('names every action in the history with the shared table, never a raw id', async () => {
@@ -84,7 +84,7 @@ describe('TroyMitchellDefault frontend', () => {
     fireEvent.change(within(form).getByPlaceholderText(/例如 12,13/), { target: { value: '12,13' } })
     fireEvent.click(within(form).getByRole('button', { name: '开始' }))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body).toEqual({
-      id: 'bsp', confirmed: true, method: 'probe', host: 'host-b', slot: 'host-b/s6', values: { prefer: '12,13' } }), wait)
+      id: 'boardctrl', confirmed: true, method: 'probe', host: 'host-b', slot: 'host-b/s6', values: { prefer: '12,13' } }), wait)
   })
 })
 
@@ -105,24 +105,24 @@ describe('TroyMitchellDefault health', () => {
 
 describe('TroyMitchellDefault console', () => {
   it('says on the card how the last run ended when it failed', async () => {
-    const pico = state.boards.find(b => b.name === 'bsp-k1-pico')!
-    pico.run = { ...{ id: 'run-a1b2c3d4', boards: ['bsp-k1-pico'], kind: 'boot', label: '刷机中', by: 'user:alice', since: '2026-11-10T09:00:00.000Z', line: 'flash rootfs', status: 'interrupted' as const, message: 'boardd 在它运行时重启了，没能跟到它结束', endedAt: '2026-11-10T09:20:00.000Z' }, status: 'failed' as const, message: 'fastboot: no device' }
+    const pico = state.boards.find(b => b.name === 'boardctrl-k1-pico')!
+    pico.run = { ...{ id: 'run-a1b2c3d4', boards: ['boardctrl-k1-pico'], kind: 'boot', label: '刷机中', by: 'user:alice', since: '2026-11-10T09:00:00.000Z', line: 'flash rootfs', status: 'interrupted' as const, message: 'boardd 在它运行时重启了，没能跟到它结束', endedAt: '2026-11-10T09:20:00.000Z' }, status: 'failed' as const, message: 'fastboot: no device' }
     FakeEventSource.instances.filter(item => /(^|\/)api\/events(\?|$)/.test(item.url)).at(-1)!.emit('changed', { board: pico.name })
     await tab('板子')
-    await tab('实验室 bsp')
-    await waitFor(() => expect(document.querySelector('[data-board="bsp-k1-pico"] .last-run')?.textContent).toMatch(/^刷机失败了：fastboot: no device · \d\d-\d\d \d\d:\d\d:\d\d$/), wait)
-    expect(document.querySelector('[data-board="bsp-k1-pico"] .last-run')!.className).toContain('warn')
+    await tab('实验室 boardctrl')
+    await waitFor(() => expect(document.querySelector('[data-board="boardctrl-k1-pico"] .last-run')?.textContent).toMatch(/^刷机失败了：fastboot: no device · \d\d-\d\d \d\d:\d\d:\d\d$/), wait)
+    expect(document.querySelector('[data-board="boardctrl-k1-pico"] .last-run')!.className).toContain('warn')
     pico.run = null
     FakeEventSource.instances.filter(item => /(^|\/)api\/events(\?|$)/.test(item.url)).at(-1)!.emit('changed', { board: pico.name })
-    await waitFor(() => expect(document.querySelector('[data-board="bsp-k1-pico"] .last-run')).toBeNull(), wait)
+    await waitFor(() => expect(document.querySelector('[data-board="boardctrl-k1-pico"] .last-run')).toBeNull(), wait)
   })
 
   it('says why the console dropped in its status, and that boardd restarted', async () => {
     const { FakeEventSource } = await import('./frontend-setup.ts')
-    const streamsOf = () => FakeEventSource.instances.filter(item => item.url.startsWith('api/console?raw=1&board=bsp-k1-musecard'))
+    const streamsOf = () => FakeEventSource.instances.filter(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k1-musecard'))
     await tab('板子')
-    await tab('实验室 bsp')
-    const card = await waitFor(() => { const el = document.querySelector('[data-board="bsp-k1-musecard"]'); if (!el) throw new Error('no card'); return el as HTMLElement }, wait)
+    await tab('实验室 boardctrl')
+    const card = await waitFor(() => { const el = document.querySelector('[data-board="boardctrl-k1-musecard"]'); if (!el) throw new Error('no card'); return el as HTMLElement }, wait)
     fireEvent.click(card)
     const status = await screen.findByTestId('console-status', {}, wait)
     const stream = streamsOf().at(-1)!
@@ -138,25 +138,25 @@ describe('TroyMitchellDefault console', () => {
 
   it('switches the console to another board from its title, by click or keys', async () => {
     const consoleTitle = () => document.querySelector('.console .board-switch h3')?.textContent
-    await waitFor(() => expect(consoleTitle()).toBe('bsp-k1-musecard'), wait)
+    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k1-musecard'), wait)
     const name = document.querySelector('.console .board-switch [role=button]') as HTMLElement
     const list = () => document.querySelector('.console [role=listbox]') as HTMLElement | null
     fireEvent.click(name)
     await waitFor(() => expect(list()).toBeTruthy(), wait)
     // Only boards with a console, the one shown marked, each with where it is and who has it.
     const options = within(list()!).getAllByRole('option')
-    expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('b')!.textContent)).toEqual(['bsp-k1-musecard'])
-    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'bsp-k3-cm1')!
-    expect(cm1.textContent).toContain('实验室 bsp')
+    expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('b')!.textContent)).toEqual(['boardctrl-k1-musecard'])
+    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!
+    expect(cm1.textContent).toContain('实验室 boardctrl')
     fireEvent.keyDown(list()!, { key: 'Escape' })
     await waitFor(() => expect(list()).toBeNull(), wait)
     expect(document.activeElement).toBe(name)
     fireEvent.keyDown(name, { key: 'Enter' })
     await waitFor(() => expect(list()).toBeTruthy(), wait)
-    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'bsp-k3-cm1')!)
-    await waitFor(() => expect(consoleTitle()).toBe('bsp-k3-cm1'), wait)
+    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!)
+    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k3-cm1'), wait)
     expect(list()).toBeNull()
     const { FakeEventSource } = await import('./frontend-setup.ts')
-    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=bsp-k3-cm1'))).toBe(true), wait)
+    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k3-cm1'))).toBe(true), wait)
   })
 })

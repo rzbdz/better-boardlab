@@ -19,7 +19,7 @@ catalog/
 | layer | holds | who ships it |
 |---|---|---|
 | bsp core | mechanism: locks, jobs, consoles, steps, hooks | bsp repository |
-| bsp platforms (`platforms/<name>/`) | public hardware facts: boot-ROM fingerprints, download-mode patterns, USB ids, pin maps, public hooks | bsp repository — **ships with boardlab** (`externals/bsp`); every platform there is always read |
+| bsp platforms (`platforms/<name>/`) | public hardware facts: boot-ROM fingerprints, download-mode patterns, USB ids, pin maps, public hooks | bsp repository — **ships with boardlab** (`externals/boardctrl`); every platform there is always read |
 | site (this repository) | everything only your lab has: build servers, SDK trees and recipes, private images and helpers, hosts, hints | you |
 
 So the SpacemiT K3 SoC facts are public and already ship: `platforms/spacemit/socs/k3/soc.yaml`

@@ -22,7 +22,7 @@ describe('architecture', () => {
       cpSync(join(root, 'frontends'), join(copy, 'frontends'), { recursive: true })
       const write = (path: string, text: string) => { mkdirSync(join(copy, path, '..'), { recursive: true }); writeFileSync(join(copy, path), text) }
       // A module using another it neither declares nor requires, and reaching into a frontend.
-      write('src/modules/home-assistant/leak.ts', "import { bsp } from '../bsp/index.ts'\nimport { mountPage } from '../../../frontends/modern/main.tsx'\nexport { bsp, mountPage }\n")
+      write('src/modules/home-assistant/leak.ts', "import { bsp } from '../boardctrl/index.ts'\nimport { mountPage } from '../../../frontends/modern/main.tsx'\nexport { bsp, mountPage }\n")
       // A frontend reaching into a module's server side.
       write('frontends/modern/leak.ts', "import { LOCAL } from '../../src/modules/local/index.ts'\nexport { LOCAL }\n")
       // A module's commands using the core's server side, and its page part a module's server side.
@@ -31,10 +31,10 @@ describe('architecture', () => {
       // A module nobody declared, set up under another id and offered to boardd by no catalog entry.
       write('src/modules/zigbee/index.ts', "export const zigbee = { id: 'zb', setup() {} }\n")
       expect(listed(copy)).toEqual(expect.arrayContaining([
-        expect.stringMatching(/^src\/modules\/home-assistant\/leak\.ts modules: module home-assistant imports module bsp without declaring it/),
+        expect.stringMatching(/^src\/modules\/home-assistant\/leak\.ts modules: module home-assistant imports module boardctrl without declaring it/),
         expect.stringMatching(/^src\/modules\/home-assistant\/leak\.ts layers: modules may not import frontends \(frontends\/modern\/main\.tsx\)/),
         expect.stringMatching(/^frontends\/modern\/leak\.ts layers: frontends may not import modules \(src\/modules\/local\/index\.ts\)/),
-        expect.stringMatching(/^src\/modules\/home-assistant\/index\.ts modules: module home-assistant uses module bsp but does not list it in requires/),
+        expect.stringMatching(/^src\/modules\/home-assistant\/index\.ts modules: module home-assistant uses module boardctrl but does not list it in requires/),
         expect.stringMatching(/^src\/modules\/script-slots\/cli\.ts layers: module-cli may not import core \(core\/src\/core\/lab\.ts\)/),
         expect.stringMatching(/^src\/modules\/script-slots\/ui\.ts layers: module-ui may not import modules \(src\/modules\/local\/index\.ts\)/),
         expect.stringMatching(/^src\/modules\/zigbee modules: module zigbee is not declared/),

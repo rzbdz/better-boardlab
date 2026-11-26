@@ -1,5 +1,5 @@
 /**
- * Reaching other machines from boardd, for the modules that set them up (a bsp board host, a compile machine): ssh as
+ * Reaching other machines from boardd, for the modules that set them up (a boardctrl board host, a compile machine): ssh as
  * boardd's user with boardd's own key, trying the ways in until one works, and putting boardd's key on the machine so
  * every later login is key-only. A library: modules use it, it registers nothing.
  *

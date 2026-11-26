@@ -116,6 +116,21 @@
       ],
       "$comment": "the CLI entry and the registries scripts/modules.mjs writes"
     },
+    "module-sdk": {
+      "paths": [
+        "src/sdk.browser.ts"
+      ],
+      "may": [
+        "core",
+        "shared",
+        "ui-contract"
+      ],
+      "typeOnly": [
+        "shared"
+      ],
+      "node": false,
+      "$comment": "what a module's part of the page imports as `boardlab/ui`: the module SDK's values (core/sdk.ts, which reads and draws nothing), the view helpers and the page's call"
+    },
     "ui-contract": {
       "path": "src/ui",
       "may": [
@@ -184,7 +199,7 @@
       "script-slots": [
         "local"
       ],
-      "bsp": [
+      "boardctrl": [
         "hosts",
         "serial-mux"
       ],
@@ -197,7 +212,6 @@
       "hosts": [],
       "system": [],
       "feedback": [],
-      "nexus-images": [],
       "sftp-images": [
         "hosts"
       ],

@@ -1,7 +1,7 @@
 # Releases
 
 This repository packages a boardlab distribution. Its release version is the `version` field in `package.json`; it is
-independent of the versions and tags of the `boardlab-core` and bsp submodules. Those projects are developed and tagged
+independent of the versions and tags of the `boardlab-core` and boardctrl submodules. Those projects are developed and tagged
 in their own repositories, while the distribution records their exact revisions as gitlinks.
 
 ## Versions
@@ -31,7 +31,7 @@ node scripts/release.mjs --source https://github.com/rzbdz/better-boardlab/relea
 The output directory contains:
 
 - `boardlab-<version>.tar.gz`, containing the built CLI and frontends, public help and skills, license, installer, and
-  the bsp files needed on board hosts;
+  the boardctrl files needed on board hosts;
 - `install.sh`, the bootstrap installer with the selected release source;
 - `release.json`, recording the distribution version, full source revision, tarball filename, SHA-256 digest, and the tagged core version and full revision;
 - `CHANGELOG.md`, generated from commit subjects since the previous release or an explicit base.

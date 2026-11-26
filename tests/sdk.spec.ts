@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import { serve } from 'boardlab-core/server/http.ts'
 import { BoardsClient } from 'boardlab-core/shared/client.ts'
-import { sdkCommand } from '../src/shared/bsp-client.ts'
-import { bspSdk, type SdkReach } from '../src/modules/bsp/sdk.ts'
+import { sdkCommand } from '../src/shared/boardctrl-client.ts'
+import { bspSdk, type SdkReach } from '../src/modules/boardctrl/sdk.ts'
 import { Bench, dir, makeLab, sha, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -85,7 +85,7 @@ describe('SDK work through boardd', () => {
     }
     const bench = new Bench([])
     const svc = makeLab({ ...bench.options(openDatabase(join(dir, 'raw.sqlite'))), sdk })
-    await svc.backends.add('user:alice', 'host1', 'bsp')
+    await svc.backends.add('user:alice', 'host1', 'boardctrl')
     await svc.backends.configure('user:alice', 'host1', { enabled: true, url: 'http://registry.test:8765', username: '', password: 'host-secret', devices: '' })
     // A port of its own per test: two tests in one file must not land on the same one.
     const port = await freePort()
@@ -100,7 +100,7 @@ describe('SDK work through boardd', () => {
       await raw(['hosts'])
       expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host1' }] })
       // Two labs, none named: both are reached, so a command can be about either.
-      await svc.backends.add('user:alice', 'host2', 'bsp')
+      await svc.backends.add('user:alice', 'host2', 'boardctrl')
       await svc.backends.configure('user:alice', 'host2', { enabled: true, url: 'bspd+ssh://root@host2.dc:8765', username: '', password: 'two-secret', devices: '' })
       await raw(['gpio', 'list'])
       expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host1', url: 'http://registry.test:8765' }, { name: 'lab-host2', url: 'bspd+ssh://root@host2.dc:8765', token: 'two-secret' }] })
@@ -157,7 +157,7 @@ process.stdout.write('ok\\n')
     // The command runs unchanged; the labs are where bsp reads its remotes, each with its own token.
     expect(bsp.seen.at(-1)).toMatchObject({ argv: ['--json', '-r', 'lab-host1', 'gpio', 'list'], env: { BSP_HOLDER: 'bsp:claude:r' } })
     const config = bsp.seen.at(-1)!.env.BSP_CONFIG!
-    expect(config).toMatch(new RegExp(`^${join(dir, 'state', 'bsp-holders')}/[0-9a-f]{16}/remotes\\.json$`))
+    expect(config).toMatch(new RegExp(`^${join(dir, 'state', 'boardctrl-holders')}/[0-9a-f]{16}/remotes\\.json$`))
     expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ registry: null, remotes: { 'lab-host1': { url: 'http://registry.test:8765', token: 'host-secret' } } })
     expect(said).toEqual(['ok\n'])
     // `-r` keeps the command's choice, said the way a person says it (`host1`), written as the remote's own name.

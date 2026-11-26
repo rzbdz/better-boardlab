@@ -322,7 +322,7 @@ export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: 
     return () => seen.disconnect()
   }, [sections.map(item => item.id).join()])
   const go = (id: string) => { document.getElementById(`s-${id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); setCurrent(id) }
-  // `#/settings/<section>`: a module view by its id (bsp-hosts) or a section's own id (notify).
+  // `#/settings/<section>`: a module view by its id (boardctrl-hosts) or a section's own id (notify).
   useEffect(() => {
     if (!focus) return
     const id = sections.some(item => item.id === `m-${focus}`) ? `m-${focus}` : focus

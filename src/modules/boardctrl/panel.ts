@@ -93,7 +93,7 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
     if (!isHuman(caller.holder)) throw new BoardError('forbidden', '主机的 GPIO 面板只给人用；程序请用 boardlab 的命令和接口')
     const id = String(params.lab ?? '')
     const settings = lab.backends.labSettings().find(item => item.id === id)
-    if (!settings || settings.addedAs !== 'bsp') throw new BoardError('not-found', `没有 bsp 实验室 ${id}`)
+    if (!settings || settings.addedAs !== 'boardctrl') throw new BoardError('not-found', `没有 boardctrl 实验室 ${id}`)
     if (method === 'POST') {
       const other = otherHolder(id, caller.holder)
       if (other) throw new BoardError('forbidden', `${other.board} 正被 ${other.holder} 使用：它放锁之前，GPIO 面板只能看，不能改这台主机的线`)
@@ -107,7 +107,7 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
     for (const [key, value] of Object.entries(headers ?? {})) if (!HOP.has(key) && typeof value === 'string') sent[key] = value
     const payload = method === 'POST' ? Buffer.from(body && Object.keys(body).length ? JSON.stringify(body) : '') : null
     if (payload) { sent['content-type'] = 'application/json'; sent['content-length'] = String(payload.length) }
-    sent['x-forwarded-prefix'] = `/api/bsp/hosts/${id}/panel`
+    sent['x-forwarded-prefix'] = `/api/boardctrl/hosts/${id}/panel`
     if (token) sent.authorization = `Bearer ${token}`
     const response = await new Promise<IncomingMessage>((resolve, reject) => {
       const outgoing = httpRequest({ host: '127.0.0.1', port, method, path: rest + (search ? `?${search}` : ''), headers: sent }, resolve)
@@ -122,7 +122,7 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
   }
 
   return [
-    { method: 'GET', path: '/api/bsp/hosts/:lab/panel/*', about: '板卡主机自己的页面（GPIO 面板、事件、工具），经 boardd 转过去，只给人用', handle: request => pass(request, 'GET') },
-    { method: 'POST', path: '/api/bsp/hosts/:lab/panel/*', about: '板卡主机页面上的操作，经 boardd 转过去（boardd 带上 token）', handle: request => pass(request, 'POST') },
+    { method: 'GET', path: '/api/boardctrl/hosts/:lab/panel/*', about: '板卡主机自己的页面（GPIO 面板、事件、工具），经 boardd 转过去，只给人用', handle: request => pass(request, 'GET') },
+    { method: 'POST', path: '/api/boardctrl/hosts/:lab/panel/*', about: '板卡主机页面上的操作，经 boardd 转过去（boardd 带上 token）', handle: request => pass(request, 'POST') },
   ]
 }

@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Duplex } from 'node:stream'
-import { bspLab, type BspRunner } from '../src/modules/bsp/driver.ts'
-import { followJob } from '../src/modules/bsp/follow.ts'
+import { boardctrlLab, type BoardctrlRunner } from '../src/modules/boardctrl/driver.ts'
+import { followJob } from '../src/modules/boardctrl/follow.ts'
 import { encodeMessage, FrameDecoder } from '../src/modules/serial-mux/client.ts'
 import type { BoardTarget, LabConfig } from 'boardlab-core/core/backend.ts'
 
@@ -18,7 +18,7 @@ const config: LabConfig = { url: 'http://registry.test:8765', username: '', pass
 /** A bsp CLI that answers from a table by its arguments after the global options, and records every call. */
 function fakeBsp(answer: (args: string[]) => ReturnType<typeof ok>) {
   const calls: Array<{ args: string[], env: NodeJS.ProcessEnv }> = []
-  const run: BspRunner = async (args, { env }) => {
+  const run: BoardctrlRunner = async (args, { env }) => {
     const rest = args.slice(args.indexOf('--stateless') + 1)
     const routed = rest[0] === '-r' ? rest.slice(2) : rest
     calls.push({ args, env })
@@ -36,8 +36,8 @@ const DUTS = [
 describe('bsp lab driver', () => {
   it('lists bsp boards with their host, download port and who holds them outside boardd', async () => {
     const bsp = fakeBsp(args => args[0] === 'hosts' ? ok([{ host: 'h1', duts: ['k3-a', 'k3-c'] }, { host: 'h2', duts: ['k1-b'] }, { host: 'h3', error: 'timed out' }]) : ok(DUTS))
-    const lab = bspLab({ run: bsp.run })
-    expect(await lab.inventory!.verify(config)).toBe('2 台 bsp 主机（h1、h2），3 块板子；连不上：h3')
+    const lab = boardctrlLab({ run: bsp.run })
+    expect(await lab.inventory!.verify(config)).toBe('2 台 boardctrl 主机（h1、h2），3 块板子；连不上：h3')
     const devices = await lab.inventory!.devices(config)
     expect(devices.map(d => [d.name, d.model, d.soc, d.serialPort, d.serialConnected, d.downloadUsbPath, d.heldBy])).toEqual([
       ['k3-a', 'deb1', 'K3', 'h1:board1', true, '2-1.2', null],
@@ -47,25 +47,25 @@ describe('bsp lab driver', () => {
     expect(bsp.calls[0]!.args.slice(0, 2)).toEqual(['--json', '--stateless'])
     expect(bsp.calls[0]!.env).toMatchObject({ BSP_REGISTRY: 'http://registry.test:8765', BSP_TOKEN: 'tok' })
     const only = fakeBsp(() => ok([]))
-    await bspLab({ run: only.run }).inventory!.devices({ ...config, username: 'h1,h2', url: '', password: '' })
+    await boardctrlLab({ run: only.run }).inventory!.devices({ ...config, username: 'h1,h2', url: '', password: '' })
     expect(only.calls[0]!.args).toEqual(['--json', '--stateless', '-r', 'h1,h2', 'dut', 'list'])
     expect(only.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
     // On a board host: this machine's bspd, directly, with no registry.
     const local = fakeBsp(() => ok([]))
-    await bspLab({ run: local.run }).inventory!.devices({ ...config, url: 'bspd+http://127.0.0.1:8765' })
+    await boardctrlLab({ run: local.run }).inventory!.devices({ ...config, url: 'bspd+http://127.0.0.1:8765' })
     expect(local.calls[0]!.args).toEqual(['--json', '--stateless', '--url', 'http://127.0.0.1:8765', 'dut', 'list'])
     expect(local.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
     const none = fakeBsp(() => ok([{ host: 'h3', error: 'no route' }]))
-    await expect(bspLab({ run: none.run }).inventory!.verify(config)).rejects.toThrow('没有连上任何 bsp 主机：h3（no route）')
+    await expect(boardctrlLab({ run: none.run }).inventory!.verify(config)).rejects.toThrow('没有连上任何 boardctrl 主机：h3（no route）')
   })
 
   it('fails on a host it cannot reach, instead of taking the empty list for no boards', async () => {
     // A stale token is `ok: true, result: []` with a warning and exit code 3: silently emptying the lab is the bug.
     const stale = fakeBsp(() => unreachable('h1'))
-    await expect(bspLab({ run: stale.run }).inventory!.devices(config)).rejects.toThrow('h1 unreachable: missing or wrong token')
+    await expect(boardctrlLab({ run: stale.run }).inventory!.devices(config)).rejects.toThrow('h1 unreachable: missing or wrong token')
     // One host down while another answers: an error too, so boardd never takes a partial listing as the whole lab.
-    const partial: BspRunner = async () => ({ code: 3, stdout: JSON.stringify({ ok: true, result: DUTS, warnings: ['h2 unreachable: timed out'] }), stderr: '' })
-    await expect(bspLab({ run: partial }).inventory!.devices(config)).rejects.toThrow('h2 unreachable: timed out')
+    const partial: BoardctrlRunner = async () => ({ code: 3, stdout: JSON.stringify({ ok: true, result: DUTS, warnings: ['h2 unreachable: timed out'] }), stderr: '' })
+    await expect(boardctrlLab({ run: partial }).inventory!.devices(config)).rejects.toThrow('h2 unreachable: timed out')
   })
 
   it('works a DUT\'s relays and buttons on the relay controller of its own host', async () => {
@@ -75,7 +75,7 @@ describe('bsp lab driver', () => {
       { target: '37', label: 'GPIO37', aliases: ['k3-c/boot'], state: 'released', actions: ['press', 'release'], channel: { mode: 'button' } },
     ]
     const bsp = fakeBsp(args => args.includes('gpio') ? ok(pins) : args[0] === 'dut' ? ok(DUTS) : ok({ target: '35', state: 'off' }))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.channels!.list(config, on('k3-a'))).toEqual([
       { id: 'k3-a/reset', label: 'reset', kind: 'relay', state: 'off', actions: ['on', 'off', 'toggle', 'pulse'] },
       { id: 'k3-a/power', label: 'power', kind: 'relay', state: 'on', actions: ['on', 'off', 'toggle', 'pulse'] },
@@ -99,7 +99,7 @@ describe('bsp lab driver', () => {
       if (args[1] === 'boot') return ok({ lines: ['[0.0s] file 1/2', '[9.1s] done'] })
       return ok({})
     })
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.lease!.take(config, 'k3-a', { holder: 'boardlab:user:dana', purpose: '调试', token: null })).toBe('T1')
     expect(await lab.lease!.take(config, 'k3-a', { holder: 'boardlab:claude:s1', purpose: '接着调', token: 'T1' })).toBe('T1')
     await expect(lab.lease!.take(config, 'k3-a', { holder: 'boardlab:x', purpose: 'p', token: 'OLD' })).rejects.toThrow('bsp dut acquire：DUT k3-a is leased by alice（wait）')
@@ -131,7 +131,7 @@ describe('bsp lab driver', () => {
     ])
     const spec = { id: 'k3-board', board: 'deb1', soc: 'k3', console: { alias: 'ttyUSB3' }, fastboot: { usb: 'usb:2-1.3' }, control: { backend: 'human' } }
     const probe = fakeBsp(args => args.includes('add') ? ok({}) : ok({ results: { h1: { proposals: [{ spec, warnings: ['no download-mode signature seen'] }] } }, added: [] }))
-    const finder = bspLab({ run: probe.run }).discovery!
+    const finder = boardctrlLab({ run: probe.run }).discovery!
     const found = await finder.run(config, 'probe', {}, {}, () => {})
     expect(found.message).toBe('h1 上发现 1 块新板子，到「扫描」确认后登记')
     expect(found.found).toEqual([{ host: 'h1', name: 'k3-board', warnings: ['no download-mode signature seen'], detail: spec,
@@ -151,7 +151,7 @@ describe('bsp lab driver', () => {
       if (args[0] === 'probe') return ok({ h1: { consoles: [{ id: 's4', kind: 'serial-mux', alias: 's4' }], usb: [{ usb: 'usb:2-1.2', product: 'DFU' }] } })
       return ok({})
     })
-    const methodsLab = bspLab({ run: plan.run }).discovery!
+    const methodsLab = boardctrlLab({ run: plan.run }).discovery!
     const methods = await methodsLab.methods(config, {})
     // 手工登记 is not a scan: it is how a person describes a board no probe can see, and it is offered either way.
     expect(methods.map(method => [method.id, method.title])).toEqual([['probe', '自动刷机'], ['manual', '手工登记']])
@@ -173,11 +173,11 @@ describe('bsp lab driver', () => {
       '--host', 'h1', '--soc', 'k3', '--board', 'deb1', '--sdks', 'sdk-a'])
     expect(registered).toEqual(['b1'])
     const ports = fakeBsp(args => args[0] === 'probe' ? ok({ h1: { consoles: [{ id: 'ttyUSB3', kind: 'tty', device: '/dev/ttyUSB3' }, { id: 'k9', kind: 'serial-mux', alias: 'k9', device: '/dev/ttyUSB9' }], usb: [{ usb: 'usb:2-1.2', product: 'DFU' }, { usb: 'usb:2-1.7', product: 'USB download gadget' }] } }) : ok(DUTS))
-    expect(await bspLab({ run: ports.run }).ports!.list(config)).toEqual([{ host: 'h1',
+    expect(await boardctrlLab({ run: ports.run }).ports!.list(config)).toEqual([{ host: 'h1',
       consoles: [{ id: '/dev/ttyUSB3', label: '/dev/ttyUSB3' }, { id: 'k9', label: 'serial-mux k9（/dev/ttyUSB9）' }],
       usb: [{ id: 'usb:2-1.7', label: 'usb:2-1.7 USB download gadget' }] }])
     expect(ports.calls[0]!.args.slice(2)).toEqual(['probe', '--dry-run'])
-    await bspLab({ run: probe.run }).discovery!.register(config, found.found[0]!, 'slot-3')
+    await boardctrlLab({ run: probe.run }).discovery!.register(config, found.found[0]!, 'slot-3')
     expect(probe.calls[3]!.args.slice(2)).toEqual(['dut', 'add', 'h1', '--spec', JSON.stringify({ ...spec, id: 'slot-3' })])
   })
 
@@ -196,7 +196,7 @@ describe('bsp lab driver', () => {
       if (args[0] === 'probe') throw new Error('a registration read must not run a discovery plan')
       return ok({})
     })
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     const [first, sameHostBoard] = await Promise.all([lab.boardConfig(config, board), lab.boardConfig(config, board)])
     expect(first).toEqual(sameHostBoard)
     expect(first).toMatchObject({ gpios: [{ value: 'P1' }], ports: [{ value: 'usb:1-2', label: 'usb:1-2（1234:abcd）' }],
@@ -217,8 +217,8 @@ describe('bsp lab driver', () => {
     const bsp = fakeBsp(() => ok({ job: 'flash-7', lines: ['[   0.0s] download package', '[  41.0s] flash rootfs 100%'], elapsed_s: 41.4, flasher: 'tool-b', flashed: true }))
     const progress: string[] = []
     const signals: Array<AbortSignal | undefined> = []
-    const run: BspRunner = async (args, options) => { signals.push(options.signal); options.onStderr?.('[  12.0s] flash rootfs 40%'); return bsp.run(args, options) }
-    const lab = bspLab({ run })
+    const run: BoardctrlRunner = async (args, options) => { signals.push(options.signal); options.onStderr?.('[  12.0s] flash rootfs 40%'); return bsp.run(args, options) }
+    const lab = boardctrlLab({ run })
     const abort = new AbortController()
     expect(await lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/k3/pkg.zip?sig=1', flasher: null }, line => progress.push(line), abort.signal))
       .toBe('[   0.0s] download package\n[  41.0s] flash rootfs 100%\n刷机工具：tool-b，用时 41 秒')
@@ -241,7 +241,7 @@ describe('bsp lab driver', () => {
   it('reads what each host of a lab keeps in its cache, and says which hosts it could not reach', async () => {
     const cache = { path: '/var/cache/a', used: 10, entries: 2, held: 1, max_bytes: 100, ttl_s: 86400, min_free_bytes: 5, free: 1000 }
     const bsp = fakeBsp(() => ok([{ host: 'h1', via: 'http', modules: ['dut'], duts: [], cache }, { host: 'h2', via: 'ssh', modules: ['dut'], duts: [], cache: null }, { host: 'h3', error: 'refused' }]))
-    expect(await bspLab({ run: bsp.run }).caches(config)).toEqual([{ host: 'h1', cache, error: null }, { host: 'h2', cache: null, error: null }, { host: 'h3', cache: null, error: 'refused' }])
+    expect(await boardctrlLab({ run: bsp.run }).caches(config)).toEqual([{ host: 'h1', cache, error: null }, { host: 'h2', cache: null, error: null }, { host: 'h3', cache: null, error: 'refused' }])
     expect(bsp.calls[0]!.args.slice(2)).toEqual(['hosts'])
   })
 
@@ -249,7 +249,7 @@ describe('bsp lab driver', () => {
     const plan = { package: 'pkg.zip', partial: true, notes: [], media: [{ id: 'disk', label: 'disk', size: 1 << 20, partitions: [{ name: 'boot', offset: 0, size: 4096, image: 'boot.img', payload: 100, selectable: true }] }] }
     let planning = true
     const bsp = fakeBsp(() => planning ? ok({ plan }) : ok({ job: 'flash-9', lines: ['done'], flashed: true }))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(lab.builds!.accepts).toEqual({ schemes: ['http', 'https', 'ssh'], suffixes: ['.zip', '.tar.gz', '.tgz', '.tar'] })
     // A plan touches no board: the host reads the package and answers with its layout.
     expect(await lab.builds!.plan!(config, on('k3-a', 'T1'), { url: 'ssh://builder@build.example.org/out/pkg.zip' }, () => {})).toEqual(plan)
@@ -263,33 +263,33 @@ describe('bsp lab driver', () => {
       'dut flash k3-a --package https://images.test/pkg.zip --lease T1 --timeout 3600',
     ])
     // A host whose bsp does not know --plan answers without one: say so.
-    const old = bspLab({ run: fakeBsp(() => ok({})).run })
+    const old = boardctrlLab({ run: fakeBsp(() => ok({})).run })
     await expect(old.builds!.plan!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip' }, () => {})).rejects.toThrow(/--plan/)
   })
 
   it('registers boards as bsp finds them, on the slots asked for, and says why a slot found nothing', async () => {
     const seen: string[] = []
     const bsp = fakeBsp(() => ok({ results: { h1: { proposals: [{ spec: { id: 'k3-s4' }, warnings: [], registered: { dut: 'k3-s4' } }], registered: [{ dut: 'k3-s4', slot: 's4' }], reasons: ['no reset line made console(s) s5 speak'] } } }))
-    const run: BspRunner = async (args, options) => { options.onStderr?.('[h1]  [   4.7s] registered k3-s4 in slot s4'); return bsp.run(args, options) }
-    const found = await bspLab({ run }).discovery!.run(config, 'probe', {}, { slot: 'h1/s4' }, () => {}, device => seen.push(device))
+    const run: BoardctrlRunner = async (args, options) => { options.onStderr?.('[h1]  [   4.7s] registered k3-s4 in slot s4'); return bsp.run(args, options) }
+    const found = await boardctrlLab({ run }).discovery!.run(config, 'probe', {}, { slot: 'h1/s4' }, () => {}, device => seen.push(device))
     expect(bsp.calls[0]!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--register', '--slots', 's4'])
     expect(seen).toEqual(['k3-s4'])
     expect(found).toEqual({ found: [], message: '登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak' })
     // A method that is not the backend's is refused, not silently run.
-    await expect(bspLab({ run }).discovery!.run(config, 'nope', {}, {}, () => {})).rejects.toThrow(/没有发现方法 nope/)
+    await expect(boardctrlLab({ run }).discovery!.run(config, 'nope', {}, {}, () => {})).rejects.toThrow(/没有发现方法 nope/)
     // A rebuild starts one host over: bsp forgets its boards and slots and registers each board it finds again.
-    const rebuilt = await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, device => seen.push(device))
+    const rebuilt = await boardctrlLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, device => seen.push(device))
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--yes'])
     expect(rebuilt.message).toBe('登记了 1 块：h1/k3-s4；h1：no reset line made console(s) s5 speak')
     // Rediscovering keeps the boards in use: bsp redoes only what moved.
-    expect(bspLab({ run }).discovery!.keepsInUse).toBe(true)
-    await bspLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, undefined, { keepInUse: true })
+    expect(boardctrlLab({ run }).discovery!.keepsInUse).toBe(true)
+    await boardctrlLab({ run }).discovery!.rebuild!(config, 'h1', () => {}, undefined, { keepInUse: true })
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['-r', 'h1', 'probe', '--rebuild', '--keep-used', '--yes'])
   })
 
   it('reads a board\'s log over a time range on its host, searched', async () => {
     const bsp = fakeBsp(() => ok({ lines: ['[2026-11-10 09:00:00] ERROR mmc0'], matched: 1, truncated: false }))
-    const range = await bspLab({ run: bsp.run }).serial.logs!(config, on('k3-a'), { since: '2026-11-10 08:00:00', grep: 'error', limit: 500 })
+    const range = await boardctrlLab({ run: bsp.run }).serial.logs!(config, on('k3-a'), { since: '2026-11-10 08:00:00', grep: 'error', limit: 500 })
     expect(range).toEqual({ lines: ['[2026-11-10 09:00:00] ERROR mmc0'], matched: 1, truncated: false })
     expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--since', '2026-11-10 08:00:00', '--grep', 'error', '--limit', '500'])
   })
@@ -300,7 +300,7 @@ describe('bsp lab driver', () => {
       hits: { dut: 'k3-a', lines: [], positions: [], numbers: [], matched: 2, total: 9, hits: [3, 8], hits_truncated: false, truncated: false, marks: [{ line: 1, id: 'linux', text: 'Linux version 6.6 (' }], marks_truncated: false },
     }
     const bsp = fakeBsp(args => ok(args.includes('--at') ? answers.window : answers.hits))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.serial.logs!(config, on('k3-a'), { at: 'line:8', before: 1, after: 3 })).toEqual({
       lines: ['a', 'b'], matched: 2, truncated: false, positions: ['2026-11-10:0', '2026-11-10:2'], numbers: [7, 8], total: 9, base: 0, at: '2026-11-10:2', moreBefore: true, moreAfter: false, snapped: false,
     })
@@ -318,7 +318,7 @@ describe('bsp lab driver', () => {
       if (args.some(arg => ['--at', '--hits', '--marks', '--from-line'].includes(arg))) return { code: 2, stdout: '', stderr: 'usage: boardctrl [-h] <command> ...\nboardctrl: error: unrecognized arguments: --at end' }
       return ok({ dut: 'k3-a', lines, matched: lines.length, truncated: false })
     })
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.serial.logs!(config, on('k3-a'), { at: 'end', before: 2 })).toMatchObject({ lines: ['line 28', 'line 29'], numbers: [28, 29], total: 30, moreBefore: true })
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'logs', 'k3-a', '--limit', '20000'])
     expect(await lab.serial.logs!(config, on('k3-a'), { grep: 'linux', hits: true })).toMatchObject({ hits: [12], matched: 1, total: 30 })
@@ -327,26 +327,26 @@ describe('bsp lab driver', () => {
     // A plain search from an older host is its own answer, and other failures are still failures.
     expect(await lab.serial.logs!(config, on('k3-a'), { grep: 'line 1' })).toMatchObject({ lines, matched: 30 })
     const down = fakeBsp(() => fail('host unreachable'))
-    await expect(bspLab({ run: down.run }).serial.logs!(config, on('k3-a'), { at: 'end', before: 2 })).rejects.toThrow(/unreachable/)
+    await expect(boardctrlLab({ run: down.run }).serial.logs!(config, on('k3-a'), { at: 'end', before: 2 })).rejects.toThrow(/unreachable/)
   })
 
   it('says what the board\'s SoC prints as it boots, as its host knows it, and none from an older host', async () => {
     const marks = [{ id: 'rom', title: 'Boot ROM', pattern: '(?:ROMA: boot start)', flags: '', stage: 0, tone: 'rom' }]
     const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'boot-marks' ? ok({ dut: 'k3-a', soc: 'soc-a', marks }) : ok({}))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.serial.bootMarks!(config, on('k3-a'))).toEqual(marks)
     // Asked once a while, however often the page opens the console.
     await lab.serial.bootMarks!(config, on('k3-a'))
     expect(bsp.calls.filter(call => call.args.includes('boot-marks'))).toHaveLength(1)
     // Another host entirely (nothing kept for it): one installed before it knew boot marks has none.
-    const { forgetBootMarks } = await import('../src/modules/bsp/logs.ts')
+    const { forgetBootMarks } = await import('../src/modules/boardctrl/logs.ts')
     forgetBootMarks()
     const old = fakeBsp(() => { throw new Error('invalid choice: boot-marks') })
-    expect(await bspLab({ run: old.run }).serial.bootMarks!(config, on('k3-a'))).toEqual([])
+    expect(await boardctrlLab({ run: old.run }).serial.bootMarks!(config, on('k3-a'))).toEqual([])
   })
 
   it('reads the boot marks again after a site sync, and not before', async () => {
-    const { bootMarksOf, forgetBootMarks } = await import('../src/modules/bsp/logs.ts')
+    const { bootMarksOf, forgetBootMarks } = await import('../src/modules/boardctrl/logs.ts')
     let read = 0
     const marks = bootMarksOf(async () => { read++; return { marks: [{ id: 'rom', title: 'Boot ROM', pattern: 'ROM: x', stage: 0, tone: 'rom' as const }] } })
     const config = { url: 'ssh://lab-1', username: 'root' } as never
@@ -361,7 +361,7 @@ describe('bsp lab driver', () => {
 
   it('greys a board whose slot lost its adapter', async () => {
     const bsp = fakeBsp(args => args.includes('slot') ? ok([]) : ok([{ ...DUTS[0], slot: 's3', slot_online: false }]))
-    const [device] = await bspLab({ run: bsp.run }).inventory!.devices(config)
+    const [device] = await boardctrlLab({ run: bsp.run }).inventory!.devices(config)
     expect(device).toMatchObject({ slot: 'h1/s3', slotGone: true })
   })
 
@@ -369,7 +369,7 @@ describe('bsp lab driver', () => {
     const bsp = fakeBsp(args => args.includes('slot') ? ok([{ id: 's3', host: 'h1', ref: 'h1/s3', alias: 's3', online: true, console_up: true, dut: 'k3-a' }, { id: 's4', host: 'h1', ref: 'h1/s4', alias: 's4', online: true, console_up: true, dut: null }, { id: 's5', host: 'h1', ref: 'h1/s5', online: false, dut: null }])
       : args.includes('refresh') ? ok({ status: 'succeeded', result: { dut: 'k3-board-32g', changed: ['board', 'id'], board: 'k3_com260', identified: true } })
         : ok([{ ...DUTS[0], slot: 's3', media_boot: { method: 'rom-handoff', available: true } }]))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     const devices = await lab.inventory!.devices(config)
     expect(devices[0]!.mediaBoot).toEqual({ method: 'rom-handoff', available: true })
     expect(devices.map(d => [d.name, d.address ?? null, d.slot, !!d.empty, d.serialPort])).toEqual([
@@ -384,7 +384,7 @@ describe('bsp lab driver', () => {
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['dut', 'refresh', 'k3-a', '--lease', 'T1', '--timeout', '1800', '--rename'])
     // A board a person resets: bsp's progress lines become the notice on its card, with bsp's request id.
     const notices: Array<[string | null, string | null]> = []
-    const human = bspLab({ run: async (args, { onStderr }) => {
+    const human = boardctrlLab({ run: async (args, { onStderr }) => {
       if (args.includes('confirm')) {
         // The same request answered again says it already was (the board arrived first, or a second click).
         if (args.includes('--request') && args[args.indexOf('--request') + 1] === 'ab12cd34ef56') return ok({ confirmed: 'reset', waited_s: 4.2, request: 'ab12cd34ef56', repeat: true, how: 'detected' })
@@ -401,12 +401,12 @@ describe('bsp lab driver', () => {
     // A late click, naming the request: answered, not an error, and the message says why.
     expect(await human.relay.confirm!(config, on('slot-1', 'T'), '', 'ab12cd34ef56')).toBe('板子自己到位了，已经自动确认（请求 ab12cd34ef56，不用再点）')
     // Its lock ending stops the waiting bsp.
-    const waiting = bspLab({ run: (_args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'aborted' }), { once: true })) })
+    const waiting = boardctrlLab({ run: (_args, { signal }) => new Promise(resolve => signal?.addEventListener('abort', () => resolve({ code: null, stdout: '', stderr: 'aborted' }), { once: true })) })
     const stop = new AbortController()
     const reset = waiting.relay.reset(config, on('slot-1', 'T'), () => {}, stop.signal)
     stop.abort(new Error('锁已经被抢走'))
     await expect(reset).rejects.toThrow('bsp dut reset 停下了：锁已经被抢走')
-    const broken = bspLab({ run: async () => ({ code: null, stdout: '', stderr: 'spawn bsp ENOENT' }) })
+    const broken = boardctrlLab({ run: async () => ({ code: null, stdout: '', stderr: 'spawn bsp ENOENT' }) })
     await expect(broken.inventory!.devices(config)).rejects.toThrow('bsp dut list 失败（超时或没能运行）：spawn bsp ENOENT')
   })
 
@@ -426,7 +426,7 @@ describe('bsp lab driver', () => {
         }
       }
     })
-    const lab = bspLab({ spawn: args => { spawned = args; return { stream: Duplex.from({ readable: boarddSide, writable: daemonSide }), stderr: () => '' } } })
+    const lab = boardctrlLab({ spawn: args => { spawned = args; return { stream: Duplex.from({ readable: boarddSide, writable: daemonSide }), stderr: () => '' } } })
     const session = await lab.serial.open(config, on('k3-a'))
     expect(spawned).toEqual(['--json', '--stateless', 'dut', 'pipe', 'k3-a'])
     expect(session.history).toEqual(['U-Boot 2022.10', '=> '])
@@ -440,7 +440,7 @@ describe('bsp lab driver', () => {
 
     // A pipe that cannot start prints bsp's error instead of frames.
     const errorSide = new PassThrough()
-    const failing = bspLab({ spawn: () => {
+    const failing = boardctrlLab({ spawn: () => {
       setTimeout(() => { errorSide.end(JSON.stringify({ ok: false, error: { message: 'console board1 of k3-a is not running on h1', hint: 'see `bsp dut status k3-a`' } })) }, 5)
       return { stream: Duplex.from({ readable: errorSide, writable: new PassThrough() }), stderr: () => '' }
     } })
@@ -453,7 +453,7 @@ describe('bsp lab driver', () => {
     const written: string[] = []
     hostSide.on('data', chunk => written.push(chunk.toString()))
     const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt', console: null }]
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
       spawn: args => { spawned = args; return { stream: Duplex.from({ readable: boarddSide, writable: hostSide }), stderr: () => '' } },
     })
@@ -476,7 +476,7 @@ describe('bsp lab driver', () => {
 describe('bsp lab rename', () => {
   it('renames the DUT and its console in bspd under the lease, and treats a lost answer as done', async () => {
     const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'rename' ? ok({ note: 'lease dropped by rename; acquire the new name' }) : ok({}))
-    const out = await bspLab({ run: bsp.run }).rename!.rename(config, on('k3-a', 'lease-token'), 'k3-b')
+    const out = await boardctrlLab({ run: bsp.run }).rename!.rename(config, on('k3-a', 'lease-token'), 'k3-b')
     expect(out).toMatchObject({ device: 'k3-b', alias: 'k3-b' })
     expect(out.message).toMatch(/lease dropped/)
     expect(bsp.calls[0]!.args.slice(2)).toEqual(['dut', 'rename', 'k3-a', 'k3-b', '--console', '--lease', 'lease-token'])
@@ -486,10 +486,10 @@ describe('bsp lab rename', () => {
       if (args[0] === 'dut' && args[1] === 'list') return ok([{ id: 'k3-b', host: 'h1' }])
       return ok({})
     })
-    expect(await bspLab({ run: lost.run }).rename!.rename(config, on('k3-a'), 'k3-b')).toMatchObject({ device: 'k3-b' })
+    expect(await boardctrlLab({ run: lost.run }).rename!.rename(config, on('k3-a'), 'k3-b')).toMatchObject({ device: 'k3-b' })
     // A name that is neither renamed nor there is an error.
     const neither = fakeBsp(args => args[0] === 'dut' && args[1] === 'list' ? ok([{ id: 'k3-c', host: 'h1' }]) : fail('no DUT k3-a'))
-    await expect(bspLab({ run: neither.run }).rename!.rename(config, on('k3-a'), 'k3-b')).rejects.toThrow(/no DUT k3-a/)
+    await expect(boardctrlLab({ run: neither.run }).rename!.rename(config, on('k3-a'), 'k3-b')).rejects.toThrow(/no DUT k3-a/)
   })
 })
 
@@ -497,13 +497,13 @@ describe('bsp lab cancel', () => {
   it('says there is nothing to cancel, and what ran last, instead of a board that would not stop', async () => {
     const nothing = (details: unknown) => fakeBsp(() => ({ code: 1, stdout: JSON.stringify({ ok: false, error: { code: 'invalid_request', message: 'k3-a: no job running', hint: 'nothing to cancel', details } }), stderr: '' }))
     const last = nothing({ running: false, last_job: { id: 'flash-7', kind: 'flash', status: 'failed', error: { message: 'line busy' } } })
-    const error = await bspLab({ run: last.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
-    expect(error).toMatchObject({ code: 'conflict', message: expect.stringMatching(/不用取消.*flash-7（flash）failed：line busy.*bsp job get flash-7/) })
+    const error = await boardctrlLab({ run: last.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
+    expect(error).toMatchObject({ code: 'conflict', message: expect.stringMatching(/不用取消.*flash-7（flash）failed：line busy.*boardctrl job get flash-7/) })
     const never = nothing({ running: false, last_job: null })
-    await expect(bspLab({ run: never.run }).cancel!(config, on('k3-a', 'tok'))).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/没有它跑过任务的记录/) })
+    await expect(boardctrlLab({ run: never.run }).cancel!(config, on('k3-a', 'tok'))).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/没有它跑过任务的记录/) })
     // Any other refusal stays an error of its own (boardd reports it as a board that did not stop).
     const refused = fakeBsp(() => fail('lease held by someone else'))
-    const other = await bspLab({ run: refused.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
+    const other = await boardctrlLab({ run: refused.run }).cancel!(config, on('k3-a', 'tok')).catch(e => e)
     expect(other.code).toBeUndefined()
     expect(other.message).toMatch(/lease held/)
   })
@@ -512,7 +512,7 @@ describe('bsp lab cancel', () => {
 describe('bsp lab news', () => {  it('follows the registry: port changes become news, and an ended stream says so', async () => {
     const out = new PassThrough()
     let args: string[] = []
-    const lab = bspLab({ spawn: given => { args = given; return { stream: Duplex.from({ readable: out, writable: new PassThrough() }), stderr: () => 'registry gone' } } })
+    const lab = boardctrlLab({ spawn: given => { args = given; return { stream: Duplex.from({ readable: out, writable: new PassThrough() }), stderr: () => 'registry gone' } } })
     const news: unknown[] = []
     let ended = ''
     const stop = lab.news!.watch(config, item => news.push(item), reason => { ended = reason })
@@ -535,7 +535,7 @@ describe.skipIf(!MOCK)('bsp lab driver against a bsp mock host', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'bsp-')) })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
   it('lists, leases and resets the mock board', async () => {
-    const lab = bspLab({ bin: process.env.BOARDS_BSP ?? join(__dirname, '../externals/bsp/bin/bsp') })
+    const lab = boardctrlLab({ bin: process.env.BOARDS_BOARDCTRL ?? join(__dirname, '../externals/boardctrl/bin/bsp') })
     const mock: LabConfig = { url: '', username: '', password: '', jump: '' }
     process.env.BSP_URL = MOCK
     const devices = await lab.inventory!.devices(mock)
@@ -554,7 +554,7 @@ describe('bsp debug', () => {
   it('reports a board\'s debug provider with what it offers', async () => {
     const bsp = fakeBsp(args => args[0] === 'dut' && args[1] === 'list' ? ok([board({ debug: { provider: 'gpio-swd', kinds: path.kinds } })])
       : args[0] === 'slot' ? ok([]) : ok(path))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     const devices = await lab.inventory!.devices(config)
     expect(devices[0]!.debug).toEqual({ provider: 'gpio-swd', kinds: ['halt', 'run', 'regs', 'trace'] })
     const got = await lab.debug!.path(config, { board: 'k3-a', device: 'k3-a', lease: null, die: 'die0', usbPath: null, port: null, gate: null })
@@ -566,7 +566,7 @@ describe('bsp debug', () => {
   it('treats a board with no debug path as having none', async () => {
     const bsp = fakeBsp(args => args[0] === 'dut' ? ok([board(undefined)]) : args[0] === 'slot' ? ok([])
       : ok({ dut: 'k3-a', host: 'h1', provider: 'none', kinds: [] }))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     expect(await lab.debug!.path(config, { board: 'k3-a', device: 'k3-a', lease: null, die: 'die0', usbPath: null, port: null, gate: null })).toBeNull()
     const devices = await lab.inventory!.devices(config)
     expect((devices[0] as { debug?: unknown }).debug ?? null).toBeNull()
@@ -580,7 +580,7 @@ describe('bsp debug', () => {
       if (rest[1] === 'stop') return ok({ dut: 'k3-a', role: 'debug', stopped: true })
       return ok(path)
     })
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     const target = { board: 'k3-a', device: 'k3-a', lease: 'tok', die: 'die0', usbPath: null, port: null, gate: null }
     expect(await lab.debug!.start(config, target)).toMatchObject({ running: true, endpoint: '127.0.0.1:3334' })
     expect(bsp.calls.at(-1)!.args.slice(2)).toEqual(['debug', 'start', 'k3-a', '--lease', 'tok'])
@@ -595,7 +595,7 @@ describe('bsp debug', () => {
 describe('bsp console errors', () => {
   it('reports a raw console whose pipe failed instead of showing a silent console', async () => {
     const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt' }]
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
       spawn: () => {
         const side = new PassThrough()
@@ -609,7 +609,7 @@ describe('bsp console errors', () => {
   it('a raw console with nothing to say yet opens anyway', async () => {
     const duts = [{ ...DUTS[0]!, id: 'ec-1', console_provider: 'rtt' }]
     const side = new PassThrough()
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(args => ok(args[0] === 'dut' && args[1] === 'list' ? duts : {})).run,
       spawn: () => ({ stream: side, stderr: () => '' }),
     })
@@ -625,11 +625,11 @@ describe('bsp console errors', () => {
 
 describe('bsp debug stream', () => {
   const target = { board: 'ec-1', device: 'ec-1', lease: null, die: 'die0', usbPath: null, port: null, gate: null }
-  const open = (lab: ReturnType<typeof bspLab>) => lab.debug!.stream!(config, target)
+  const open = (lab: ReturnType<typeof boardctrlLab>) => lab.debug!.stream!(config, target)
 
   it('opens when the trace says something, and carries what follows', async () => {
     const side = new PassThrough()
-    const lab = bspLab({ run: fakeBsp(() => ok({})).run, spawn: () => ({ stream: side, stderr: () => '' }) })
+    const lab = boardctrlLab({ run: fakeBsp(() => ok({})).run, spawn: () => ({ stream: side, stderr: () => '' }) })
     const opening = open(lab)
     side.write(Buffer.from('pc 0x1000\n'))
     const session = await opening
@@ -643,7 +643,7 @@ describe('bsp debug stream', () => {
 
   it('gives the pipe\'s own reason when the pipe then breaks', async () => {
     // The bytes arrive and the pipe breaks before it closes: the envelope it wrote is why, not "Premature close".
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(() => ok({})).run,
       spawn: () => {
         const side = new PassThrough()
@@ -659,7 +659,7 @@ describe('bsp debug stream', () => {
     // A session asked for on a slow host: nothing arrives for a while, and then it fails. Opening on a 1.5 s
     // silence would hand the caller a stream and only afterwards the reason it never opened.
     const side = new PassThrough()
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(() => ok({})).run,
       spawn: () => {
         setTimeout(() => side.end(JSON.stringify({ ok: false, error: { message: 'its debug session is not running' } })), 1800)
@@ -672,7 +672,7 @@ describe('bsp debug stream', () => {
   it('fails with the reason the pipe gave when it cannot open a session', async () => {
     // What the CLI does when it cannot open the session: it says why and exits. A caller must not get a session
     // that will never carry a trace, nor the reason arriving as if the board had said it.
-    const lab = bspLab({
+    const lab = boardctrlLab({
       run: fakeBsp(() => ok({})).run,
       spawn: () => {
         const side = new PassThrough()
@@ -691,7 +691,7 @@ describe('bsp debug stream', () => {
     // The provider and target are made-up: a site's own names must not appear in this tree.
     const bsp = fakeBsp(args => args[0] === 'hosts' ? ok([{ host: 'h1' }, { host: 'h2', error: 'down' }])
       : args[0] === 'sdk' ? ok([{ id: 'made-up-build', soc: 'made-up-soc' }]) : ok({ registered: { dut: 'pin-board' } }))
-    const lab = bspLab({ run: bsp.run })
+    const lab = boardctrlLab({ run: bsp.run })
     // The host is the caller's context (or the lab's single host); the SoC list is the catalog's.
     const methods = await lab.discovery!.methods({ ...config, username: 'h1' }, {})
     const manual = methods.find(method => method.id === 'manual')!
@@ -719,12 +719,12 @@ describe('bsp debug stream', () => {
 describe('bsp runs boardd lost', () => {
   it('reports the host job a flash names as its handle, and follows that job again to its end', async () => {
     const handles: string[] = []
-    const run: BspRunner = async (args, options) => {
+    const run: BoardctrlRunner = async (args, options) => {
       options.onStderr?.('k3-a @ h1: flash pkg.zip with tool-b, job flash-17-4')
       options.onStderr?.('[  12.0s] flash rootfs 40%')
       return fakeBsp(() => ok({ job: 'flash-17-4', lines: [], flasher: 'tool-b' })).run(args, options)
     }
-    await bspLab({ run }).builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, undefined, { handle: handle => handles.push(handle) })
+    await boardctrlLab({ run }).builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {}, undefined, { handle: handle => handles.push(handle) })
     expect(handles).toHaveLength(1)
 
     // The next boardd follows the job on its host until it ends, with the board's lease.
@@ -734,7 +734,7 @@ describe('bsp runs boardd lost', () => {
     ]
     const bsp = fakeBsp(() => ok(views.shift()))
     const progress: string[] = []
-    expect(await bspLab({ run: bsp.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, line => progress.push(line), new AbortController().signal))
+    expect(await boardctrlLab({ run: bsp.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, line => progress.push(line), new AbortController().signal))
       .toBe('flash rootfs 80%\nflash rootfs 100%')
     expect(progress).toEqual(['flash rootfs 80%', 'flash rootfs 100%'])
     expect(bsp.calls.map(call => call.args.slice(2).join(' '))).toEqual([
@@ -744,9 +744,9 @@ describe('bsp runs boardd lost', () => {
 
     // A job that failed or was cancelled on the host ends that way.
     const failed = fakeBsp(() => ok({ status: 'failed', lines: [], next: 0, error: { message: 'flasher exited 2' } }))
-    await expect(bspLab({ run: failed.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toThrow(/flasher exited 2/)
+    await expect(boardctrlLab({ run: failed.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toThrow(/flasher exited 2/)
     const cancelled = fakeBsp(() => ok({ status: 'cancelled', lines: [], next: 0 }))
-    await expect(bspLab({ run: cancelled.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' })
+    await expect(boardctrlLab({ run: cancelled.run }).follow!(config, on('k3-a', 'T1'), handles[0]!, () => {}, new AbortController().signal)).rejects.toMatchObject({ code: 'cancelled' })
   })
 
   it('asks a host it cannot reach again, and stops on what the host says about the job', async () => {
@@ -766,7 +766,7 @@ describe('bsp runs boardd lost', () => {
     ])
     // A host that does not know the job answers about it: not asked again.
     let calls = 0
-    const unknown = async () => { calls++; throw Object.assign(new Error('no job flash-17-4'), { bsp: { code: 'not_found' } }) }
+    const unknown = async () => { calls++; throw Object.assign(new Error('no job flash-17-4'), { boardctrl: { code: 'not_found' } }) }
     await expect(followJob(handle, () => {}, unknown, { retryMs: [1] })).rejects.toThrow(/no job/)
     expect(calls).toBe(1)
     // One out of reach for too long is given up on, saying the job may still run there.

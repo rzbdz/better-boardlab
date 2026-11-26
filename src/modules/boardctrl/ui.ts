@@ -37,9 +37,9 @@ function install(lab: LabSettings | null): Element[] {
       submitLabel: lab ? '重新安装' : '添加并安装',
       submit: job('install', lab ? '重新安装' : '添加并安装', async (input, sink, signal) => {
         const id = lab?.id ?? String(input.id).trim()
-        if (!lab) { sink.line(`添加实验室 ${id}…`); await call('POST', 'api/labs/add', { id, kind: 'bsp' }) }
+        if (!lab) { sink.line(`添加实验室 ${id}…`); await call('POST', 'api/labs/add', { id, kind: 'boardctrl' }) }
         try {
-          const done = await stream('api/bsp/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board, noToken: input.noToken === true, force: input.force === true }, sink, signal)
+          const done = await stream('api/boardctrl/install', { id, address: input.address, user: input.user, password: input.password, jump: input.jump, board: input.board, noToken: input.noToken === true, force: input.force === true }, sink, signal)
           return done.message
         } catch (error) {
           // A lab added for this attempt and then not installed is not a lab: without this, the next try would be
@@ -56,7 +56,7 @@ function install(lab: LabSettings | null): Element[] {
 /** Where a host's GPIO page is opened: always through boardd, which reaches the host the way it drives it and adds the
  * host's token. Opened at the host's own address, the page has no token and every change it makes is refused. */
 function gpioLink(_url: string | null, lab: string): string {
-  return `api/bsp/hosts/${encodeURIComponent(lab)}/panel/`
+  return `api/boardctrl/hosts/${encodeURIComponent(lab)}/panel/`
 }
 
 interface BoardChoices {
@@ -71,7 +71,7 @@ const boardAsking = new Map<string, Promise<BoardChoices>>()
 function readBoardChoices(board: string): Promise<BoardChoices> {
   const asking = boardAsking.get(board)
   if (asking) return asking
-  const ask = call<BoardChoices>('GET', `api/bsp/board?board=${encodeURIComponent(board)}`)
+  const ask = call<BoardChoices>('GET', `api/boardctrl/board?board=${encodeURIComponent(board)}`)
   boardAsking.set(board, ask)
   return ask.then(current => { boardChoices.set(board, current); return current })
     .finally(() => { if (boardAsking.get(board) === ask) boardAsking.delete(board) })
@@ -114,7 +114,7 @@ function boardForm(board: string, current: BoardChoices): Element[] {
         if (typeof input.fdlPin === 'string' && input.fdlPin && input.fdlPin !== current.control.fdl?.pin) changed.fdlPin = input.fdlPin
         if (typeof input.fdl === 'string' && input.fdl && input.fdl !== currentFdl) changed.fdl = input.fdl
         if (Object.keys(changed).length === 1) return '没有改动'
-        return (await call<{ message: string }>('POST', 'api/bsp/board', changed)).message
+        return (await call<{ message: string }>('POST', 'api/boardctrl/board', changed)).message
       }, { intent: 'primary', using: ['sdks'] }) },
   ]
 }
@@ -140,14 +140,14 @@ interface SiteStatus {
 }
 // The host models bsp has a header map for, as boardd's bsp tree lists them; loaded once.
 let hostModels: Array<{ id: string, name: string }> = []
-void call<{ boards: Array<{ id: string, name: string }> }>('GET', 'api/bsp/boards').then(got => { if (Array.isArray(got?.boards)) hostModels = got.boards }).catch(() => {})
+void call<{ boards: Array<{ id: string, name: string }> }>('GET', 'api/boardctrl/boards').then(got => { if (Array.isArray(got?.boards)) hostModels = got.boards }).catch(() => {})
 const modelOptions = () => [{ value: 'auto', label: '自动识别（从设备树）' }, ...hostModels.map(item => ({ value: item.id, label: `${item.name}（${item.id}）` })),
   { value: 'none', label: '没有 GPIO（只靠人工复位）' }]
 let site: SiteStatus | null = null, siteError: string | null = null, loadedAt = 0
 const loadSite = async () => {
   loadedAt = Date.now()
   try {
-    const got = await call<SiteStatus>('GET', 'api/bsp/site')
+    const got = await call<SiteStatus>('GET', 'api/boardctrl/site')
     // A boardd without the site (an older one) answers something else: say so, and keep the hosts view working.
     if (!got || !Array.isArray(got.docs) || !got.hosts) { site = null; siteError = '这个 boardd 不管站点' }
     else { site = got; siteError = null }
@@ -224,7 +224,7 @@ function sdkForm(doc: SiteDoc | null, preset: { server?: string } = {}): Element
           help: 'load 是内存启动，download 是刷机，两个都要有；还没写的用 status: todo。步骤的写法见「?」。' },
       ],
       submitLabel: doc ? '保存' : '添加',
-      submit: action('save-sdk', doc ? '保存' : '添加', input => change('api/bsp/site/sdk', { ...input, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
+      submit: action('save-sdk', doc ? '保存' : '添加', input => change('api/boardctrl/site/sdk', { ...input, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
     },
   ]
 }
@@ -242,7 +242,7 @@ function serverForm(doc: SiteDoc | null): Element[] {
         { kind: 'text', id: 'description', label: '说明', initial: f.description ?? '', wide: true },
       ],
       submitLabel: doc ? '保存' : '添加',
-      submit: action('save-server', doc ? '保存' : '添加', input => change('api/bsp/site/server', { ...input, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
+      submit: action('save-server', doc ? '保存' : '添加', input => change('api/boardctrl/site/server', { ...input, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
     },
   ]
 }
@@ -259,7 +259,7 @@ function yamlForm(kind: Kind | null, doc: SiteDoc | null): Element[] {
         { kind: 'code', id: 'text', label: 'YAML', initial: doc?.text ?? 'id: \n', rows: 16, required: true },
       ],
       submitLabel: doc ? '保存' : '添加',
-      submit: action('save-doc', doc ? '保存' : '添加', input => change('api/bsp/site/doc', { kind: kind ?? input.kind, id: input.id, text: input.text, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
+      submit: action('save-doc', doc ? '保存' : '添加', input => change('api/boardctrl/site/doc', { kind: kind ?? input.kind, id: input.id, text: input.text, original: doc?.id ?? '' }, saved(doc, input.id)), { intent: 'primary' }),
     },
   ]
 }
@@ -269,7 +269,7 @@ function docActions(kind: Kind, doc: SiteDoc, form?: (doc: SiteDoc) => Element[]
   return [
     // Documents with a form are edited there (their YAML under 高级 → 编辑原文); the rest as YAML.
     form ? open('edit', '编辑', `编辑${KIND_NAME[kind]} ${doc.id}`, () => form(doc)) : open('raw', '编辑', `${KIND_NAME[kind]} ${doc.id} 的原文`, () => yamlForm(kind, doc)),
-    action('remove', '删除', () => change('api/bsp/site/remove', { kind, id: doc.id }, out => out.message ?? `删掉了 ${doc.id}`),
+    action('remove', '删除', () => change('api/boardctrl/site/remove', { kind, id: doc.id }, out => out.message ?? `删掉了 ${doc.id}`),
       { intent: 'danger', confirm: { title: `删除 ${doc.id}`, body: `从站点删掉 ${doc.file}。同步后主机上也没有了。`, action: '删除' } }),
   ]
 }
@@ -288,12 +288,12 @@ function sourceForm(): Element[] {
       kind: 'form',
       fields: [
         { kind: 'choice', id: 'source', label: '来源', options: [{ value: 'managed', label: '这台 boardd 管理' }, { value: 'git', label: 'git 仓库' }], initial: site?.source ?? 'managed' },
-        { kind: 'text', id: 'url', label: 'git 地址', initial: site?.url ?? '', placeholder: 'git@git.example.test:lab/bsp-site.git' },
+        { kind: 'text', id: 'url', label: 'git 地址', initial: site?.url ?? '', placeholder: 'git@git.example.test:lab/boardctrl-site.git' },
         { kind: 'text', id: 'branch', label: '分支', initial: site?.branch ?? 'main' },
         { kind: 'switch', id: 'discard', label: '丢掉这里的改动', initial: false, help: '这里的站点有新来源里没有的提交或改动时，不勾就不换（它们会留在一个本地分支里）' },
       ],
       submitLabel: '换来源',
-      submit: action('set-source', '换来源', input => change('api/bsp/site/source', input, out => out.message ?? '换好了'), { intent: 'primary' }),
+      submit: action('set-source', '换来源', input => change('api/boardctrl/site/source', input, out => out.message ?? '换好了'), { intent: 'primary' }),
     },
   ]
 }
@@ -374,7 +374,7 @@ function siteView(labs: LabSettings[]): View {
   const loose = sdks.filter(doc => doc.fields.workspace || !servers.some(server => server.id === doc.fields.server))
   const optional = s?.images?.optional ?? []
   return {
-    id: 'bsp-site', slot: 'settings', title: 'SDK 与站点', help: 'site', order: 20,
+    id: 'boardctrl-site', slot: 'settings', title: 'SDK 与站点', help: 'site', order: 20,
     summary: 'SDK 在哪、怎么刷，同步到每台板卡主机。',
     // The guidance levels are read from this site; the help says how an agent asks for them.
     extra: { 'bsp.guidanceHelp': 'guidance' },
@@ -385,7 +385,7 @@ function siteView(labs: LabSettings[]): View {
     },
     status: !s ? undefined : s.problems.length ? { tone: 'warn', text: `${s.problems.length} 个问题` } : { tone: behind.length ? 'warn' : 'ok', text: s.revision ?? '空' },
     body: !s ? [siteError ? notice(`读不到站点：${siteError}`) : text('读取中…')] : [
-      text('站点是每台 bsp 板卡主机都读的配置：SDK、编译服务器和 SoC 资料。在这里改，再同步到主机。'),
+      text('站点是每台 boardctrl 板卡主机都读的配置：SDK、编译服务器和 SoC 资料。在这里改，再同步到主机。'),
       {
         kind: 'facts', items: [
           { label: '来源', value: s.source === 'git' ? ['git: ', { code: s.url }, ' 分支 ', { code: s.branch }] : '这台 boardd 管理（还没连 git 仓库）' },
@@ -408,11 +408,11 @@ function siteView(labs: LabSettings[]): View {
       }] : []),
       {
         kind: 'actions', actions: [
-          job('sync', '同步到所有主机', async (_input, sink, signal) => { try { return (await stream('api/bsp/site/sync', {}, sink, signal)).message } finally { await loadSite() } }, {
-            intent: 'primary', blocked: !labs.length ? '还没有 bsp 主机' : s.syncing ? '正在同步' : s.problems.length ? '站点有问题，先改好' : undefined,
+          job('sync', '同步到所有主机', async (_input, sink, signal) => { try { return (await stream('api/boardctrl/site/sync', {}, sink, signal)).message } finally { await loadSite() } }, {
+            intent: 'primary', blocked: !labs.length ? '还没有 boardctrl 主机' : s.syncing ? '正在同步' : s.problems.length ? '站点有问题，先改好' : undefined,
           }),
-          action('pull', '拉取', () => change('api/bsp/site/pull', {}, out => out.message ?? '拉好了'), { blocked: s.source !== 'git' ? '站点由这台 boardd 管理' : undefined }),
-          ...(s.source === 'git' ? [action('push', '推送', () => change('api/bsp/site/push', {}, out => out.message ?? '推送了'), { blocked: s.ahead ? undefined : '没有要推送的' })] : []),
+          action('pull', '拉取', () => change('api/boardctrl/site/pull', {}, out => out.message ?? '拉好了'), { blocked: s.source !== 'git' ? '站点由这台 boardd 管理' : undefined }),
+          ...(s.source === 'git' ? [action('push', '推送', () => change('api/boardctrl/site/push', {}, out => out.message ?? '推送了'), { blocked: s.ahead ? undefined : '没有要推送的' })] : []),
           open('source', '换来源', '站点的来源', sourceForm),
         ],
       },
@@ -430,9 +430,9 @@ function siteView(labs: LabSettings[]): View {
 }
 
 export const ui: ModuleUi = {
-  module: 'bsp',
+  module: 'boardctrl',
   views(state, context): View[] {
-    const labs = state.labs.filter(lab => lab.addedAs === 'bsp')
+    const labs = state.labs.filter(lab => lab.addedAs === 'boardctrl')
     const board = context.board ? state.boards.find(item => item.name === context.board) : undefined
     if (board) {
       const bspBoard = !!board.lab && !board.lab.empty && labs.some(lab => lab.id === board.lab!.id)
@@ -441,7 +441,7 @@ export const ui: ModuleUi = {
       // A board its host can debug carries the debug block: the path is asked for once, then kept.
       if (hasDebug(board)) void readDebug(board.name)
       return [{
-        id: 'bsp-board', slot: 'board', title: 'bsp 登记',
+        id: 'boardctrl-board', slot: 'board', title: 'bsp 登记',
         body: [
           { kind: 'actions', actions: [openBoardForm(board.name)] },
           // The host's own page: its GPIO header, lines and events, opened on the host itself.
@@ -451,7 +451,7 @@ export const ui: ModuleUi = {
       }]
     }
     return [{
-      id: 'bsp-hosts', slot: 'settings', title: 'bsp 板卡主机', help: 'board-hosts', order: 10,
+      id: 'boardctrl-hosts', slot: 'settings', title: 'boardctrl 板卡主机', help: 'board-hosts', order: 10,
       summary: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。',
       status: labs.length ? { tone: labs.every(lab => lab.enabled && lab.verifyOk !== false) ? 'ok' : 'warn', text: `${labs.length} 台` } : undefined,
       body: [
@@ -467,7 +467,7 @@ export const ui: ModuleUi = {
               : !lab.enabled ? { tone: 'warn' as const, text: '还没装好' } : lab.verifyOk === false ? { tone: 'error' as const, text: '连不上' } : { tone: 'ok' as const, text: '在线' },
             actions: [
               open('reinstall', '重新安装', `重新安装 ${lab.id}`, () => install(lab)),
-              action('remove', '删除', async () => { await call('POST', 'api/bsp/uninstall', { id: lab.id }); return `删除了 ${lab.id}：主机上的 bspd 卸掉了` },
+              action('remove', '删除', async () => { await call('POST', 'api/boardctrl/uninstall', { id: lab.id }); return `删除了 ${lab.id}：主机上的 bspd 卸掉了` },
                 { intent: 'danger', confirm: { title: `删除 ${lab.id}`, body: '卸掉主机上的 bspd（它的板子记录留在主机上），并从 boardlab 删掉这个实验室和它的板子。有人拿着锁时不能删。', action: '删除' } }),
             ],
           })),
@@ -492,11 +492,11 @@ function bytes(value: number): string {
 
 /** What each host of a lab keeps of what it downloaded, against its bounds: one bar per host. */
 async function hostCaches(lab: string): Promise<Element[]> {
-  const hosts = await call<Array<{ host: string, cache: HostCache | null, error: string | null }>>('GET', `api/bsp/hosts/${encodeURIComponent(lab)}/cache`)
+  const hosts = await call<Array<{ host: string, cache: HostCache | null, error: string | null }>>('GET', `api/boardctrl/hosts/${encodeURIComponent(lab)}/cache`)
   if (!hosts.length) return [text('这个实验室还没有主机。')]
   return hosts.map((item): Element => {
     if (item.error) return notice(`${item.host}：读不到（${item.error}）`, 'warn')
-    if (!item.cache) return text([{ strong: item.host }, '：主机上的 bsp 太旧，不报缓存；重新安装后就有。'])
+    if (!item.cache) return text([{ strong: item.host }, '：主机上的 boardctrl 太旧，不报缓存；重新安装后就有。'])
     const cache = item.cache
     const label = [`${item.host}：${bytes(cache.used)}${cache.max_bytes ? ` / ${bytes(cache.max_bytes)}` : ''}`, `${cache.entries} 项${cache.held ? `（${cache.held} 项正在用）` : ''}`,
       cache.ttl_s ? `不用的留 ${Math.round(cache.ttl_s / 86_400)} 天` : null, cache.free !== null ? `磁盘还剩 ${bytes(cache.free)}` : null].filter(Boolean).join(' · ')
@@ -552,7 +552,7 @@ function trace(board: string): Element {
     kind: 'live',
     height: 'large',
     stream: {
-      id: `bsp-debug-${board}`,
+      id: `boardctrl-debug-${board}`,
       open(sink) {
         const source = new EventSource(`api/debug/stream?board=${encodeURIComponent(board)}`)
         let pending = ''

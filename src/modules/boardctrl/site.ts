@@ -1,5 +1,5 @@
 /**
- * The bsp site boardd keeps: one working copy, at `<state>/bsp/site`, of what every bsp board host reads from
+ * The boardctrl site boardd keeps: one working copy, at `<state>/bsp/site`, of what every bsp board host reads from
  * /etc/boardctrl/site besides its own `hosts/` file: SoC facts (`socs/`), the SDK catalog (`sdk/`), hooks, the
  * images the platforms stage (`.blobs/`), DUT records (`duts/`) and site providers (`providers/`, a `provider.py` per
  * one the host loads; `modules/` is the name sites used before providers). Its source is a git repository (cloned,
@@ -7,7 +7,7 @@
  * machine's ssh setup) or boardd itself ("managed here"); the copy is a git repository either way, and every edit made
  * through boardd is a commit by whoever made it. Edits are checked the way bsp loads its SDK catalog, so a site that
  * reaches a host loads there. Images the SoC facts list but the site keeps out of git are fetched into `.blobs/` by
- * the bsp CLI (`bsp images sync`) after each pull and before each sync, so the hosts get them with the site.
+ * the boardctrl CLI (`bsp images sync`) after each pull and before each sync, so the hosts get them with the site.
  */
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -149,7 +149,7 @@ export class Site {
 
   /**
    * `tree`: the boardctrl tree, whose shipped platforms the hosts layer under the site. `sshCommands`: the ways in for git over ssh.
-   * `bin`: the bsp CLI that fetches the site's images (none: images are not fetched).
+   * `bin`: the boardctrl CLI that fetches the site's images (none: images are not fetched).
    */
   constructor(readonly dir: string, private readonly settings: Settings, private readonly options: { tree?: string | null, sshCommands?: () => Promise<string[]>, bin?: string } = {}) {}
 
@@ -196,7 +196,7 @@ export class Site {
     if (made.code !== 0) throw new Error(`建站点仓库失败：${last(made)}`)
     if (!existsSync(join(dir, '.gitignore'))) writeFileSync(join(dir, '.gitignore'), '# images, fetched by sha256: kept out of git\n.blobs/\n')
     await this.git(['add', '-A'], dir)
-    await this.git(['-c', `user.name=${holder}`, '-c', 'user.email=boardlab@localhost', 'commit', '-q', '--no-verify', '-m', 'Start the bsp site'], dir)
+    await this.git(['-c', `user.name=${holder}`, '-c', 'user.email=boardlab@localhost', 'commit', '-q', '--no-verify', '-m', 'Start the boardctrl site'], dir)
   }
 
   /** Images stay out of git, whatever the source's own .gitignore says. */
@@ -325,7 +325,7 @@ export class Site {
       }
       if (input.source !== 'git') throw new BoardError('invalid', `来源只能是 managed 或 git，不是 ${input.source}`)
       const url = String(input.url ?? '').trim(), branch = String(input.branch ?? '').trim() || 'main'
-      if (!url || /\s/.test(url) || url.startsWith('-')) throw new BoardError('invalid', '要给 git 仓库地址，例如 git@git.example.test:lab/bsp-site.git')
+      if (!url || /\s/.test(url) || url.startsWith('-')) throw new BoardError('invalid', '要给 git 仓库地址，例如 git@git.example.test:lab/boardctrl-site.git')
       if (!BRANCH.test(branch) || branch.includes('..')) throw new BoardError('invalid', `不合法的分支名：${branch}`)
       const before = { source: this.settings.get('source'), url: this.settings.get('url'), branch: this.settings.get('branch') }
       this.settings.set('source', 'git'); this.settings.set('url', url); this.settings.set('branch', branch)
@@ -654,7 +654,7 @@ export class Site {
     ].filter(([, value]) => value !== null) as Array<[string, unknown]>), `${clean(input.original) ? 'Edit' : 'Add'} SDK ${id}`)
   }
 
-  /** Add or edit a build server: how bsp reaches it (`user@host`). */
+  /** Add or edit a build server: how boardctrl reaches it (`user@host`). */
   async putServer(holder: string, input: ServerInput): Promise<SiteDoc> {
     const id = String(input.id ?? '').trim(), clean = (value?: string) => String(value ?? '').trim()
     if (!clean(input.host) || !clean(input.user)) throw new BoardError('invalid', '编译服务器要有地址（host）和用户（user）')
@@ -695,7 +695,7 @@ export class Site {
     })
   }
 
-  /** Fetch the images the site's platforms list, through the bsp CLI; what is still missing, kept for the page. */
+  /** Fetch the images the site's platforms list, through the boardctrl CLI; what is still missing, kept for the page. */
   private images(say: (line: string) => void = () => {}): Promise<ImagesState | null> {
     return fetchSiteImages(this.imagesSite(), say)
   }

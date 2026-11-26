@@ -43,26 +43,26 @@ beforeAll(async () => {
 
 describe('Modern frontend', () => {
   it('shows every board as a card with its state, in upper case', async () => {
-    const musecard = await card('bsp-k1-musecard')
+    const musecard = await card('boardctrl-k1-musecard')
     expect(musecard.textContent).toContain('K1-MUSECARD')
-    expect((await card('bsp-k3-cm1')).textContent).toContain('使用中')
-    expect((await card('bsp-k3-gone')).textContent).toContain('串口离线')
-    expect((await card('bsp-k1-pico')).textContent).toContain('等人操作')
-    expect((await card('bsp-host-b-s6')).className).toContain('empty')
+    expect((await card('boardctrl-k3-cm1')).textContent).toContain('使用中')
+    expect((await card('boardctrl-k3-gone')).textContent).toContain('串口离线')
+    expect((await card('boardctrl-k1-pico')).textContent).toContain('等人操作')
+    expect((await card('boardctrl-host-b-s6')).className).toContain('empty')
   })
 
   it('colours a board an agent holds with that agent\'s colour, and a person\'s board not', async () => {
-    expect((await card('bsp-k3-cm1')).className).not.toContain('by-agent')
-    const board = state.boards.find(b => b.name === 'bsp-k3-cm1')!
+    expect((await card('boardctrl-k3-cm1')).className).not.toContain('by-agent')
+    const board = state.boards.find(b => b.name === 'boardctrl-k3-cm1')!
     const was = board.lease
     board.lease = { ...was!, holder: 'codex:fix-usb' }
     const source = await stateStream()
     source.opened()
     source.emit('lease-granted', { board: board.name, holder: 'codex:fix-usb' })
-    await waitFor(() => expect(document.querySelector('[data-board="bsp-k3-cm1"]')!.className).toMatch(/by-agent k-codex/), wait)
+    await waitFor(() => expect(document.querySelector('[data-board="boardctrl-k3-cm1"]')!.className).toMatch(/by-agent k-codex/), wait)
     board.lease = was
     source.emit('lease-granted', { board: board.name, holder: was!.holder })
-    await waitFor(() => expect(document.querySelector('[data-board="bsp-k3-cm1"]')!.className).not.toContain('by-agent'), wait)
+    await waitFor(() => expect(document.querySelector('[data-board="boardctrl-k3-cm1"]')!.className).not.toContain('by-agent'), wait)
   })
 
   it('warns that boardd restored its database from a copy until a person says they saw it', async () => {
@@ -84,33 +84,33 @@ describe('Modern frontend', () => {
     const banner = document.querySelector('.banner .b') as HTMLElement
     expect(banner.textContent).toContain('host-a · s2')
     fireEvent.click(await button('我操作好了', banner))
-    await waitFor(() => expect(calls.some(c => c.path === 'api/confirm' && (c.body as { board: string }).board === 'bsp-k1-pico')).toBe(true), wait)
+    await waitFor(() => expect(calls.some(c => c.path === 'api/confirm' && (c.body as { board: string }).board === 'boardctrl-k1-pico')).toBe(true), wait)
   })
 
   it('takes a lock from a card with a one-click purpose', async () => {
-    const free = await card('bsp-k1-musecard')
+    const free = await card('boardctrl-k1-musecard')
     const lock = within(free).queryAllByRole('button').find(b => b.textContent?.includes('拿锁'))
     if (!lock) return // the mock may already have it held by you
     fireEvent.click(lock)
     const dialog = await screen.findByRole('dialog', {}, wait)
     fireEvent.click(await button('临时开发任务', dialog))
     fireEvent.click(await button('拿锁', dialog))
-    await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board: string }).board === 'bsp-k1-musecard')?.body).toEqual({ board: 'bsp-k1-musecard', purpose: '临时开发任务' }), wait)
+    await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board: string }).board === 'boardctrl-k1-musecard')?.body).toEqual({ board: 'boardctrl-k1-musecard', purpose: '临时开发任务' }), wait)
   })
 
   it('shows what boardd is doing to a board, and holds back what would overlap it', async () => {
-    const slot = await card('bsp-host-a-s7')
+    const slot = await card('boardctrl-host-a-s7')
     expect(slot.textContent).toContain('发现中')
     expect(slot.querySelector('.st .spin')).toBeTruthy()
     // An empty slot is filled on the discover page, not from here: home points there and starts nothing itself.
     const there = await waitFor(() => { const link = slot.querySelector('a[href="#/discover"]'); expect(link).toBeTruthy(); return link! }, wait)
     expect(there.textContent).toContain('去发现')
-    go('#/board/bsp-k1-flash')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K1-FLASH'), wait)
+    go('#/board/boardctrl-k1-flash')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K1-FLASH'), wait)
     expect(document.querySelector('.flag.run')?.textContent).toContain('刷机中：flash rootfs')
     const reset = (await button(/^复位/, document.querySelector('.controls') as HTMLElement))
     expect(reset.disabled).toBe(true)
-    go('#/board/bsp-host-a-s7')
+    go('#/board/boardctrl-host-a-s7')
     await waitFor(() => expect(document.querySelector('.tilebox')?.textContent).toContain('P13：没有串口反应'), wait)
     expect((await button(/发现/, document.querySelector('.tilebox') as HTMLElement)).disabled).toBe(true)
     go('#/')
@@ -119,7 +119,7 @@ describe('Modern frontend', () => {
   it('spins the boot control for a boot only, and shows every other operation as the board\'s state', async () => {
     const { model } = await import('../frontends/modern/kit.tsx')
     const { mockState } = await import('./mock-boardd.ts')
-    const flash = mockState().boards.find(b => b.name === 'bsp-k1-flash')!
+    const flash = mockState().boards.find(b => b.name === 'boardctrl-k1-flash')!
     const doing = (kind: string, label: string) => model({ ...flash, busy: { ...flash.busy!, kind, label, line: null } }, flash.lease!.holder).flags
     for (const [kind, label] of [['reset', '复位中'], ['fastboot', '进下载模式中'], ['lock', '拿锁中'], ['refresh', '读取中'], ['configure', '修改中']]) {
       expect(doing(kind, label)).toMatchObject({ booting: null, progress: `${label}…`, busy: { kind } })
@@ -135,7 +135,7 @@ describe('Modern frontend', () => {
     const { useBoardActions } = await import('../frontends/modern/actions.tsx')
     const { setAsked } = await import('../frontends/modern/kit.tsx')
     const { mockState } = await import('./mock-boardd.ts')
-    const board = { ...mockState().boards.find(b => b.name === 'bsp-k1-flash')!, busy: null }
+    const board = { ...mockState().boards.find(b => b.name === 'boardctrl-k1-flash')!, busy: null }
     const { result, unmount } = renderHook(() => useBoardActions(board))
     act(() => { setAsked(board.name, 'reset', true); setAsked(board.name, 'confirm', true) })
     expect(result.current).toMatchObject({ busy: 'reset' })
@@ -152,14 +152,14 @@ describe('Modern frontend', () => {
   })
 
   it('opens a board: controls beside the console, log search with download and wget', async () => {
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     expect(document.querySelector('.tilebox')?.textContent).toContain('使用中')
     expect(await button('排队')).toBeTruthy()
     fireEvent.click(await button('日志'))
     // The whole log is as long as it is: only the lines in view are read, a page at a time, from the end.
     await waitFor(() => expect(document.querySelector('.lfoot')?.textContent).toContain('共 5,000 行'), wait)
-    expect(calls.some(c => /^api\/logs\?board=bsp-k3-cm1&at=end/.test(c.path))).toBe(true)
+    expect(calls.some(c => /^api\/logs\?board=boardctrl-k3-cm1&at=end/.test(c.path))).toBe(true)
     await waitFor(() => expect(screen.getByTestId('log-lines').textContent).toContain('U-Boot SPL line 4999'), wait)
     const reads = calls.filter(c => c.path.startsWith('api/logs?') && /at=line%3A/.test(c.path))
     expect(reads.length).toBeLessThanOrEqual(2)
@@ -180,8 +180,8 @@ describe('Modern frontend', () => {
   })
 
   it('draws a log of just the time range asked for, and keeps drawing it as its pages are read', async () => {
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     fireEvent.click(await button('日志'))
     await waitFor(() => expect(document.querySelector('.lfoot')?.textContent).toContain('共 5,000 行'), wait)
     const picker = () => document.querySelector('select[aria-label="搜索的时间范围"]') as HTMLSelectElement
@@ -205,8 +205,8 @@ describe('Modern frontend', () => {
 
   it('marks every boot beside the log, goes to one, and remembers which stages the person shows for that console', async () => {
     localStorage.removeItem('boardlab.boots.shown')
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     fireEvent.click(await button('日志', document.querySelector('.ctb') as HTMLElement))
     const rail = () => document.querySelector('.logwrap .lboots') as HTMLElement
     await waitFor(() => expect(rail()?.querySelectorAll('.tick').length).toBe(5), wait)
@@ -232,13 +232,13 @@ describe('Modern frontend', () => {
     expect([...panel().querySelectorAll('.boot .n')].map(n => n.textContent)).toEqual(['#3', '#2', '#1'])
     fireEvent.click(within(panel()).getByRole('button', { name: 'U-Boot SPL', pressed: true }))
     await waitFor(() => expect(rail().querySelectorAll('.tick').length).toBe(3), wait)
-    expect(JSON.parse(localStorage.getItem('boardlab.boots.shown')!)).toEqual({ 'bsp-k3-cm1.die0': ['spl'] })
+    expect(JSON.parse(localStorage.getItem('boardlab.boots.shown')!)).toEqual({ 'boardctrl-k3-cm1.die0': ['spl'] })
     fireEvent.click(within(panel()).getAllByRole('button', { name: 'Linux' }).at(-1)!)
     await waitFor(() => expect(document.querySelector('.ll[data-line="140"]')).toBeTruthy(), wait)
     expect(rail().querySelector('.panel')).toBeNull()
     // Another visit to the console keeps the choice.
     go('#/')
-    go('#/board/bsp-k3-cm1')
+    go('#/board/boardctrl-k3-cm1')
     await waitFor(() => expect(document.querySelector('.logwrap .lboots')?.querySelectorAll('.tick').length).toBe(3), wait)
     localStorage.removeItem('boardlab.boots.shown')
     go('#/')
@@ -246,11 +246,11 @@ describe('Modern frontend', () => {
 
   it('takes a search from the console to the whole log, which opens on its first match', async () => {
     const consoleUi = await import('../src/ui/console.tsx')
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     fireEvent.click(await button('串口', document.querySelector('.ctb') as HTMLElement))
     fireEvent.click(await button('搜索', document.querySelector('.ctb') as HTMLElement))
-    expect(consoleUi.searchConsole).toHaveBeenCalledWith('bsp-k3-cm1', 'die0')
+    expect(consoleUi.searchConsole).toHaveBeenCalledWith('boardctrl-k3-cm1', 'die0')
     await waitFor(() => expect(consoleProps.last?.onSearchHistory).toBeTruthy(), wait)
     act(() => consoleProps.last!.onSearchHistory!('mmc0', false))
     await waitFor(() => expect((document.querySelector('.lq input') as HTMLInputElement)?.value).toBe('mmc0'), wait)
@@ -260,21 +260,21 @@ describe('Modern frontend', () => {
 
   it('offers to stop a fastboot boot at U-Boot when the SDK\'s recipe has that break point', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
     fireEvent.click(await button(/停在\s*uboot/, dialog()))
     fireEvent.click(await button('开始', dialog()))
-    await waitFor(() => expect(calls.find(c => c.path === 'api/boot/sdk')?.body).toMatchObject({ board: 'bsp-k3-deb1', method: 'load', brk: 'uboot' }), wait)
+    await waitFor(() => expect(calls.find(c => c.path === 'api/boot/sdk')?.body).toMatchObject({ board: 'boardctrl-k3-deb1', method: 'load', brk: 'uboot' }), wait)
     go('#/')
   })
 
   it('flashes a package from a link, and offers the last link again', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
     const open = async () => { fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     // Booting no longer flashes: 启动 only loads into memory.
     fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
@@ -288,7 +288,7 @@ describe('Modern frontend', () => {
     fireEvent.change(screen.getByPlaceholderText('留空由后端按刷机包选'), { target: { value: 'tool-b' } })
     fireEvent.click(dialog().querySelector('label.check input')!)
     fireEvent.click(await button('开始刷机', dialog()))
-    await waitFor(() => expect(calls.find(c => c.path === 'api/flash/package')?.body).toEqual({ board: 'bsp-k3-deb1', url: 'https://images.test/k3/pkg.zip', flasher: 'tool-b' }), wait)
+    await waitFor(() => expect(calls.find(c => c.path === 'api/flash/package')?.body).toEqual({ board: 'boardctrl-k3-deb1', url: 'https://images.test/k3/pkg.zip', flasher: 'tool-b' }), wait)
 
     // The link and tool are offered again.
     await open()
@@ -299,8 +299,8 @@ describe('Modern frontend', () => {
 
   it('sends a file from this computer in pieces, then flashes it by the sha256 boardd hashed', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
     fireEvent.click(await tab(/^上传文件/, dialog()))
@@ -313,7 +313,7 @@ describe('Modern frontend', () => {
     expect(calls.find(c => c.path === 'api/files/uploads')?.body).toEqual({ name: 'local.zip', size: big.size })
     expect(calls.some(c => c.path === `api/files/uploads/${id}/seal`)).toBe(true)
     fireEvent.click(await button('开始刷机', dialog()))
-    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toMatchObject({ board: 'bsp-k3-deb1', sha256: 'ab'.repeat(32) }), wait)
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toMatchObject({ board: 'boardctrl-k3-deb1', sha256: 'ab'.repeat(32) }), wait)
     go('#/')
   })
 
@@ -321,8 +321,8 @@ describe('Modern frontend', () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
     let letGo!: () => void
     uploadGate.name = 'first.zip'; uploadGate.open = new Promise<void>(resolve => { letGo = resolve })
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
     fireEvent.click(await tab(/^上传文件/, dialog()))
@@ -344,15 +344,15 @@ describe('Modern frontend', () => {
 
   it('flashes an image of a market: the tree for the board\'s SoC, what it would write, chosen partitions and a reset', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
     fireEvent.click(await tab(/^镜像市场/, dialog()))
     // The tree is read folder by folder, filtered to the board's SoC.
     fireEvent.click(await button(/^soc-a/, dialog()))
     await waitFor(() => expect(calls.some(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))).toBe(true), wait)
-    expect(calls.find(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))!.path).toMatch(/soc=k3.*board=bsp-k3-deb1/)
+    expect(calls.find(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))!.path).toMatch(/soc=k3.*board=boardctrl-k3-deb1/)
     // An image its backend does not take cannot be picked.
     expect((await button(/^disk\.iso/, dialog())).disabled).toBe(true)
     fireEvent.click(await button(/^new\.zip/, dialog()))
@@ -360,7 +360,7 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
     // The tool typed last time on this board (the link test) is remembered and goes with the plan too.
     // The plan of this package, read as it was picked (other tests' plans came before it).
-    expect(calls.filter(c => c.path === 'api/flash/plan').at(-1)?.body).toEqual({ board: 'bsp-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b' })
+    expect(calls.filter(c => c.path === 'api/flash/plan').at(-1)?.body).toEqual({ board: 'boardctrl-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b' })
     // A look at another tab and back to the same image is not another package: its plan is kept, not asked for again.
     const plans = () => calls.filter(c => c.path === 'api/flash/plan').length
     const once = plans()
@@ -372,14 +372,14 @@ describe('Modern frontend', () => {
     expect((await button('开始刷机', dialog())).disabled).toBe(true)
     fireEvent.click(await button('rootfs', dialog()))
     fireEvent.click(await button('开始刷机', dialog()))
-    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'bsp-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b', partitions: ['rootfs'], reset: true }), wait)
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'boardctrl-k3-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b', partitions: ['rootfs'], reset: true }), wait)
     go('#/')
   })
 
   it('searches the whole market at once: the folders leading to a match, expanded, and nothing else', async () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(await button(/^刷机/, document.querySelector('.controls') as HTMLElement))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
     fireEvent.click(await tab(/^镜像市场/, dialog()))
@@ -387,7 +387,7 @@ describe('Modern frontend', () => {
     // The whole tree is read in boardd at once, filtered the board's SoC and marked for its backend.
     fireEvent.change(find, { target: { value: 'deep' } })
     await waitFor(() => expect(calls.some(c => c.path.startsWith('api/markets/shelf/search?q=deep'))).toBe(true), wait)
-    expect(calls.find(c => c.path.startsWith('api/markets/shelf/search'))!.path).toMatch(/soc=k3.*board=bsp-k3-deb1/)
+    expect(calls.find(c => c.path.startsWith('api/markets/shelf/search'))!.path).toMatch(/soc=k3.*board=boardctrl-k3-deb1/)
     // Only the folders leading to the match, expanded all the way, and the match itself.
     await waitFor(() => expect(dialog().querySelector('.mk-found')?.textContent).toContain('deep.zip'), wait)
     const rows = [...dialog().querySelectorAll('.mk-found .mk-row')].map(row => row.textContent ?? '')
@@ -427,10 +427,10 @@ describe('Modern frontend', () => {
     expect((await button('不能刷', dialog())).disabled).toBe(true)
     expect(await button('刷这块', dialog())).toBeTruthy()
     fireEvent.click(await button('拿锁并刷', dialog()))
-    await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board?: string }).board === 'bsp-k1-pico')?.body).toMatchObject({ board: 'bsp-k1-pico', purpose: '刷机 new.zip' }), wait)
+    await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board?: string }).board === 'boardctrl-k1-pico')?.body).toMatchObject({ board: 'boardctrl-k1-pico', purpose: '刷机 new.zip' }), wait)
     // The flash dialog opens on the image picked, for that board.
     await waitFor(() => expect(dialog()?.querySelector('h2')?.textContent).toBe('刷机'), wait)
-    expect(dialog().textContent).toContain('BSP-K1-PICO')
+    expect(dialog().textContent).toContain('BOARDCTRL-K1-PICO')
     expect(dialog().querySelector('.fl-picked')?.textContent).toContain('soc-a/new.zip')
     // Its backend cannot say what a package would write, so that is not offered.
     expect(dialog().textContent).not.toContain('看看会写什么')
@@ -441,34 +441,34 @@ describe('Modern frontend', () => {
 
   it('clears the console without disconnecting it', async () => {
     const consoleUi = await import('../src/ui/console.tsx')
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     fireEvent.click(await button('清屏', document.querySelector('.ctb') as HTMLElement))
-    expect(consoleUi.clearConsole).toHaveBeenCalledWith('bsp-k3-cm1', 'die0')
+    expect(consoleUi.clearConsole).toHaveBeenCalledWith('boardctrl-k3-cm1', 'die0')
     go('#/')
   })
 
   it('switches to another board from the name, by mouse or keys, keeping the tab it shows', async () => {
-    go('#/board/bsp-k3-cm1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
+    go('#/board/boardctrl-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
     fireEvent.click(await button('日志'))
     // The board's side panel starts over on a switch, the name with it: look it up each time.
     let name = document.querySelector('.bswitch [role=button]') as HTMLElement
     expect(name.getAttribute('aria-expanded')).toBe('false')
     expect(name.closest('h1')?.className).toBe('bname')
-    expect(name.getAttribute('aria-label')).toMatch(/^BSP-K3-CM1，/)
+    expect(name.getAttribute('aria-label')).toMatch(/^BOARDCTRL-K3-CM1，/)
     fireEvent.click(name)
     const list = () => document.querySelector('.bswitch [role=listbox]') as HTMLElement | null
     await waitFor(() => expect(list()).toBeTruthy(), wait)
     // Every board but the empty slots, the one shown marked; a short list has no filter box and takes the keys itself.
     const options = within(list()!).getAllByRole('option')
-    expect(options.map(o => o.querySelector('.bs-name')!.textContent)).toContain('BSP-K1-PICO')
+    expect(options.map(o => o.querySelector('.bs-name')!.textContent)).toContain('BOARDCTRL-K1-PICO')
     expect(options.some(o => /HOST-B-S6/.test(o.textContent ?? ''))).toBe(false)
-    expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('.bs-name')!.textContent)).toEqual(['BSP-K3-CM1'])
+    expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('.bs-name')!.textContent)).toEqual(['BOARDCTRL-K3-CM1'])
     expect(document.querySelector('.bswitch input')).toBeNull()
     expect(document.activeElement).toBe(list())
     const at = () => list()!.querySelector('[data-active]')!.querySelector('.bs-name')!.textContent
-    expect(at()).toBe('BSP-K3-CM1')
+    expect(at()).toBe('BOARDCTRL-K3-CM1')
     // Esc closes it and gives the focus back; so does a press outside.
     fireEvent.keyDown(list()!, { key: 'Escape' })
     await waitFor(() => expect(list()).toBeNull(), wait)
@@ -482,14 +482,14 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(list()).toBeTruthy(), wait)
     fireEvent.keyDown(list()!, { key: 'ArrowDown' })
     const next = at()!
-    expect(next).not.toBe('BSP-K3-CM1')
+    expect(next).not.toBe('BOARDCTRL-K3-CM1')
     fireEvent.keyDown(list()!, { key: 'Enter' })
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe(next), wait)
     expect(document.querySelector('.ctb .tab.on')?.textContent).toBe('日志')
 
     // More than eight boards: a filter box, which has the keys; a click picks.
-    const extra = ['bsp-k1-extra-a', 'bsp-k1-extra-b'].map(n => ({ ...structuredClone(state.boards.find(b => b.name === 'bsp-k1-musecard')!), name: n }))
+    const extra = ['boardctrl-k1-extra-a', 'boardctrl-k1-extra-b'].map(n => ({ ...structuredClone(state.boards.find(b => b.name === 'boardctrl-k1-musecard')!), name: n }))
     state.boards.push(...extra)
     const source = await stateStream()
     source.emit('changed', { board: null })
@@ -504,21 +504,21 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(within(list()!).getAllByRole('option')).toHaveLength(1), wait)
     fireEvent.click(within(list()!).getByRole('option'))
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-CM1'), wait)
-    expect(location.hash).toBe('#/board/bsp-k3-cm1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-CM1'), wait)
+    expect(location.hash).toBe('#/board/boardctrl-k3-cm1')
     expect(list()).toBeNull()
-    await waitFor(() => expect(calls.filter(c => c.path.startsWith('api/logs?')).at(-1)!.path).toMatch(/board=bsp-k3-cm1/), wait)
+    await waitFor(() => expect(calls.filter(c => c.path.startsWith('api/logs?')).at(-1)!.path).toMatch(/board=boardctrl-k3-cm1/), wait)
     state.boards.splice(state.boards.length - extra.length, extra.length)
     source.emit('changed', { board: null })
     go('#/')
   })
 
   it('says how the last run ended when it needs a person, and nothing after a success', async () => {
-    const pico = state.boards.find(b => b.name === 'bsp-k1-pico')!
-    pico.run = { id: 'run-a1b2c3d4', boards: ['bsp-k1-pico'], kind: 'boot', label: '刷机中', by: 'user:alice', since: '2026-11-10T09:00:00.000Z', line: 'flash rootfs', status: 'interrupted' as const, message: 'boardd 在它运行时重启了，没能跟到它结束', endedAt: '2026-11-10T09:20:00.000Z' }
+    const pico = state.boards.find(b => b.name === 'boardctrl-k1-pico')!
+    pico.run = { id: 'run-a1b2c3d4', boards: ['boardctrl-k1-pico'], kind: 'boot', label: '刷机中', by: 'user:alice', since: '2026-11-10T09:00:00.000Z', line: 'flash rootfs', status: 'interrupted' as const, message: 'boardd 在它运行时重启了，没能跟到它结束', endedAt: '2026-11-10T09:20:00.000Z' }
     const source = await stateStream()
     source.emit('changed', { board: pico.name })
-    go('#/board/bsp-k1-pico')
+    go('#/board/boardctrl-k1-pico')
     await waitFor(() => expect(document.querySelector('.detail .last-run')?.textContent).toContain('刷机没跟到结束'), wait)
     expect(document.querySelector('.detail .last-run')?.textContent).toContain('boardd 在它运行时重启了')
     pico.run = { ...pico.run, status: 'succeeded', message: null }
@@ -529,9 +529,9 @@ describe('Modern frontend', () => {
   })
 
   it('keeps the board shortcuts out of the open switcher', async () => {
-    // bsp-k3-deb1 is yours, so R resets it; a letter typed in the open list does not.
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    // boardctrl-k3-deb1 is yours, so R resets it; a letter typed in the open list does not.
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     fireEvent.click(document.querySelector('.bswitch [role=button]')!)
     const list = () => document.querySelector('.bswitch [role=listbox]') as HTMLElement | null
     await waitFor(() => expect(list()).toBeTruthy(), wait)
@@ -545,7 +545,7 @@ describe('Modern frontend', () => {
   })
 
   it('makes the console fill the screen and back', async () => {
-    go('#/board/bsp-k3-cm1')
+    go('#/board/boardctrl-k3-cm1')
     await waitFor(() => expect(document.querySelector('.handle')).toBeTruthy(), wait)
     fireEvent.click(document.querySelector('.handle')!)
     await waitFor(() => expect(document.querySelector('.detail.full')).toBeTruthy(), wait)
@@ -579,7 +579,7 @@ describe('Modern frontend', () => {
     expect(consoleA!.value).toBe('ttyUSB7')
     fireEvent.click(await button('开始', dialog()))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body)
-      .toEqual({ id: 'bsp', confirmed: true, method: 'bind', host: 'host-a', slot: 'host-a/s7', values: { usb: '1-1.2', console: 'ttyUSB7', soc: 'k3' } }), wait)
+      .toEqual({ id: 'boardctrl', confirmed: true, method: 'bind', host: 'host-a', slot: 'host-a/s7', values: { usb: '1-1.2', console: 'ttyUSB7', soc: 'k3' } }), wait)
 
     fireEvent.click(await button(/发现这块板/, panel('host-b')))
     await waitFor(() => expect(dialog()).toBeTruthy(), wait)
@@ -594,11 +594,11 @@ describe('Modern frontend', () => {
     fireEvent.change(consoleB!, { target: { value: 'ttyUSB9' } })
     fireEvent.click(await button('开始', dialog()))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body)
-      .toEqual({ id: 'bsp', confirmed: true, method: 'bind', host: 'host-b', slot: 'host-b/s6', values: { usb: '1-1.4', console: 'ttyUSB9', soc: 'k3' } }), wait)
+      .toEqual({ id: 'boardctrl', confirmed: true, method: 'bind', host: 'host-b', slot: 'host-b/s6', values: { usb: '1-1.4', console: 'ttyUSB9', soc: 'k3' } }), wait)
   })
 
   it('offers the same automatic or manual choice from an empty board page', async () => {
-    go('#/board/bsp-host-b-s6')
+    go('#/board/boardctrl-host-b-s6')
     await waitFor(() => expect(document.querySelector('.detail')).toBeTruthy(), wait)
     fireEvent.click(await button('发现这块板', document.querySelector('.detail') as HTMLElement))
     const dialog = await screen.findByRole('dialog', {}, wait)
@@ -610,7 +610,7 @@ describe('Modern frontend', () => {
   })
 
   it('starts automatic discovery for one slot after choosing 自动刷机 on its board page', async () => {
-    go('#/board/bsp-host-b-s6')
+    go('#/board/boardctrl-host-b-s6')
     await waitFor(() => expect(document.querySelector('.detail')).toBeTruthy(), wait)
     fireEvent.click(await button('发现这块板', document.querySelector('.detail') as HTMLElement))
     const dialog = await screen.findByRole('dialog', {}, wait)
@@ -619,11 +619,11 @@ describe('Modern frontend', () => {
     fireEvent.change(within(dialog).getByPlaceholderText(/例如 12,13/), { target: { value: '12,13' } })
     fireEvent.click(await button('开始', dialog))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body)
-      .toEqual({ id: 'bsp', confirmed: true, method: 'probe', host: 'host-b', slot: 'host-b/s6', values: { prefer: '12,13' } }), wait)
+      .toEqual({ id: 'boardctrl', confirmed: true, method: 'probe', host: 'host-b', slot: 'host-b/s6', values: { prefer: '12,13' } }), wait)
   })
 
   it('renders a discovery method it has never seen, with the fields the backend named', async () => {
-    go('#/board/bsp-host-b-s6')
+    go('#/board/boardctrl-host-b-s6')
     await waitFor(() => expect(document.querySelector('.detail')).toBeTruthy(), wait)
     fireEvent.click(await button('发现这块板', document.querySelector('.detail') as HTMLElement))
     const dialog = await screen.findByRole('dialog', {}, wait)
@@ -633,7 +633,7 @@ describe('Modern frontend', () => {
     fireEvent.change(within(dialog).getByPlaceholderText(/例如 A-12/), { target: { value: 'A-12' } })
     fireEvent.click(await button('开始', dialog))
     await waitFor(() => expect(calls.filter(c => c.path === 'api/labs/discover').at(-1)?.body)
-      .toEqual({ id: 'bsp', confirmed: true, method: 'lookup', host: 'host-b', slot: 'host-b/s6', values: { code: 'A-12' } }), wait)
+      .toEqual({ id: 'boardctrl', confirmed: true, method: 'lookup', host: 'host-b', slot: 'host-b/s6', values: { code: 'A-12' } }), wait)
   })
 
   it('rediscovers a host while its boards are held, keeping them', async () => {
@@ -644,10 +644,10 @@ describe('Modern frontend', () => {
     expect(rediscover.disabled).toBe(false)
     fireEvent.click(rediscover)
     const dialog = await screen.findByRole('dialog', {}, wait)
-    expect(dialog.textContent).toContain('保留在用的板子：BSP-K3-DEB1、BSP-K3-CM1')
-    expect(dialog.textContent).toContain('忘掉串口不见的板子：BSP-K3-GONE')
+    expect(dialog.textContent).toContain('保留在用的板子：BOARDCTRL-K3-DEB1、BOARDCTRL-K3-CM1')
+    expect(dialog.textContent).toContain('忘掉串口不见的板子：BOARDCTRL-K3-GONE')
     fireEvent.click(await button('重新发现', dialog))
-    await waitFor(() => expect(calls.find(c => c.path === 'api/labs/rebuild')?.body).toEqual({ id: 'bsp', host: 'host-b', confirmed: true, keepInUse: true }), wait)
+    await waitFor(() => expect(calls.find(c => c.path === 'api/labs/rebuild')?.body).toEqual({ id: 'boardctrl', host: 'host-b', confirmed: true, keepInUse: true }), wait)
   })
 
   it('walks a boardlab with no boards through its first steps', async () => {
@@ -659,10 +659,10 @@ describe('Modern frontend', () => {
     const steps = [...container.querySelectorAll('.steps li')].map(li => li.querySelector('b')?.textContent)
     // A settings step is the module's own view: its title, its place (order) and its one line, so this page names no
     // module and learns nothing of one.
-    expect(steps[0]).toBe('bsp 板卡主机')
+    expect(steps[0]).toBe('boardctrl 板卡主机')
     // Only modules that offered a settings section appear (this state has no client machines to set up).
-    expect(steps).toEqual(['bsp 板卡主机', 'SDK 与站点', '发现板子'])
-    expect(container.querySelector('li.next a')?.getAttribute('href')).toBe('#/settings/bsp-hosts')
+    expect(steps).toEqual(['boardctrl 板卡主机', 'SDK 与站点', '发现板子'])
+    expect(container.querySelector('li.next a')?.getAttribute('href')).toBe('#/settings/boardctrl-hosts')
     unmount()
   })
 
@@ -701,22 +701,22 @@ describe('Modern frontend', () => {
   })
 
   it('shows what each board host keeps in its cache, read when opened', async () => {
-    go('#/settings/bsp-hosts')
+    go('#/settings/boardctrl-hosts')
     const opener = () => [...document.querySelectorAll('button')].find(item => /的主机缓存/.test(item.textContent ?? ''))
     await waitFor(() => expect(opener()).toBeTruthy(), wait)
-    expect(calls.some(c => /^api\/bsp\/hosts\/.*\/cache/.test(c.path))).toBe(false)
+    expect(calls.some(c => /^api\/boardctrl\/hosts\/.*\/cache/.test(c.path))).toBe(false)
     fireEvent.click(opener()!)
     const box = () => opener()!.parentElement!
     await waitFor(() => expect(box().textContent).toContain('host-a：46.0 GiB / 50.0 GiB'), wait)
     expect(box().textContent).toContain('12 项（1 项正在用） · 不用的留 7 天 · 磁盘还剩 80.0 GiB')
-    expect(box().textContent).toContain('host-b：主机上的 bsp 太旧')
+    expect(box().textContent).toContain('host-b：主机上的 boardctrl 太旧')
     expect(box().querySelector('progress, [role=progressbar], .mv-progress')).toBeTruthy()
     go('#/')
   })
 
   it('opens a settings section by its address', async () => {
-    go('#/settings/bsp-hosts')
-    await waitFor(() => expect(document.querySelector('.settings-nav button.on')?.textContent).toBe('bsp 板卡主机'), wait)
+    go('#/settings/boardctrl-hosts')
+    await waitFor(() => expect(document.querySelector('.settings-nav button.on')?.textContent).toBe('boardctrl 板卡主机'), wait)
     go('#/')
   })
 
@@ -740,10 +740,10 @@ describe('Modern frontend', () => {
   })
 
   it('lists the site by build server, each with its SDKs, and keeps the rest under 高级', async () => {
-    go('#/settings/bsp-site')
+    go('#/settings/boardctrl-site')
     const panel = await waitFor(() => { const found = [...document.querySelectorAll('section.panel')].find(el => el.querySelector('h2')?.textContent?.startsWith('SDK 与站点')); expect(found).toBeTruthy(); return found as HTMLElement }, wait)
     const nav = [...document.querySelectorAll('.settings-nav button')].map(el => el.textContent)
-    expect(nav.indexOf('bsp 板卡主机')).toBeLessThan(nav.indexOf('SDK 与站点'))
+    expect(nav.indexOf('boardctrl 板卡主机')).toBeLessThan(nav.indexOf('SDK 与站点'))
     await waitFor(() => expect(panel.textContent).toContain('这台 boardd 管理（还没连 git 仓库）'), wait)
     expect(panel.textContent).toContain('Add SDK vendor-a')
     const server = [...panel.querySelectorAll('.mv-group')].find(el => el.firstElementChild?.textContent?.startsWith('build-a')) as HTMLElement
@@ -782,8 +782,8 @@ describe('Modern frontend', () => {
     }) as typeof fetch
     try {
       await api.models(true)
-      go('#/board/bsp-k3-deb1')
-      await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+      go('#/board/boardctrl-k3-deb1')
+      await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
       const field = await waitFor(() => {
         const input = document.querySelector('.model-edit input') as HTMLInputElement | null
         expect(input).toBeTruthy()
@@ -796,28 +796,28 @@ describe('Modern frontend', () => {
       const editor = field.closest('.model-edit') as HTMLElement
       fireEvent.change(field, { target: { value: 'k3_com260' } })
       fireEvent.click(await button('保存', editor))
-      await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board')?.body).toEqual({ name: 'bsp-k3-deb1', product: 'k3_com260' }), wait)
+      await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board')?.body).toEqual({ name: 'boardctrl-k3-deb1', product: 'k3_com260' }), wait)
 
       fireEvent.change(field, { target: { value: '' } })
       fireEvent.click(await button('保存', editor))
-      await waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === 'api/board').at(-1)?.body).toEqual({ name: 'bsp-k3-deb1', product: null }), wait)
+      await waitFor(() => expect(calls.filter(c => c.method === 'POST' && c.path === 'api/board').at(-1)?.body).toEqual({ name: 'boardctrl-k3-deb1', product: null }), wait)
     } finally { globalThis.fetch = base; go('#/') }
   })
 
   it('renames a board from the menu, then reloads the page', async () => {
-    go('#/board/bsp-k3-deb1')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K3-DEB1'), wait)
+    go('#/board/boardctrl-k3-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K3-DEB1'), wait)
     const before = calls.filter(c => c.method === 'GET' && c.path === 'api/state').length
     fireEvent.click(await screen.findByRole('button', { name: '更多' }, wait))
     fireEvent.click(await button(/给板子改名/))
     const dialog = await screen.findByRole('dialog', {}, wait)
     const input = dialog.querySelector('input') as HTMLInputElement
-    expect(input.value).toBe('bsp-k3-deb1')
+    expect(input.value).toBe('boardctrl-k3-deb1')
     // What a person types is the name; no lab prefix is added for them.
-    expect(dialog.textContent).toContain('不会自动加 bsp- 前缀')
+    expect(dialog.textContent).toContain('不会自动加 boardctrl- 前缀')
     fireEvent.change(input, { target: { value: 'k3-deb1r' } })
     fireEvent.click(await button('改名', dialog))
-    await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board/rename')?.body).toEqual({ board: 'bsp-k3-deb1', name: 'k3-deb1r' }), wait)
+    await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board/rename')?.body).toEqual({ board: 'boardctrl-k3-deb1', name: 'k3-deb1r' }), wait)
     await waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === 'api/state').length).toBeGreaterThan(before), wait)
     await waitFor(() => expect(document.querySelector('.toast')?.textContent).toContain('改名好了'), wait)
     go('#/')
@@ -827,17 +827,17 @@ describe('Modern frontend', () => {
     const dialog = () => document.querySelector('[role=dialog]') as HTMLElement
     const reads = (board: string) => calls.filter(c => c.path.startsWith('api/boot/breaks') && c.path.includes(`board=${board}`)).length
     const open = async () => { fireEvent.click(await button(/^启动/, document.querySelector('.controls') as HTMLElement)); await waitFor(() => expect(dialog()).toBeTruthy(), wait) }
-    go('#/board/bsp-k1-musecard')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K1-MUSECARD'), wait)
+    go('#/board/boardctrl-k1-musecard')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K1-MUSECARD'), wait)
     // The page reads the selected SDK's break points before the dialog opens.
-    await waitFor(() => expect(reads('bsp-k1-musecard')).toBe(1), wait)
+    await waitFor(() => expect(reads('boardctrl-k1-musecard')).toBe(1), wait)
     await open()
     expect(await button(/停在\s*uboot/, dialog())).toBeTruthy()
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(document.querySelector('[role=dialog]')).toBeNull(), wait)
     await open()
     expect(await button(/停在\s*uboot/, dialog())).toBeTruthy()
-    expect(reads('bsp-k1-musecard')).toBe(1)
+    expect(reads('boardctrl-k1-musecard')).toBe(1)
     fireEvent.keyDown(window, { key: 'Escape' })
     go('#/')
   })
@@ -849,11 +849,11 @@ describe('Modern frontend', () => {
   })
 
   it('asks a debug-capable board\'s host for its debug path and shows what it offers', async () => {
-    go('#/board/bsp-k1-musecard')
-    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BSP-K1-MUSECARD'), wait)
+    go('#/board/boardctrl-k1-musecard')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K1-MUSECARD'), wait)
     // The path is asked for when the board page opens, and what arrived is on the page: the provider's own name,
     // what it offers, and a way to start the session — not only a request made.
-    await waitFor(() => expect(calls.some(c => c.path === 'api/debug' && (c.body as { board?: string, action?: string }).board === 'bsp-k1-musecard'
+    await waitFor(() => expect(calls.some(c => c.path === 'api/debug' && (c.body as { board?: string, action?: string }).board === 'boardctrl-k1-musecard'
       && (c.body as { action?: string }).action === 'path')).toBe(true), wait)
     await waitFor(() => expect(document.body.textContent).toContain('调试（SWD over GPIO）'), wait)
     expect(document.body.textContent).toContain('两颗 GPIO 位操作出来的链路。')
@@ -863,7 +863,7 @@ describe('Modern frontend', () => {
   })
 
   it('asks the host to start the session, then offers the provider\'s own actions and its trace', async () => {
-    go('#/board/bsp-k1-musecard')
+    go('#/board/boardctrl-k1-musecard')
     await waitFor(() => expect(document.body.textContent).toContain('调试（SWD over GPIO）'), wait)
     fireEvent.click(await button(/启动调试会话/))
     await waitFor(() => expect(calls.some(c => c.path === 'api/debug' && (c.body as { action?: string }).action === 'start')).toBe(true), wait)

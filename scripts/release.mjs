@@ -56,16 +56,15 @@ mkdirSync(stage, { recursive: true })
 // is in the worktree but is not part of the release, and must never travel in it.
 const dirs = ['skills', 'docs/help', 'firmware'].filter(path => existsSync(join(root, path)))
 if (existsSync(join(root, 'host-tools'))) dirs.push('host-tools')      // tools board hosts get beside bspd
-if (existsSync(join(root, 'ca'))) dirs.push('ca')                     // certificates this distribution carries
 execFileSync('sh', ['-c', `tar -cf - dist | tar -xf - -C '${stage}'`], { cwd: root })
 const tracked = dirs.concat('LICENSE', 'README.md')
 execFileSync('sh', ['-c', `git ls-files -z -- ${tracked.join(' ')} | tar --null -cf - -T - | tar -xf - -C '${stage}'`], { cwd: root })
 // The bsp tree board hosts are set up from: the files git tracks there, with serial-mux's.
-const bsp = join(root, 'externals/bsp')
+const bsp = join(root, 'externals/boardctrl')
 if (existsSync(join(bsp, 'deploy/bspd-install.sh'))) {
-  mkdirSync(join(stage, 'externals/bsp'), { recursive: true })
-  execFileSync('sh', ['-c', `git ls-files -z --recurse-submodules | tar --null -cf - -T - | tar -xf - -C '${join(stage, 'externals/bsp')}'`], { cwd: bsp })
-  writeFileSync(join(stage, 'externals/bsp/REVISION'), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
+  mkdirSync(join(stage, 'externals/boardctrl'), { recursive: true })
+  execFileSync('sh', ['-c', `git ls-files -z --recurse-submodules | tar --null -cf - -T - | tar -xf - -C '${join(stage, 'externals/boardctrl')}'`], { cwd: bsp })
+  writeFileSync(join(stage, 'externals/boardctrl/REVISION'), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
 }
 writeFileSync(join(stage, 'VERSION'), `${version}\n`)
 // Modules this distribution has on top of the shared ones (the internal one's CA module), for the installer to load.

@@ -9,6 +9,7 @@ import { api, identity, isCancelled, type PageState } from '../../src/ui/api.ts'
 import { restoreWarning } from '../../src/ui/notify.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
+import { marketUis } from '../../src/ui/market-ui.ts'
 import { registerModuleUis, ViewPanel, viewsFor } from './render.tsx'
 import { Dialog, TABS, Tabs, who, type Prompt, type Run, type Tab } from './kit.tsx'
 import { alertPerson, AttentionPanel } from './views/attention.tsx'
@@ -239,5 +240,7 @@ function PromptDialog({ prompt, onClose, onRun, onIdentity }: { prompt: Exclude<
 /** Start the page with the distribution's module UIs. */
 export function mountPage(uis: ModuleUi[]) {
   registerModuleUis(uis)
+  // Modules from a market bring their page parts at load; the page draws them with these once they are in.
+  void marketUis().then(parts => { if (parts.length) registerModuleUis([...uis, ...parts.map(part => part.ui)]) })
   createRoot(document.getElementById('root')!).render(<App />)
 }

@@ -18,8 +18,8 @@ import { local, type Hardware, type LocalApi, type Mux } from '../src/modules/lo
 import type { ScanTiming } from '../src/modules/local/scan.ts'
 import { homeAssistant as haModule, type HomeAssistantApi } from '../src/modules/home-assistant/index.ts'
 import { scriptSlots, type ScriptSlotsApi } from '../src/modules/script-slots/index.ts'
-import { bsp } from '../src/modules/bsp/index.ts'
-import type { SdkRunner } from '../src/modules/bsp/sdk.ts'
+import { boardctrl } from '../src/modules/boardctrl/index.ts'
+import type { SdkRunner } from '../src/modules/boardctrl/sdk.ts'
 
 /** What a test lab is made of: the bench's fakes, and the SDK runner a test adds. */
 export interface TestOptions {
@@ -45,7 +45,7 @@ export function makeLab(options: TestOptions): BoardLab {
       local({ mux: options.mux, hardware: options.hardware, scanTiming: options.scanTiming }),
       haModule({ client: options.ha }),
       scriptSlots({ runner: options.hardware.scripts }),
-      bsp({ sdk: options.sdk, instances: [] }),
+      boardctrl({ sdk: options.sdk, instances: [] }),
     ],
   })
 }

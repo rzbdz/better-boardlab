@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(__dirname, '..')
-const BSP = join(ROOT, 'externals/bsp')
+const BSP = join(ROOT, 'externals/boardctrl')
 const CLI = join(ROOT, 'dist/cli.js')
 /** The bsp test venv: it has the server extras, the machine's own python may not. */
 const PYTHON = process.env.BOARDLAB_E2E_PYTHON ?? '/root/workspace/bspvenv/bin/python'
@@ -111,7 +111,7 @@ async function startBoardd(dir: string, hosts: Array<{ id: string, url: string, 
   const port = await freePort()
   const stateDir = join(dir, 'boardd')
   mkdirSync(stateDir, { recursive: true })
-  writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { bsp: {} } }, null, 2))
+  writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { boardctrl: {} } }, null, 2))
   const child = spawn(process.execPath, ['--no-warnings', CLI, 'serve', '--port', String(port), '--state-dir', stateDir, '--no-ui'], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -133,7 +133,7 @@ async function startBoardd(dir: string, hosts: Array<{ id: string, url: string, 
     return JSON.parse(text) as unknown
   }
   for (const host of hosts) {
-    await call('/api/labs/add', { id: host.id, kind: 'bsp' })
+    await call('/api/labs/add', { id: host.id, kind: 'boardctrl' })
     // `bspd+http://…`: this boardd reaches that host directly, the way it reaches a host it set up itself.
     await call('/api/labs', { id: host.id, enabled: true, url: `bspd+${host.url}`, password: host.token })
     const tested = await call('/api/labs/test', { id: host.id }) as { verifyOk?: boolean, verifyMessage?: string }
@@ -187,8 +187,8 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
    * token did not reach bsp, whose address was loopback, or whose name a site entry claimed, answers "missing or
    * wrong token" for — or silently talks to — the wrong host, and this is where that shows.
    */
-  it('reads each host itself, with that host\'s token, through the raw bsp passthrough', () => {
-    const gpio = cli(['bsp', 'gpio', 'list'])
+  it('reads each host itself, with that host\'s token, through the raw boardctrl passthrough', () => {
+    const gpio = cli(['boardctrl', 'gpio', 'list'])
     expect(gpio.code, gpio.err).toBe(0)
     // One section per host, both of them: a single section means one lab answered for the other.
     const sections = [...gpio.out.matchAll(/^== (\S+) ==$/gm)].map(found => found[1])
@@ -199,7 +199,7 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
   })
 
   it('names one lab the way the page names it, and reaches that one only', () => {
-    const one = cli(['bsp', '-r', 'host-a', 'gpio', 'list'])
+    const one = cli(['boardctrl', '-r', 'host-a', 'gpio', 'list'])
     expect(one.code, one.err).toBe(0)
     // One host: bsp prints no section header, and what comes is that host's header and nothing else.
     expect(one.out).not.toMatch(/^== /m)

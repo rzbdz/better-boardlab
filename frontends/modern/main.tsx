@@ -11,6 +11,7 @@ import type { ModuleUi } from '../../src/ui/contract.ts'
 import { changes, onPrefs, prefs, restoreWarning, show, type Note } from '../../src/ui/notify.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
 import { hhmm, holder, Icon, model, setBoards, setRefresher, UIProvider, upper, useUI, where } from './kit.tsx'
+import { marketUis } from '../../src/ui/market-ui.ts'
 import { registerModuleUis, ViewPage, viewsFor } from './render.tsx'
 import { BoardPage } from './views/board.tsx'
 import { HomePage } from './views/home.tsx'
@@ -214,5 +215,8 @@ function Shell() {
 /** Start the page with the distribution's module UIs. */
 export function mountPage(uis: ModuleUi[]) {
   registerModuleUis(uis)
+  // Modules from a market bring their page parts at load; the page draws them with these once they are in. A part that
+  // arrives later needs a re-render, so the page is drawn again (its state is fetched again anyway).
+  void marketUis().then(parts => { if (parts.length) registerModuleUis([...uis, ...parts.map(part => part.ui)]) })
   createRoot(document.getElementById('root')!).render(<UIProvider><Shell /></UIProvider>)
 }

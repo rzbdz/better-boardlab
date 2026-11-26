@@ -19,7 +19,7 @@ const AWAY_MS = 30 * 60_000
 /** An answer about the job itself, not about reaching its host: the host does not know the job, or refused to say. */
 function verdict(error: unknown): boolean {
   if (error instanceof CancelledError) return true
-  const code = (error as { bsp?: { code?: string } } | null)?.bsp?.code
+  const code = (error as { boardctrl?: { code?: string } } | null)?.boardctrl?.code
   return code === 'not_found' || code === 'invalid_request' || code === 'forbidden'
 }
 
@@ -55,7 +55,7 @@ export async function followJob(handle: string, progress: (line: string) => void
       // A host out of reach for a while (a network blip, its daemon restarting) is asked again; the job runs on there.
       if (verdict(error) || options.signal?.aborted) throw error
       away ||= Date.now()
-      if (Date.now() - away > awayMs) throw new Error(`主机上的任务 ${parsed.job} 跟不上了：${Math.round(awayMs / 60_000)} 分钟连不上它的主机（${(error as Error).message}）；任务可能还在主机上跑，boardlab bsp job get ${parsed.job} 看它`)
+      if (Date.now() - away > awayMs) throw new Error(`主机上的任务 ${parsed.job} 跟不上了：${Math.round(awayMs / 60_000)} 分钟连不上它的主机（${(error as Error).message}）；任务可能还在主机上跑，boardlab boardctrl job get ${parsed.job} 看它`)
       await new Promise(resolve => setTimeout(resolve, retryMs[Math.min(misses++, retryMs.length - 1)]))
       continue
     }

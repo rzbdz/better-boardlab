@@ -5,7 +5,7 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 # 开发板（boardlab）
 
-所有开发板都由中心的 boardd 统一管理（这台机器上的 `boardlab` 已经连到它，`boardlab remote show` 可以看）。人、Claude 和 DSH 遵守同一套锁规则；不要绕过它直接用 `smtty`、`serial-mux`、`fastboot`、Home Assistant 或 `bsp`：板子在哪台主机、怎么连，只有 boardd 知道，你这边不需要也不应该配置。**除非人类明确要求直接运行 `bsp`，agent 禁止直接调用任何 `bsp` 命令（`boardlab bsp` 也不作为绕过手段）；缺少能力时用 `boardlab feedback` 提交，或告诉人类。SDK 自己的 skill 也不构成这个例外。**
+所有开发板都由中心的 boardd 统一管理（这台机器上的 `boardlab` 已经连到它，`boardlab remote show` 可以看）。人、Claude 和 DSH 遵守同一套锁规则；不要绕过它直接用 `smtty`、`serial-mux`、`fastboot`、Home Assistant 或 `boardctrl`：板子在哪台主机、怎么连，只有 boardd 知道，你这边不需要也不应该配置。**除非人类明确要求直接运行 `boardctrl`，agent 禁止直接调用任何 `boardctrl` 命令（`boardlab boardctrl` 也不作为绕过手段）；缺少能力时用 `boardlab feedback` 提交，或告诉人类。SDK 自己的 skill 也不构成这个例外。**
 
 ## 直接做任务，不要先摸底
 
@@ -52,14 +52,14 @@ boardlab unlock com260                       # 锁没有时间限制，用完一
 - 自定义槽位上没有 fastboot 脚本的板子只能复位，`boardlab fastboot` 会报「只能复位」；不要为此去改槽位脚本，脚本由用户维护。
 - 认板子只看 `boardlab list` 和扫描结果，不要猜 `/dev/ttyUSBn`。
 - `boardlab list` 里标着 `[实验室 <名字> <设备>]` 的板子在远程实验室，命令完全一样。正常 SDK 启动/刷机由板端主机自己从构建服务器取产物；本机文件兜底才经 boardd 传输。实验室的板子别人也可能在实验室后台直接用，串口没有输入闸门；看到不是你发的输入或复位，停下来告诉用户。
-- 实验室 `bsp` 的板子（`bsp-<dut>`，例如 `bsp-board-1`）在 bsp 管理的板卡主机上。拿锁时 boardd 同时替你持有 bsp 的租约，所以只用 `boardlab` 命令操作它们，不要再用 `bsp dut acquire/reset/boot` 去动同一块板。要在构建服务器上租 SDK 源码树、编译、改代码，用 `boardlab sdk …`（见下一节）。
+- 实验室 `boardctrl` 的板子（`boardctrl-<dut>`，例如 `boardctrl-board-1`）在 boardctrl 管理的板卡主机上。拿锁时 boardd 同时替你持有 boardctrl 的租约，所以只用 `boardlab` 命令操作它们，不要再用 `boardctrl dut acquire/reset/boot` 去动同一块板。要在构建服务器上租 SDK 源码树、编译、改代码，用 `boardlab sdk …`（见下一节）。
 - 卡片或 `boardlab show --json` 里 `lab.attention` 不为空时，板子在等人按 RESET 之类的操作（由人复位的板子）：复位、boot 放到后台跑，把提示原样告诉用户，用户说做完了再 `boardlab confirm <board> --request <lab.attentionRequest>`（带上请求 id 不会因为实验室已经自己看到结果而报错）。不要自己猜着确认。
-- `lab.heldBy` 不为空表示有人直接在 bsp 里租着这块板，拿锁会失败；要等就 `boardlab queue`。
-- 后端能单独控制继电器的板子（bsp 主机；`boardlab relay <board>` 会说这块板能不能），持锁时可以直接控制它的线：`boardlab relay <board>` 列出继电器和按钮，`boardlab relay <board> power pulse --ms 3000` 断电三秒再上电，`boardlab relay <board> boot press` 按住 BOOT（用完 `release`）。复位和进下载模式仍然用 `reset`、`fastboot`；只在用户要求、或这两条做不到时才直接动线，并说明动了哪根。
+- `lab.heldBy` 不为空表示有人直接在 boardctrl 里租着这块板，拿锁会失败；要等就 `boardlab queue`。
+- 后端能单独控制继电器的板子（boardctrl 主机；`boardlab relay <board>` 会说这块板能不能），持锁时可以直接控制它的线：`boardlab relay <board>` 列出继电器和按钮，`boardlab relay <board> power pulse --ms 3000` 断电三秒再上电，`boardlab relay <board> boot press` 按住 BOOT（用完 `release`）。复位和进下载模式仍然用 `reset`、`fastboot`；只在用户要求、或这两条做不到时才直接动线，并说明动了哪根。
 - 实验室的板子都在槽位里（`boardlab list` 里的「槽位 host1/s3」）。所有命令都可以用槽位名代替板名：`boardlab lock host1/s3 --for …`、`boardlab console host1/s3`。在同一个槽位上换着板子反复测试时，用槽位名，不用管板子叫什么。
-- 「空槽位」是还没登记板子的串口：可以拿锁、`boardlab console` 看，用户要求时 `boardlab lab methods bsp --slot <主机>/s4` 看这个槽位的发现方式，再 `boardlab lab discover bsp --method <方式> --slot <主机>/s4 --yes` 在上面找板子（会复位没登记的线），找到就登记。
+- 「空槽位」是还没登记板子的串口：可以拿锁、`boardlab console` 看，用户要求时 `boardlab lab methods boardctrl --slot <主机>/s4` 看这个槽位的发现方式，再 `boardlab lab discover boardctrl --method <方式> --slot <主机>/s4 --yes` 在上面找板子（会复位没登记的线），找到就登记。
 - 用户说槽位里换了板子：拿锁后 `boardlab refresh <槽位>`（`--name <新名字>` 或 `--rename` 按读到的型号改名），不要 remove 再重新发现；锁跟着槽位走。
-- 板子识别不出来（`soc` 为空、没有下载口、`lab.sdks` 为空，`boardlab show <board> --json` 能看到）：拿锁后用 `boardlab set <board> --soc <soc> --usb usb:<x-y> --fdl button` 补齐登记（也可以改 `--model`、`--sdks`、`--reset-pin`、`--fdl-pin`）。boardd 用你锁上的那份 bsp 租约去改，直接 `boardlab bsp dut set` 是拿不到租约的，不要绕。
+- 板子识别不出来（`soc` 为空、没有下载口、`lab.sdks` 为空，`boardlab show <board> --json` 能看到）：拿锁后用 `boardlab set <board> --soc <soc> --usb usb:<x-y> --fdl button` 补齐登记（也可以改 `--model`、`--sdks`、`--reset-pin`、`--fdl-pin`）。boardd 用你锁上的那份 boardctrl 租约去改，直接 `boardlab boardctrl dut set` 是拿不到租约的，不要绕。
 - 拿锁时板子正被人用：你会等最多 60 秒，页面会问那个人「让出 / 继续用」。被拒时说明没有拿到，别抢；等他放锁或改用另一块板子。
 - `boardlab reset` 是让板子启动它自己的系统。下载模式短接的板子：`boardlab list` 写着「复位：经 … 从介质启动」时，复位会从板载介质启动；写着「停在下载模式」时，复位后它停在下载模式，要用 `boardlab boot` 从内存启动。
 - 多芯片板用 `<board>.<die>` 指定芯片，例如 `boardlab send evb.die1 ...`。
@@ -116,11 +116,11 @@ boardlab ask "把 K3 板的 USB 线插到 2-1.1" --kind 插拔 \
 
 ## SDK：编译、改代码、启动
 
-SDK 源码树在构建服务器上，也通过 boardlab 用（boardd 那边的 bsp 执行，用法和 `bsp sdk` 一样，`boardlab sdk help` 列出全部）：
+SDK 源码树在构建服务器上，也通过 boardlab 用（boardd 那边的 boardctrl 执行，用法和 `boardctrl sdk` 一样，`boardlab sdk help` 列出全部）：
 
 ```sh
 boardlab sdk list                                   # 有哪些 SDK、在哪台构建服务器
-boardlab sdk acquire sdk-a --task fix-usb        # 租源码树：切到任务分支 bsp/fix-usb；用完一定 release
+boardlab sdk acquire sdk-a --task fix-usb        # 租源码树：切到任务分支 boardctrl/fix-usb；用完一定 release
 boardlab sdk exec sdk-a -- git -C linux-6.18 log --oneline -3
 boardlab sdk get sdk-a linux-6.18/drivers/usb/x.c -o x.c     # 取到本机改
 boardlab sdk put sdk-a linux-6.18/drivers/usb/x.c x.c        # 改完写回（要持有租约）
@@ -138,7 +138,7 @@ boardlab sdk exec sdk-a -- git -C linux-6.18 log --oneline @{u}..HEAD   # 本地
 ```
 
 - 已是最新：直接继续。
-- 只是落后、没有本地独有提交：告诉用户落后多少，**问**要不要基于最新远端开发；同意后在刚切出的 `bsp/<task>` 上 `git merge --ff-only @{u}`（在你提交任何东西之前）。
+- 只是落后、没有本地独有提交：告诉用户落后多少，**问**要不要基于最新远端开发；同意后在刚切出的 `boardctrl/<task>` 上 `git merge --ff-only @{u}`（在你提交任何东西之前）。
 - 有本地独有提交、已分叉或没设上游：不要自己 rebase / reset，说清看到了什么，问用户用哪个基线。
 - fetch 失败（构建服务器没网或没权限）：说出来，问用户是否就用本地状态继续。
 - 永远不动所有者自己的分支，只让任务分支跟上远端。
@@ -146,11 +146,11 @@ boardlab sdk exec sdk-a -- git -C linux-6.18 log --oneline @{u}..HEAD   # 本地
 编好以后在板子上验证，不用把产物拷来拷去：
 
 ```sh
-boardlab lock bsp-board-1 --for "验证 fix-usb"
-boardlab boot bsp-board-1 --sdk sdk-a        # 内存启动：板子所在主机自己去构建服务器取产物
-boardlab flash bsp-board-1 --sdk sdk-a       # 要烧录到板子上时才用；先说明原因
-boardlab log bsp-board-1 --lines 300            # 看串口确认真的起来了
-boardlab unlock bsp-board-1
+boardlab lock boardctrl-board-1 --for "验证 fix-usb"
+boardlab boot boardctrl-board-1 --sdk sdk-a        # 内存启动：板子所在主机自己去构建服务器取产物
+boardlab flash boardctrl-board-1 --sdk sdk-a       # 要烧录到板子上时才用；先说明原因
+boardlab log boardctrl-board-1 --lines 300            # 看串口确认真的起来了
+boardlab unlock boardctrl-board-1
 ```
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
@@ -196,7 +196,7 @@ boardlab guidance --dut <board>     # 一次问全：问板子所在主机它的
 
 ## 给 SDK 加启动或刷机方法
 
-SDK 的定义（构建服务器、路径、组件、产物、load 内存启动和 download 刷机两套步骤）在中心的 SDK 目录里，改了会马上推到每台板卡主机。**不要去改任何机器上的 yaml 文件**（板卡主机的 site、本机的 ~/.config/bsp）：那些副本不会生效，下次部署还会被覆盖。
+SDK 的定义（构建服务器、路径、组件、产物、load 内存启动和 download 刷机两套步骤）在中心的 SDK 目录里，改了会马上推到每台板卡主机。**不要去改任何机器上的 yaml 文件**（板卡主机的 site、本机的 ~/.config/boardctrl）：那些副本不会生效，下次部署还会被覆盖。
 
 ```sh
 boardlab registry sdk get sdk-a -o sdk-a.yaml       # 第一行记着版本号，别删
@@ -216,10 +216,10 @@ boardlab registry hosts                             # 每台主机拿到的目�
 
 ## 新接上的板子
 
-- 网页上每台主机/空槽位有「发现这块板」：选一种实验室**上报的方式**（bsp 现在上报「自动刷机」和「人工刷机」，别的后端可能上报别的），再按它给的字段填。CLI 用 `boardlab lab methods <实验室> [--host <主机>] [--slot <主机>/s4]` 看有哪些方式、字段和可选项，用 `boardlab lab discover <实验室> --method <方式> [--set 字段=值 …] [--host] [--slot] [--yes]` 运行。
-- `boardlab slots bsp` 列出 bsp 主机上还没有板子用的串口和下载口。没有按钮/复位线、已经由人按住 BOOT 进了下载模式的板子，用 `boardlab lab discover bsp --method bind --host <主机> --set usb=<下载口> --set console=<串口> --set soc=<SoC> [--set sdk=<SDK>] [--set board=<型号>] [--set name=<板名>] --yes` 登记；先 `boardlab lab methods bsp --host <主机>` 看当前字段和可选项。多个下载口/串口时不会替你猜，按 `labPorts`（`boardlab slots`）或 `lab methods` 的选项指定。
-- 登记后板子的 SDK 由它的 SoC 和 bsp 的 SDK 目录决定；要改 SoC/SDK 用 `boardlab set <板子> --soc <SoC> [--sdks a,b]`，或网页板子页的「改登记」。`boardlab set --model <型号>` 记型号。
-- 自动发现（bsp 的「自动刷机」）会让实验室逐个拉没人用的复位线，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。知道这批板子接在哪些排针上时给它 `--set prefer=12,13` 先试那些 GPIO（`12,13`、`GPIO12`、`gpio_13`、`P15` 等写法由后端认）。
+- 网页上每台主机/空槽位有「发现这块板」：选一种实验室**上报的方式**（boardctrl 现在上报「自动刷机」和「人工刷机」，别的后端可能上报别的），再按它给的字段填。CLI 用 `boardlab lab methods <实验室> [--host <主机>] [--slot <主机>/s4]` 看有哪些方式、字段和可选项，用 `boardlab lab discover <实验室> --method <方式> [--set 字段=值 …] [--host] [--slot] [--yes]` 运行。
+- `boardlab slots boardctrl` 列出 boardctrl 主机上还没有板子用的串口和下载口。没有按钮/复位线、已经由人按住 BOOT 进了下载模式的板子，用 `boardlab lab discover boardctrl --method bind --host <主机> --set usb=<下载口> --set console=<串口> --set soc=<SoC> [--set sdk=<SDK>] [--set board=<型号>] [--set name=<板名>] --yes` 登记；先 `boardlab lab methods boardctrl --host <主机>` 看当前字段和可选项。多个下载口/串口时不会替你猜，按 `labPorts`（`boardlab slots`）或 `lab methods` 的选项指定。
+- 登记后板子的 SDK 由它的 SoC 和 boardctrl 的 SDK 目录决定；要改 SoC/SDK 用 `boardlab set <板子> --soc <SoC> [--sdks a,b]`，或网页板子页的「改登记」。`boardlab set --model <型号>` 记型号。
+- 自动发现（boardctrl 的「自动刷机」）会让实验室逐个拉没人用的复位线，会复位板子，只在用户要求时运行；找到的是改动建议，`boardlab proposals apply <id> [--name <板名>]` 才登记。知道这批板子接在哪些排针上时给它 `--set prefer=12,13` 先试那些 GPIO（`12,13`、`GPIO12`、`gpio_13`、`P15` 等写法由后端认）。
 - 发现卡住或用户不想要了：`boardlab lab cancel <实验室>`，不要等（会停在当前这一步，已经登记的留着）。
 
 ## 全部接口
@@ -234,7 +234,7 @@ boardlab registry hosts                             # 每台主机拿到的目�
 
 - 命令报“成功”，结果没生效。例如改了目录，主机还在用旧的；说刷完了，板子没变。
 - 输出和事实对不上。例如 `--json` 说 ok，文字输出却说失败；状态显示的和串口看到的不一样。
-- 为了做完任务，你做了 skill 明确说不要做的事（直接改主机上的 yaml、直接调 `bsp`、ssh 到主机），或者绕了很多步。
+- 为了做完任务，你做了 skill 明确说不要做的事（直接改主机上的 yaml、直接调 `boardctrl`、ssh 到主机），或者绕了很多步。
 - 少了接口或字段，只能猜，或者只能从别的地方拼出来。
 - 文档、帮助和实际行为不一致。
 - 报错没说清原因，或者提示的办法不管用。

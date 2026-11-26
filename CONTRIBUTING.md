@@ -17,7 +17,7 @@ pnpm run build
 Run the CLI from this checkout with `node dist/cli.js`, or start boardd with `node dist/cli.js serve`.
 
 This repository combines [boardlab-core](https://github.com/rzbdz/boardlab-core) with distribution modules.
-`core/` and `externals/bsp` are git submodules:
+`core/` and `externals/boardctrl` are git submodules:
 
 - Make core changes in the boardlab-core repository and bsp changes in the bsp repository.
 - Test and commit those changes in their owning repositories.

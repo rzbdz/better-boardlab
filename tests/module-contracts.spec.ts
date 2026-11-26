@@ -3,7 +3,7 @@ import { BoardsApiError, type BoardsClient } from 'boardlab-core/shared/client.t
 import { localClient } from '../src/shared/local-client.ts'
 import { scriptSlotsClient } from '../src/shared/script-slots-client.ts'
 import { homeAssistantClient } from '../src/shared/home-assistant-client.ts'
-import { sdkCommand, sdkFollowing } from '../src/shared/bsp-client.ts'
+import { sdkCommand, sdkFollowing } from '../src/shared/boardctrl-client.ts'
 import { socFromProduct } from '../src/shared/local.ts'
 
 function transport() {

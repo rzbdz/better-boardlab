@@ -1,7 +1,7 @@
 /**
  * bsp board hosts as a lab. boardd drives them only through the `bsp` CLI (`--json --stateless`), never through bsp's
- * files or code: listing, leases, reset, download mode, staging and RAM boot are `bsp dut …` commands, and the console
- * is `bsp dut pipe`, which carries serial-mux's own protocol from the board host to boardd's serial-mux client. Which
+ * files or code: listing, leases, reset, download mode, staging and RAM boot are `boardctrl dut …` commands, and the console
+ * is `boardctrl dut pipe`, which carries serial-mux's own protocol from the board host to boardd's serial-mux client. Which
  * hosts there are comes from bsp's own configuration (its site and host registry), so new hosts need nothing here.
  */
 import { Duplex } from 'node:stream'
@@ -13,19 +13,20 @@ import type { BootMark, DiscoveryContext, DiscoveryMethod, DiscoveryValues, Flas
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
 import { askedIn } from 'boardlab-core/core/relay.ts'
+import { cliEnv } from './cli-env.ts'
 import { bspDebug } from './debug.ts'
 import { bootMarksOf, logArgs, logRange, newerQuery, OLD_HOST_LINES, oldHostLog, olderHost, type HostLog } from './logs.ts'
 import { openRaw } from './console.ts'
 import { cancellable, EXIT_CANCELLED, runCli, spawnPipe } from './process.ts'
 import { nothingToCancel } from './cancel.ts'
 import { followJob, reportingJob } from './follow.ts'
-import { debugOf, DEVICE_NAME, isSlot, SLOT_LEASE, type BspDut, type BspPin, type BspSlot, type BspSpec } from './records.ts'
-import type { BspResult } from './process.ts'
-export { EXIT_CANCELLED, jobIn, killGroup, runCli, type BspResult } from './process.ts'
+import { debugOf, DEVICE_NAME, isSlot, SLOT_LEASE, type BoardctrlDut, type BoardctrlPin, type BoardctrlSlot, type BoardctrlSpec } from './records.ts'
+import type { BoardctrlResult } from './process.ts'
+export { EXIT_CANCELLED, jobIn, killGroup, runCli, type BoardctrlResult } from './process.ts'
 
-/** Holders boardd gives its bsp leases: `boardlab:<holder of the lock>`. */
+/** Holders boardd gives its boardctrl leases: `boardlab:<holder of the lock>`. */
 export const HOLDER_PREFIX = 'boardlab:'
-/** bsp leases end unless renewed; boardd renews at every lab sync (each minute). */
+/** boardctrl leases end unless renewed; boardd renews at every lab sync (each minute). */
 const LEASE_TTL_S = 600
 const TIMEOUT_MS = 60_000
 
@@ -43,18 +44,18 @@ export function cliName(): string {
  * `onStderr` gets the progress lines bsp prints while it works; `signal` kills it, and every process it started (the
  * driver aborts it only when there is nothing on the host left to wait for).
  */
-export type BspRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }) => Promise<BspResult>
+export type BoardctrlRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }) => Promise<BoardctrlResult>
 /** Starts `bsp … dut pipe`; its stdin and stdout are the pipe. */
-export type BspSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
+export type BoardctrlSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
 /**
  * `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). `cancelGraceMs`: how long a cancelled
  * job's CLI may take to follow the job to its end before it is killed.
  */
-export interface BspOptions { bin?: string, run?: BspRunner, spawn?: BspSpawner, sshKey?: string, stateDir?: string, cancelGraceMs?: number }
+export interface BoardctrlOptions { bin?: string, run?: BoardctrlRunner, spawn?: BoardctrlSpawner, sshKey?: string, stateDir?: string, cancelGraceMs?: number }
 
-/** How a board's bsp record may be changed from boardlab (`bsp dut set`); fields left out stay as they are. */
-export interface BspBoardChange {
+/** How a board's bsp record may be changed from boardlab (`boardctrl dut set`); fields left out stay as they are. */
+export interface BoardctrlBoardChange {
   board?: string, soc?: string, description?: string, usb?: string,
   resetPin?: string, pulseMs?: number, fdl?: 'strapped' | 'button' | 'unset', fdlPin?: string, sdks?: string[],
 }
@@ -64,11 +65,11 @@ export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
 /** What a host's artifact cache holds against its bounds, as the host's status reports it (bytes, but `entries`, `held`). */
 export interface HostCache { path: string, used: number, entries: number, held: number, max_bytes: number, ttl_s: number, min_free_bytes: number, free: number | null }
 
-export interface BspBackend extends Backend {
+export interface BoardctrlBackend extends Backend {
   /** Each host of the lab and its artifact cache (null from a host without the policy, an error for one not reached). */
   caches(config: LabConfig): Promise<Array<{ host: string, cache: HostCache | null, error: string | null }>>
   /** Change a board's record in bspd, holding its lease (`token`); says which fields changed. */
-  change(config: LabConfig, device: string, token: string | null, change: BspBoardChange): Promise<string[]>
+  change(config: LabConfig, device: string, token: string | null, change: BoardctrlBoardChange): Promise<string[]>
   /** The board's own record and the actual choices on its host for a dropdown editor. */
   boardConfig(config: LabConfig, device: string, fresh?: boolean): Promise<{
     control: { backend?: string, reset?: { pin?: string }, fdl?: { strategy?: string, pin?: string } }
@@ -77,37 +78,32 @@ export interface BspBackend extends Backend {
   }>
 }
 
-export function bspLab(options: BspOptions = {}): BspBackend {
+export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
   // The board controller CLI; `bsp` is its old name, still installed on machines set up before the rename.
-  const bin = options.bin ?? process.env.BOARDS_BSP ?? cliName()
-  const run: BspRunner = options.run ?? ((args, options) => runCli(bin, args, options))
+  const bin = options.bin ?? process.env.BOARDS_BOARDCTRL ?? cliName()
+  const run: BoardctrlRunner = options.run ?? ((args, options) => runCli(bin, args, options))
   const cancelGraceMs = options.cancelGraceMs
-  const start: BspSpawner = options.spawn ?? ((args, env) => spawnPipe(bin, args, env))
+  const start: BoardctrlSpawner = options.spawn ?? ((args, env) => spawnPipe(bin, args, env))
 
   /**
-   * `url` names a bsp host registry, `username` the hosts to use (`-r`), `password` the hosts' API token. Commands on a
+   * `url` names a boardctrl host registry, `username` the hosts to use (`-r`), `password` the hosts' API token. Commands on a
    * host's own hardware (its relay controller) go to that host alone.
    */
   // `url` is either one bspd reached directly (`bspd+http://127.0.0.1:8765`, this machine's on a board host), or a bsp
   // registry that lists several hosts (a plain URL, or empty for bsp's own site).
   const direct = (config: LabConfig) => config.url.startsWith('bspd+')
-  // `bspd+ssh://root@host:8765` (a host boardlab set up): the bsp CLI's `ssh://`, through boardd's own key.
+  // `bspd+ssh://root@host:8765` (a host boardlab set up): the boardctrl CLI's `ssh://`, through boardd's own key.
   const bspdUrl = (config: LabConfig) => config.url.slice('bspd+'.length)
   const registryUrl = (config: LabConfig) => config.url
   const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', bspdUrl(config)]
     : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
-  // The site boardd keeps (SDKs, recipes) is what local bsp commands read: `sdk show`, a boot recipe's break points.
-  const site = options.stateDir ? join(options.stateDir, 'bsp', 'site') : null
-  const env = (config: LabConfig): NodeJS.ProcessEnv => ({
-    ...process.env, ...(site && existsSync(site) ? { BSP_SITE: site } : {}),
-    ...(config.url && !direct(config) ? { BSP_REGISTRY: registryUrl(config) } : {}), ...(config.password ? { BSP_TOKEN: config.password } : {}),
-    ...(options.sshKey && bspdUrl(config).startsWith('ssh://') ? { BSP_SSH_OPTIONS: `-i ${options.sshKey} -o IdentitiesOnly=yes` } : {}),
-  })
+  const site = options.stateDir ? join(options.stateDir, 'boardctrl', 'site') : null
+  const env = (config: LabConfig) => cliEnv({ config, site, sshKey: options.sshKey, direct: direct(config), url: registryUrl(config) })
   /** Run a bsp command; `signal` stops it as `cancellable` says (`dut`/`job cancel` under the lease of `on`, the board). */
-  const bsp = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal, on?: { readonly device: string, readonly lease: string | null }): Promise<T> => {
+  const boardctrlCli = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal, on?: { readonly device: string, readonly lease: string | null }): Promise<T> => {
     const result = await cancellable(
       (onLine, kill) => run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr: onLine, signal: kill }),
-      (what, at) => bsp(config, what, 60_000, undefined, at ?? host),
+      (what, at) => boardctrlCli(config, what, 60_000, undefined, at ?? host),
       { onStderr, signal, stop: on ? () => ['dut', 'cancel', on.device, ...lease(on.lease)] : undefined, jobArgs: on ? () => lease(on.lease) : undefined, graceMs: cancelGraceMs })
     let envelope: { ok: boolean, result?: T, warnings?: string[], error?: { code?: string, message?: string, hint?: string, details?: Record<string, unknown> } } | null = null
     try { envelope = JSON.parse(result.stdout) } catch {}
@@ -130,12 +126,12 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       return envelope.result as T
     }
     const error = envelope?.error
-    if (error) throw Object.assign(new Error(`bsp ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`), { bsp: error })
+    if (error) throw Object.assign(new Error(`bsp ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`), { boardctrl: error })
     const text = `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-4).join('\n')
     throw new Error(`bsp ${args.slice(0, 2).join(' ')} 失败${result.code === null ? '（超时或没能运行）' : `（退出码 ${result.code}）`}${text ? `：${text}` : ''}`)
   }
 
-  /** A `bsp probe` run (a discovery or a rebuild): boards bsp registered as it went, and the rest as findings. */
+  /** A `boardctrl probe` run (a discovery or a rebuild): boards bsp registered as it went, and the rest as findings. */
   const probed = async (config: LabConfig, args: string[], progress: (line: string) => void,
     registered: ((device: string) => void) | undefined, host?: string, signal?: AbortSignal): Promise<{ found: LabFinding[], message: string }> => {
     const onLine = (line: string) => {
@@ -143,8 +139,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       const done = line.match(/\bregistered (\S+)(?: in slot \S+)?$/)
       if (done) registered?.(done[1]!)
     }
-    type Result = { proposals?: Array<{ spec: BspSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
-    const out = await bsp<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host, signal)
+    type Result = { proposals?: Array<{ spec: BoardctrlSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
+    const out = await boardctrlCli<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host, signal)
     const results = Object.entries(out.results ?? {})
     // What bsp could not register (a name taken, say) is left for a person to apply as a proposal.
     const found = results.flatMap(([at, result]) => (result.proposals ?? []).filter(item => !item.registered).map(({ spec, warnings }) => ({
@@ -157,17 +153,17 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     const message = [
       ...(added.length ? [`登记了 ${added.length} 块：${added.join('、')}`] : []),
       ...(found.length ? [`${where} 上发现 ${found.length} 块${added.length ? '没能自动登记的' : '新'}板子，到「扫描」确认后登记`] : []),
-      ...(!added.length && !found.length ? [`bsp probe 在 ${where} 上没有发现新板子`] : []),
+      ...(!added.length && !found.length ? [`boardctrl probe 在 ${where} 上没有发现新板子`] : []),
       ...reasons,
     ].join('；')
     return { found, message }
   }
   const lease = (token: string | null | undefined) => token && token !== SLOT_LEASE ? ['--lease', token] : []
-  /** Break points by catalog target, briefly: `bsp sdk show` is slow and the page asks on every dialog change. */
+  /** Break points by catalog target, briefly: `boardctrl sdk show` is slow and the page asks on every dialog change. */
   const BREAKS_TTL_MS = 30_000
   const breaksCache = new Map<string, { at: number, value: { load: string[], download: string[] } }>()
   const breaksAsking = new Map<string, Promise<{ load: string[], download: string[] }>>()
-  const bootMarks = bootMarksOf((config, device) => bsp<{ marks?: BootMark[] }>(config, ['dut', 'boot-marks', device], 30_000))
+  const bootMarks = bootMarksOf((config, device) => boardctrlCli<{ marks?: BootMark[] }>(config, ['dut', 'boot-marks', device], 30_000))
   /**
    * A person is asked to press something: bspd says what in the DUT's status (`needs_human`), while the reset (or
    * entering download mode) waits. The command's own output only reports it in passing, so it is polled here and the
@@ -178,7 +174,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     let stopped = false, last: string | null = null, lastRequest: string | null = null
     const tick = async () => {
       while (!stopped && !signal?.aborted) {
-        const status = await bsp<{ needs_human?: { id?: string, message?: string } | null }>(config, ['dut', 'status', device], 15_000).catch(() => null)
+        const status = await boardctrlCli<{ needs_human?: { id?: string, message?: string } | null }>(config, ['dut', 'status', device], 15_000).catch(() => null)
         const message = status?.needs_human?.message ?? null, request = status?.needs_human?.id ?? null
         if (message !== last || request !== lastRequest) { last = message; lastRequest = request; notice(message, request) }
         await new Promise(resolve => setTimeout(resolve, 1000))
@@ -208,14 +204,14 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   /** The host each DUT is on, as last listed; a DUT not listed yet is looked up. */
   const hostOf = new Map<string, string>()
   const hostsAsking = new Map<string, Promise<void>>()
-  const boardOf = new Map<string, BspDut>()
+  const boardOf = new Map<string, BoardctrlDut>()
   /** A registration dialog needs the DUT's saved record, not another fastboot/console/control status read. */
-  const recordOfBoard = async (config: LabConfig, device: string): Promise<BspDut> => {
+  const recordOfBoard = async (config: LabConfig, device: string): Promise<BoardctrlDut> => {
     if (!boardOf.has(device)) {
       const key = `${config.url}\u0000${config.username}`
       let asking = hostsAsking.get(key)
       if (!asking) {
-        asking = bsp<BspDut[]>(config, ['dut', 'list']).then(duts => {
+        asking = boardctrlCli<BoardctrlDut[]>(config, ['dut', 'list']).then(duts => {
           for (const dut of duts) {
             hostOf.set(dut.id, dut.host)
             boardOf.set(dut.id, { ...dut, control: { ...dut.control, reset: { ...dut.control?.reset }, fdl: { ...dut.control?.fdl } } })
@@ -247,8 +243,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     if (asking) return asking
     const ask = (async () => {
       const [pins, ports] = await Promise.all([
-        bsp<BspPin[]>(config, ['gpio', 'list'], 15_000, undefined, host).catch(() => [] as BspPin[]),
-        bsp<Array<{ usb: string, vid?: string, pid?: string }>>(config, ['dut', 'ports'], 15_000, undefined, host),
+        boardctrlCli<BoardctrlPin[]>(config, ['gpio', 'list'], 15_000, undefined, host).catch(() => [] as BoardctrlPin[]),
+        boardctrlCli<Array<{ usb: string, vid?: string, pid?: string }>>(config, ['dut', 'ports'], 15_000, undefined, host),
       ])
       const value = {
         gpios: pins.filter(pin => pin.actions?.length).map(pin => ({ value: pin.target, label: `${pin.target}（${pin.label ?? 'GPIO'}）` })),
@@ -275,8 +271,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   const freePorts = async (config: LabConfig): Promise<LabSlots[]> => {
     // A dry-run probe touches nothing: it lists each host's free consoles and the download-mode USB devices on it.
     const [plans, duts] = await Promise.all([
-      bsp<Record<string, { consoles?: Array<{ id: string, kind: string, alias?: string, device?: string }>, usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
-      bsp<BspDut[]>(config, ['dut', 'list']),
+      boardctrlCli<Record<string, { consoles?: Array<{ id: string, kind: string, alias?: string, device?: string }>, usb?: Array<{ usb: string, product?: string }> }>>(config, ['probe', '--dry-run'], 120_000),
+      boardctrlCli<BoardctrlDut[]>(config, ['dut', 'list']),
     ])
     const used = new Set((Array.isArray(duts) ? duts : []).map(dut => dut.usb))
     return Object.entries(plans).map(([host, plan]) => ({
@@ -287,40 +283,40 @@ export function bspLab(options: BspOptions = {}): BspBackend {
   }
   /** The SDK catalog's instances: a board's SDKs, and the SoCs they are built for. */
   const sdkCatalog = async (config: LabConfig): Promise<Array<{ id: string, soc: string | null }>> => {
-    const listed = await bsp<Array<{ id: string, soc: string | null }>>(config, ['sdk', 'list'], 60_000).catch(() => [] as Array<{ id: string, soc: string | null }>)
+    const listed = await boardctrlCli<Array<{ id: string, soc: string | null }>>(config, ['sdk', 'list'], 60_000).catch(() => [] as Array<{ id: string, soc: string | null }>)
     return Array.isArray(listed) ? listed : []
   }
   /** A context's slot as bsp's `--slots` takes it (`/s2` → `s2`). */
   const slotId = (slot?: string | null) => slot?.split('/').at(-1) ?? null
 
   return {
-    kind: 'bsp 板卡主机',
+    kind: 'boardctrl 板卡主机',
     about: 'boardd 经 bsp 操作这台主机上的板子：复位线、下载口、串口、刷机和启动都由主机上的 bspd 做，锁和排队以这台 boardd 为准（拿锁时它同时持有 bspd 的租约）。',
     fields: {
       url: { label: 'bspd 地址', placeholder: '本机的 bspd：bspd+http://127.0.0.1:8765（或 bsp registry 的地址）', required: false },
-      username: { label: '只用这些 bsp 主机', placeholder: '经 registry 时：逗号分隔的主机名；留空用全部', required: false },
+      username: { label: '只用这些 boardctrl 主机', placeholder: '经 registry 时：逗号分隔的主机名；留空用全部', required: false },
       password: { label: 'bspd token', placeholder: 'bspd 要求 token 时填', required: false },
     },
     defaultJump: () => '',
 
     inventory: {
       async verify(config) {
-        const hosts = await bsp<Array<{ host: string, duts?: string[], error?: string }>>(config, ['hosts'])
+        const hosts = await boardctrlCli<Array<{ host: string, duts?: string[], error?: string }>>(config, ['hosts'])
         const up = hosts.filter(host => !host.error)
         const down = hosts.filter(host => host.error)
-        if (!up.length) throw new Error(`没有连上任何 bsp 主机${down.length ? `：${down.map(host => `${host.host}（${host.error}）`).join('，')}` : ''}`)
+        if (!up.length) throw new Error(`没有连上任何 boardctrl 主机${down.length ? `：${down.map(host => `${host.host}（${host.error}）`).join('，')}` : ''}`)
         const boards = up.reduce((sum, host) => sum + (host.duts?.length ?? 0), 0)
-        return `${up.length} 台 bsp 主机（${up.map(host => host.host).join('、')}），${boards} 块板子${down.length ? `；连不上：${down.map(host => host.host).join('、')}` : ''}`
+        return `${up.length} 台 boardctrl 主机（${up.map(host => host.host).join('、')}），${boards} 块板子${down.length ? `；连不上：${down.map(host => host.host).join('、')}` : ''}`
       },
 
       async devices(config) {
-        const duts = await bsp<BspDut[]>(config, ['dut', 'list'])
+        const duts = await boardctrlCli<BoardctrlDut[]>(config, ['dut', 'list'])
         for (const dut of duts) {
           hostOf.set(dut.id, dut.host)
           boardOf.set(dut.id, { ...dut, control: { ...dut.control, reset: { ...dut.control?.reset }, fdl: { ...dut.control?.fdl } } })
         }
         // Slots with no board yet are listed too, by their console: watchable, discoverable. Hosts without slots have none.
-        const slots = await bsp<BspSlot[]>(config, ['slot', 'list']).catch(() => [] as BspSlot[])
+        const slots = await boardctrlCli<BoardctrlSlot[]>(config, ['slot', 'list']).catch(() => [] as BoardctrlSlot[])
         const empty = slots.filter(slot => !slot.dut && slot.online).map((slot): LabDevice => ({
           name: `${slot.host}-${slot.id}`, address: slot.ref, slot: slot.ref, empty: true, host: slot.host, model: null, online: false,
           serialPort: `${slot.host}:${slot.alias ?? slot.id}`, serialConnected: slot.console_up ?? true, downloadUsbPath: null, ip: null,
@@ -330,7 +326,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           mediaBoot: dut.media_boot ?? null,
           name: dut.id, host: dut.host, sdks: dut.sdks ?? [], model: dut.board || null, soc: dut.soc || null,
           online: false, serialPort: dut.console ? `${dut.host}:${dut.console}` : null,
-          // Hosts without console_up predate `bsp dut pipe`; opening the console tells.
+          // Hosts without console_up predate `boardctrl dut pipe`; opening the console tells.
           serialConnected: dut.console_up ?? true,
           // Its slot's adapter is unplugged or moved: after re-cabling the host wants a rebuild.
           slotGone: dut.slot_online === false,
@@ -347,16 +343,16 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async refresh(config, target, options, progress, signal) {
         const args = ['dut', 'refresh', target.device, ...lease(target.lease), '--timeout', String(RESET_TIMEOUT_MS / 1000),
           ...(options.name ? ['--name', options.name] : options.rename ? ['--rename'] : [])]
-        const job = await bsp<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress, undefined, signal, target)
+        const job = await boardctrlCli<{ status?: string, error?: { message?: string }, result?: { dut: string, changed?: string[], board?: string, usb?: string, identified?: boolean } }>(config, args, RESET_TIMEOUT_MS + 60_000, progress, undefined, signal, target)
         if (job.status === 'cancelled') throw new CancelledError(`已取消：${target.device} 的重新读取`)
-        if (job.status && job.status !== 'succeeded') throw new Error(job.error?.message ?? `bsp dut refresh ${job.status}`)
+        if (job.status && job.status !== 'succeeded') throw new Error(job.error?.message ?? `boardctrl dut refresh ${job.status}`)
         const r = job.result ?? { dut: target.device }
         return {
           device: r.dut,
           message: `${r.dut}：${r.identified ? `读到 ${r.board ?? '型号未知'}` : '没有读到型号（没有下载口或 SoC 不支持识别）'}${r.changed?.length ? `，改了 ${r.changed.join('、')}` : '，没有变化'}`,
         }
       },
-      remove: async (config, device) => { await bsp(config, ['dut', 'remove', device]) },
+      remove: async (config, device) => { await boardctrlCli(config, ['dut', 'remove', device]) },
     },
 
     // The DUT's name in bspd changes too, its console alias and reset/fdl aliases with it. bsp drops the lease on a
@@ -364,11 +360,11 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     rename: {
       async rename(config, { device, lease: token }, to) {
         try {
-          const result = await bsp<{ note?: string }>(config, ['dut', 'rename', device, to, '--console', ...lease(token)], 180_000)
+          const result = await boardctrlCli<{ note?: string }>(config, ['dut', 'rename', device, to, '--console', ...lease(token)], 180_000)
           return { device: to, alias: to, message: `${device} → ${to}${result.note ? `（${result.note}）` : ''}` }
         } catch (error) {
           // A retry after an answer that did not arrive: the host may already have renamed it.
-          const duts = await bsp<BspDut[]>(config, ['dut', 'list']).catch(() => [] as BspDut[])
+          const duts = await boardctrlCli<BoardctrlDut[]>(config, ['dut', 'list']).catch(() => [] as BoardctrlDut[])
           if (duts.some(dut => dut.id === to)) return { device: to, alias: to, message: `${device} → ${to}（主机上已经改好了）` }
           throw error
         }
@@ -376,23 +372,23 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     },
 
     relay: {
-      // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `bsp dut confirm`, until
+      // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `boardctrl dut confirm`, until
       // the lock it runs under ends.
       reset: async (config, at, notice, signal) => {
         const { device, lease: token } = at
         const tell = once(notice)
         const watching = watchingHuman(config, device, tell, signal)
-        try { await bsp(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, at) } finally { watching() }
+        try { await boardctrlCli(config, ['dut', 'reset', device, '--no-fdl', ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, at) } finally { watching() }
       },
       enterDownload: async (config, at, notice, signal) => {
         const { device, lease: token } = at
         const tell = once(notice)
         const watching = watchingHuman(config, device, tell, signal)
-        try { await bsp(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, at) } finally { watching() }
+        try { await boardctrlCli(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, at) } finally { watching() }
       },
       confirm: async (config, { device }, note, request) => {
         // The request id makes it idempotent: answered already (the board showed it on its own), bsp says so.
-        const result = await bsp<{ confirmed: string, waited_s: number, request?: string, repeat?: boolean, how?: string }>(
+        const result = await boardctrlCli<{ confirmed: string, waited_s: number, request?: string, repeat?: boolean, how?: string }>(
           config, ['dut', 'confirm', device, ...(note ? [note] : []), ...(request ? ['--request', request] : [])])
         if (result.repeat) {
           const how = result.how === 'detected' ? '板子自己到位了，已经自动确认'
@@ -410,7 +406,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
      */
     channels: {
       async list(config, { device }) {
-        const pins = await bsp<BspPin[]>(config, ['gpio', 'list'], TIMEOUT_MS, undefined, await hostOfBoard(config, device))
+        const pins = await boardctrlCli<BoardctrlPin[]>(config, ['gpio', 'list'], TIMEOUT_MS, undefined, await hostOfBoard(config, device))
         return pins.flatMap(pin => (pin.aliases ?? []).filter(alias => alias.startsWith(`${device}/`)).map(alias => ({
           id: alias, label: alias.slice(device.length + 1), kind: pin.channel?.mode ?? 'gpio', state: pin.state ?? null,
           actions: CHANNEL_ACTIONS.filter(action => (pin.actions ?? []).includes(action) || (action === 'pulse' && pin.channel?.mode === 'relay') || (action === 'click' && pin.channel?.mode === 'button')),
@@ -421,7 +417,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         // bsp groups the actions by channel kind: relays switch and pulse, buttons are pressed and clicked.
         const [group, verb] = ({ on: ['relay', 'on'], off: ['relay', 'off'], toggle: ['relay', 'toggle'], pulse: ['relay', 'pulse'], press: ['button', 'press'], release: ['button', 'release'], click: ['button', 'click'] } as const)[action]
         const timed = verb === 'pulse' || verb === 'click'
-        const result = await bsp<{ target?: string, state?: string }>(config, [group, verb, channel, ...(timed && ms ? ['--ms', String(ms)] : [])], TIMEOUT_MS + (ms ?? 0), undefined, await hostOfBoard(config, device))
+        const result = await boardctrlCli<{ target?: string, state?: string }>(config, [group, verb, channel, ...(timed && ms ? ['--ms', String(ms)] : [])], TIMEOUT_MS + (ms ?? 0), undefined, await hostOfBoard(config, device))
         return `${channel}：${verb}${timed && ms ? ` ${ms}ms` : ''}${result.state ? `，现在 ${result.state}` : ''}`
       },
     },
@@ -432,11 +428,11 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       // The board host keeps each console's log by day; bsp reads a range of it there and searches it, or reads a
       // window of it around a line, each line numbered and named by its place in the day's file.
       async logs(config, { device }, query) {
-        try { return logRange(await bsp<HostLog>(config, logArgs(device, query), 120_000), query.at != null) }
+        try { return logRange(await boardctrlCli<HostLog>(config, logArgs(device, query), 120_000), query.at != null) }
         catch (error) {
           // A host installed before it indexed its logs refuses the new flags: its last lines, numbered here.
           if (!olderHost(error) || !newerQuery(query)) throw error
-          return oldHostLog(await bsp<HostLog>(config, ['dut', 'logs', device, '--limit', String(OLD_HOST_LINES)], 120_000), query)
+          return oldHostLog(await boardctrlCli<HostLog>(config, ['dut', 'logs', device, '--limit', String(OLD_HOST_LINES)], 120_000), query)
         }
       },
       async open(config, { device }) {
@@ -468,19 +464,19 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       backendFiles: true,
       async stage(config, target, file, timeoutMs = 300_000, signal) {
         // One call on the host, not a job: a cancel stops the upload, or waits for the load already under way.
-        const result = await bsp<{ output: string, file: string, size: number }>(config,
+        const result = await boardctrlCli<{ output: string, file: string, size: number }>(config,
           ['dut', 'stage', target.device, file.path, ...lease(target.lease), '--timeout', String(Math.ceil(timeoutMs / 1000))], timeoutMs + 120_000, undefined, undefined, signal)
         return result.output
       },
       async present(config, target) {
-        return (await bsp<{ present: boolean }>(config, ['dut', 'present', target.device])).present
+        return (await boardctrlCli<{ present: boolean }>(config, ['dut', 'present', target.device])).present
       },
 
       async boot(config, at, files, timing, signal) {
         const { device, lease: token } = at
         // `boardlab boot` starts with the board already in download mode, as boardd's own boot does.
         const refs = files.map(file => file.source === 'backend' && !/^https?:\/\//.test(file.path) ? `host:${file.path}` : file.path)
-        const job = await bsp<{ lines?: string[], elapsed_s?: number }>(config, ['dut', 'boot', device, '--files', ...refs, '--no-reset',
+        const job = await boardctrlCli<{ lines?: string[], elapsed_s?: number }>(config, ['dut', 'boot', device, '--files', ...refs, '--no-reset',
           '--first-wait', String(timing.firstMs / 1000), '--later-wait', String(timing.laterMs / 1000), '--port-timeout', String(timing.waitMs / 1000),
           ...lease(token), '--timeout', '1800'], BOOT_TIMEOUT_MS, undefined, undefined, signal, at)
         return (job.lines ?? []).join('\n')
@@ -523,8 +519,8 @@ export function bspLab(options: BspOptions = {}): BspBackend {
                 options: consoles.map(item => ({ value: item.id, label: item.label })), note: consoles.length ? null : '没有空闲串口：接上串口适配器后刷新。' },
               ...(socs.length
                 ? [{ id: 'soc', label: 'SoC', kind: 'choice' as const, required: true, initial: socs.length === 1 ? socs[0]! : null,
-                  options: socs.map(soc => ({ value: soc, label: soc.toUpperCase() })), note: '登记后这块板子的 SDK 从它和 bsp 的 SDK 目录来。' }]
-                : [{ id: 'soc', label: 'SoC', kind: 'text' as const, required: false, placeholder: '例如 k1、k3', note: 'bsp 的 SDK 目录里还没有 SoC；登记后可以再补。' }]),
+                  options: socs.map(soc => ({ value: soc, label: soc.toUpperCase() })), note: '登记后这块板子的 SDK 从它和 boardctrl 的 SDK 目录来。' }]
+                : [{ id: 'soc', label: 'SoC', kind: 'text' as const, required: false, placeholder: '例如 k1、k3', note: 'boardctrl 的 SDK 目录里还没有 SoC；登记后可以再补。' }]),
               ...(sdkList.length
                 ? [{ id: 'sdk', label: 'SDK（可选）', kind: 'choice' as const, required: false, initial: null,
                   options: sdkList.map(item => ({ value: item.id, label: `${item.id}${item.soc ? `（${item.soc.toUpperCase()}）` : ''}` })), note: '留空：用这个 SoC 的全部 SDK。' }]
@@ -549,7 +545,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           compose: true,
           fields: [
             { id: 'host', label: '主机', kind: 'text' as const, required: true, initial: knownHost || null,
-              placeholder: '板子接在哪台 bsp 主机上（设置里那台的名字）' },
+              placeholder: '板子接在哪台 boardctrl 主机上（设置里那台的名字）' },
             { id: 'name', label: '板名', kind: 'text' as const, required: true, placeholder: '例：my-board' },
             { id: 'services', label: '各角色的提供者（JSON）', kind: 'text' as const, required: false,
               placeholder: '{ "debug": { "provider": "<provider>", "target": "<target>" } }',
@@ -569,7 +565,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async run(config, method, values, context, progress, registered, signal) {
         const host = context.host ?? (context.slot ? context.slot.split('/')[0]! : null)
         if (method === 'probe') {
-          // bsp probe pulses free reset lines on the selected host (or every selected slot of it), watches consoles
+          // boardctrl probe pulses free reset lines on the selected host (or every selected slot of it), watches consoles
           // and USB, and registers each board the moment it is found.
           const slots = slotId(context.slot)
           const prefer = (values.prefer ?? '').split(/[\s,]+/).filter(Boolean)
@@ -588,11 +584,11 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           // the board no working recipe. It is only a check when the catalog answered at all.
           const catalog = (soc || sdk) ? await sdkCatalog(config) : []
           const knownSocs = new Set(catalog.map(item => item.soc).filter((item): item is string => !!item))
-          if (soc && knownSocs.size && !knownSocs.has(soc)) throw new Error(`bsp 的 SDK 目录里没有 SoC ${soc}`)
+          if (soc && knownSocs.size && !knownSocs.has(soc)) throw new Error(`boardctrl 的 SDK 目录里没有 SoC ${soc}`)
           const sdkSoc = catalog.find(item => item.id === sdk)?.soc
           if (sdk && sdkSoc && soc && sdkSoc !== soc) throw new Error(`SDK ${sdk} 是给 ${sdkSoc} 的，不是 ${soc}`)
           const name = values.name?.trim() || `tmp-${host}-${consoleId.replace(/[^A-Za-z0-9_.-]+/g, '-')}`
-          await bsp(config, ['dut', 'bind', name, '--console', consoleId, '--usb', usb, '--host', host,
+          await boardctrlCli(config, ['dut', 'bind', name, '--console', consoleId, '--usb', usb, '--host', host,
             ...(soc ? ['--soc', soc] : []), ...(model ? ['--board', model] : []), ...(sdk ? ['--sdks', sdk] : [])], 180_000)
           registered?.(name)
           return { message: `登记了 ${name}（${host}：串口 ${consoleId}，下载口 ${usb}${soc ? `，SoC ${soc}` : ''}${sdk ? `，SDK ${sdk}` : ''}；由人复位）`, found: [] }
@@ -607,13 +603,13 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       },
       keepsInUse: true,
       async register(config, finding, name) {
-        const spec = { ...(finding.detail as BspSpec), id: name }
-        if (!finding.host) throw new Error('不知道这块板子在哪台 bsp 主机上')
-        await bsp(config, ['dut', 'add', finding.host, '--spec', JSON.stringify(spec)], 180_000)
+        const spec = { ...(finding.detail as BoardctrlSpec), id: name }
+        if (!finding.host) throw new Error('不知道这块板子在哪台 boardctrl 主机上')
+        await boardctrlCli(config, ['dut', 'add', finding.host, '--spec', JSON.stringify(spec)], 180_000)
       },
       /**
        * A board no probe can see: its console, download port and debug path are not USB things, so a person says what
-       * they are. The method is `manual` below, and every field is one a DUT record has (the same ones `bsp dut set`
+       * they are. The method is `manual` below, and every field is one a DUT record has (the same ones `boardctrl dut set`
        * takes), so the record bsp gets is the one a site file would carry — boardlab writes no bsp vocabulary of its
        * own, it passes the person's answers through.
        */
@@ -639,7 +635,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
           ...(values.reset_pin?.trim() ? { control: { backend: 'gpio-relay', reset: { pin: values.reset_pin.trim(), mode: 'button' } } } : {}),
           ...(services ? { services: JSON.parse(services) } : {}),
         }
-        await bsp(config, ['dut', 'add', host, '--spec', JSON.stringify(spec)], 180_000)
+        await boardctrlCli(config, ['dut', 'add', host, '--spec', JSON.stringify(spec)], 180_000)
         const what = Object.keys(spec).filter(key => !['id'].includes(key))
         return { name, message: `登记了 ${name}（${host}${what.length ? `：${what.join('、')}` : ''}）` }
       },
@@ -651,10 +647,10 @@ export function bspLab(options: BspOptions = {}): BspBackend {
     cancels: ['reset', 'download', 'stage', 'boot', 'build', 'flash', 'refresh', 'discover'],
     // A run boardd lost (it restarted) is followed by the host job its progress named.
     follow: (config, at, handle, progress, signal) =>
-      followJob(handle, progress, (args, timeoutMs, host) => bsp(config, args, timeoutMs, undefined, host, signal, at), { signal }),
+      followJob(handle, progress, (args, timeoutMs, host) => boardctrlCli(config, args, timeoutMs, undefined, host, signal, at), { signal }),
     async cancel(config, { device, lease: token }) {
       let done: { cancelled?: string[] }
-      try { done = await bsp<{ cancelled?: string[] }>(config, ['dut', 'cancel', device, ...lease(token)], 60_000) }
+      try { done = await boardctrlCli<{ cancelled?: string[] }>(config, ['dut', 'cancel', device, ...lease(token)], 60_000) }
       catch (error) { throw nothingToCancel(device, error) ?? error }
       return `让 ${done.cancelled?.join('、') ?? '它'} 停下`
     },
@@ -663,7 +659,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async boot(config, at, sdk, progress, signal, report) {
         const { device, lease: token } = at
         // The board host pulls the SDK's build from its build server and runs the SDK's boot recipe.
-        const job = await bsp<{ lines?: string[] }>(config, ['dut', 'boot', device, '--sdk', sdk.sdk, '--method', sdk.method,
+        const job = await boardctrlCli<{ lines?: string[] }>(config, ['dut', 'boot', device, '--sdk', sdk.sdk, '--method', sdk.method,
           ...(sdk.variant ? ['--variant', sdk.variant] : []), ...(sdk.brk ? ['--break', sdk.brk] : []),
           ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, reportingJob(progress, report), undefined, signal, at)
         return (job.lines ?? []).join('\n')
@@ -678,7 +674,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
         const asking = breaksAsking.get(key)
         if (asking) return asking
         const ask = (async () => {
-          const shown = await bsp<{ breakers?: { load?: string[], download?: string[] } }>(config, ['sdk', 'show', sdk], 60_000)
+          const shown = await boardctrlCli<{ breakers?: { load?: string[], download?: string[] } }>(config, ['sdk', 'show', sdk], 60_000)
           const value = { load: shown.breakers?.load ?? [], download: shown.breakers?.download ?? [] }
           breaksCache.set(key, { at: Date.now(), value })
           return value
@@ -691,7 +687,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async flash(config, at, pkg, progress, signal, report) {
         const { device, lease: token } = at
         // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.
-        const job = await bsp<{ job?: string, lines?: string[], flasher?: string, elapsed_s?: number }>(config, ['dut', 'flash', device,
+        const job = await boardctrlCli<{ job?: string, lines?: string[], flasher?: string, elapsed_s?: number }>(config, ['dut', 'flash', device,
           '--package', pkg.url ?? pkg.path!, ...(pkg.sha256 ? ['--sha256', pkg.sha256] : []), ...(pkg.flasher ? ['--flasher', pkg.flasher] : []), ...(pkg.refresh && pkg.url ? ['--refresh'] : []),
           ...(pkg.partitions?.length ? ['--partitions', pkg.partitions.join(',')] : []),
           ...lease(token), '--timeout', '3600'], 3_600_000 + 60_000, reportingJob(progress, report), undefined, signal, at)
@@ -701,10 +697,10 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       async plan(config, at, pkg, progress, signal) {
         const { device, lease: token } = at
         // The host fetches and unpacks the package and reads its partition tables, then says what flashing it would write: no board is touched.
-        const answer = await bsp<{ plan?: FlashPlan }>(config, ['dut', 'flash', device,
+        const answer = await boardctrlCli<{ plan?: FlashPlan }>(config, ['dut', 'flash', device,
           '--package', pkg.url ?? pkg.path!, ...(pkg.sha256 ? ['--sha256', pkg.sha256] : []), ...(pkg.refresh && pkg.url ? ['--refresh'] : []),
           '--plan', ...lease(token), '--timeout', '900'], 900_000 + 60_000, progress, undefined, signal, at)
-        if (!answer.plan) throw new Error('板卡主机没有给出刷机包的内容（它的 bsp 太旧，不认 --plan？）')
+        if (!answer.plan) throw new Error('板卡主机没有给出刷机包的内容（它的 boardctrl 太旧，不认 --plan？）')
         return answer.plan
       },
     },
@@ -745,28 +741,28 @@ export function bspLab(options: BspOptions = {}): BspBackend {
 
     // The board's debug path, whatever its host provides: ask what it offers, run its actions, stream its trace.
     debug: bspDebug({
-      run: <T>(config: LabConfig, args: string[]) => bsp<T>(config, args, 120_000),
+      run: <T>(config: LabConfig, args: string[]) => boardctrlCli<T>(config, args, 120_000),
       spawnStream: (config, args) => start([...global(config), ...args], env(config)),
     }),
 
     lease: {
       async take(config, device, holder: LabHolder) {
         if (isSlot(device)) return SLOT_LEASE
-        const result = await bsp<{ token: string }>(config, ['dut', 'acquire', device, '--holder', holder.holder, '--purpose', holder.purpose,
+        const result = await boardctrlCli<{ token: string }>(config, ['dut', 'acquire', device, '--holder', holder.holder, '--purpose', holder.purpose,
           '--ttl', String(LEASE_TTL_S), ...lease(holder.token)])
         return result.token
       },
-      give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await bsp(config, ['dut', 'release', device, ...lease(token)]) },
+      give: async (config, device, token) => { if (!isSlot(device) && token !== SLOT_LEASE) await boardctrlCli(config, ['dut', 'release', device, ...lease(token)]) },
     },
     async caches(config) {
-      const hosts = await bsp<Array<{ host: string, cache?: HostCache | null, error?: string }>>(config, ['hosts'], 30_000).catch(error => { throw new Error(`读不到主机：${(error as Error).message}`) })
+      const hosts = await boardctrlCli<Array<{ host: string, cache?: HostCache | null, error?: string }>>(config, ['hosts'], 30_000).catch(error => { throw new Error(`读不到主机：${(error as Error).message}`) })
       return (hosts ?? []).map(item => ({ host: item.host, cache: item.cache ?? null, error: item.error ?? null }))
     },
     async boardConfig(config, device, fresh = false) {
       // `dut status` carries the effective SDKs and whether the board's own list is explicit (an empty list means every
       // SDK of its SoC); `dut list` does not, so the editor reads the board once.
       const [record, choices, sdkList] = await Promise.all([
-        bsp<BspDut>(config, ['dut', 'status', device], 15_000),
+        boardctrlCli<BoardctrlDut>(config, ['dut', 'status', device], 15_000),
         hostChoices(config, await hostOfBoard(config, device), fresh),
         sdkCatalog(config),
       ])
@@ -791,7 +787,7 @@ export function bspLab(options: BspOptions = {}): BspBackend {
       // An empty SDK list is a value of its own (`dut set --sdks ''`): use every SDK of the SoC.
       if (change.sdks !== undefined) given.push('--sdks', change.sdks.join(','))
       if (!given.length) throw new Error('没有要改的')
-      const done = await bsp<{ changed: string[] }>(config, ['dut', 'set', device, ...lease(token), ...given], 120_000)
+      const done = await boardctrlCli<{ changed: string[] }>(config, ['dut', 'set', device, ...lease(token), ...given], 120_000)
       return done.changed ?? []
     },
   }
