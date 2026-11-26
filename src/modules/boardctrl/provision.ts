@@ -1,11 +1,11 @@
 /**
  * Setting up a boardctrl board host from boardd: reach it over ssh (any way in that works; see the hosts library), ship the
- * boardctrl tree this distribution carries, and run its `deploy/bspd-install.sh`, which makes boardctrld's config from what the
- * machine is. The lab then drives that bspd through an ssh tunnel to its loopback port (on boardd's own machine,
+ * boardctrl tree this distribution carries, and run its `deploy/install.sh`, which makes boardctrld's config from what the
+ * machine is. The lab then drives that boardctrld through an ssh tunnel to its loopback port (on boardd's own machine,
  * that port directly), with the token made here.
  * Installing again updates it in place; uninstalling takes it away. The site boardd keeps (site.ts) goes along, and
  * is synced to every host when it changes: swapped in only while nothing runs on the host's boards, and put back
- * when the host's bspd does not take it.
+ * when the host's boardctrld does not take it.
  */
 import { execFile } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
@@ -18,7 +18,7 @@ import { shipHostTools } from './host-tools.ts'
 /** `ca`: a certificate the host must trust (the network's own CA), installed before anything is downloaded there. */
 /** `noToken`: the host takes every request (no token anywhere), for a lab whose port only trusted machines reach. */
 /**
- * `force`: restart the host's bspd even while it runs jobs. Without it, the installer waits for them right before the
+ * `force`: restart the host's boardctrld even while it runs jobs. Without it, the installer waits for them right before the
  * restart and refuses, naming them, when they outlast its wait; with it, they end `interrupted by a service restart`.
  */
 export interface HostSetup { id: string, access: Access, port?: number, board?: string, ca?: string | null, noToken?: boolean, force?: boolean }
@@ -35,7 +35,7 @@ async function root(exec: Executor): Promise<string> {
   if (who.stdout.trim() === '0') return ''
   const sudo = await exec.run('sudo -n true')
   if (sudo.code === 0) return 'sudo -n '
-  throw new Error(`在 ${exec.target} 上不是 root，也不能免密 sudo：bspd 要装系统服务、拉 GPIO。用 root 登录，或者给这个用户免密 sudo`)
+  throw new Error(`在 ${exec.target} 上不是 root，也不能免密 sudo：boardctrld 要装系统服务、拉 GPIO。用 root 登录，或者给这个用户免密 sudo`)
 }
 
 /**
@@ -118,7 +118,7 @@ export async function shipSite(exec: Executor, sudo: string, bundle: string, pro
   await swapSite(exec, sudo)
 }
 
-/** Ask the host's bspd, on its loopback port with the token in its env file: a tool's JSON envelope (or `health`, or the tool list). */
+/** Ask the host's boardctrld, on its loopback port with the token in its env file: a tool's JSON envelope (or `health`, or the tool list). */
 const ASK = `import json, os, sys, urllib.request, urllib.error
 port, tool = sys.argv[1], sys.argv[2]
 path = {"health": "/api/v1/health", "tools": "/api/v1/tools"}.get(tool, "/api/v1/tools/" + tool)
@@ -152,7 +152,7 @@ async function ask(exec: Executor, sudo: string, port: number, tool: string): Pr
 const said = (envelope: Envelope) => envelope.error?.message ?? '没有回答'
 
 /**
- * Whether the host's bspd reads a new site in place (its tool list has `site_reload`; one too old to is restarted
+ * Whether the host's boardctrld reads a new site in place (its tool list has `site_reload`; one too old to is restarted
  * instead). Refused while a board on it is busy or a job runs on it: a new site changes the hooks and SoC facts they
  * use, and the installer cuts a job off when it restarts the daemon.
  *
@@ -162,16 +162,16 @@ const said = (envelope: Envelope) => envelope.error?.message ?? '没有回答'
  */
 async function readyFor(exec: Executor, sudo: string, port: number): Promise<{ reloads: boolean }> {
   const tools = await ask(exec, sudo, port, 'tools')
-  if (!tools.ok || !Array.isArray(tools.tools)) throw new SiteSyncError(`问不到 bspd 会做什么：${said(tools)}`)
+  if (!tools.ok || !Array.isArray(tools.tools)) throw new SiteSyncError(`问不到 boardctrld 会做什么：${said(tools)}`)
   const names = new Set(tools.tools.map(tool => tool.tool_name ?? String(tool.name ?? '').replace(/\./g, '_')))
   const reloads = names.has('site_reload')
   const duts = await ask(exec, sudo, port, 'dut_list')
-  if (!duts.ok) throw new SiteSyncError(`问不到 bspd 有没有板子在忙：${said(duts)}`)
+  if (!duts.ok) throw new SiteSyncError(`问不到 boardctrld 有没有板子在忙：${said(duts)}`)
   const rows = Array.isArray(duts.result) ? duts.result as Array<{ id?: string, busy?: string | null }> : []
   const busy = rows.filter(dut => dut.busy).map(dut => `${dut.id ?? '?'}：${dut.busy}`)
   if (names.has('job_list')) {
     const jobs = await ask(exec, sudo, port, 'job_list')
-    if (!jobs.ok) throw new SiteSyncError(`问不到 bspd 有没有任务在跑：${said(jobs)}`)
+    if (!jobs.ok) throw new SiteSyncError(`问不到 boardctrld 有没有任务在跑：${said(jobs)}`)
     const running = (Array.isArray(jobs.result) ? jobs.result as Array<{ id?: string, title?: string, status?: string }> : []).filter(job => job.status === 'running')
     busy.push(...running.map(job => `任务 ${job.id ?? '?'}${job.title ? `：${job.title}` : ''}`))
   }
@@ -194,29 +194,29 @@ async function providerCodeChanged(exec: Executor, sudo: string): Promise<boolea
 }
 
 /**
- * Which unit a host runs bspd as: the new name, or the old one for a host not installed on since the names changed.
+ * Which unit a host runs boardctrld as: the new name, or the old one for a host not installed on since the names changed.
  * `$U` is set to it (and nothing else is done) for `systemctl` and `journalctl`.
  */
 const UNIT = `U=boardctrld; if ! systemctl cat boardctrld 2>/dev/null && systemctl cat bsp-hostd 2>/dev/null; then U=bsp-hostd; fi`
 
-/** Restart bspd and wait for it to answer; what went wrong when it does not. */
+/** Restart boardctrld and wait for it to answer; what went wrong when it does not. */
 async function restart(exec: Executor, sudo: string, port: number, waitSeconds: number): Promise<string | null> {
   const run = await exec.run(`${sudo}sh -c '${UNIT}; systemctl restart "$U"'`, { timeoutMs: 60_000 })
-  if (run.code !== 0) return `重启 bspd 失败：${(run.stderr || run.stdout).trim()}`
+  if (run.code !== 0) return `重启 boardctrld 失败：${(run.stderr || run.stdout).trim()}`
   for (let attempt = 0; attempt < waitSeconds; attempt++) {
     if ((await ask(exec, sudo, port, 'health')).ok) return null
     await new Promise(resolve => setTimeout(resolve, 1000))
   }
   const journal = await exec.run(`${sudo}sh -c '${UNIT}; journalctl -u "$U" --no-pager -n 5 -o cat 2>/dev/null'`, { timeoutMs: 30_000 })
   const tail = journal.code === 0 ? journal.stdout.trim().split('\n').filter(Boolean).slice(-3).join(' / ') : ''
-  return `重启了 bspd，但它 ${waitSeconds} 秒内没起来${tail ? `：${tail}` : ''}`
+  return `重启了 boardctrld，但它 ${waitSeconds} 秒内没起来${tail ? `：${tail}` : ''}`
 }
 
 /**
- * Have the host's bspd take the site just swapped in: `site.reload` for the data, and a restart when the provider code
- * changed (modules are read when the host starts) — or, on a bspd too old to reload, a restart for both. When it does
- * not take it, the site it had is put back (and read again, or bspd restarted on it), and what went wrong is the
- * error: a host never keeps a site its bspd refused. Says what it did.
+ * Have the host's boardctrld take the site just swapped in: `site.reload` for the data, and a restart when the provider code
+ * changed (modules are read when the host starts) — or, on a boardctrld too old to reload, a restart for both. When it does
+ * not take it, the site it had is put back (and read again, or boardctrld restarted on it), and what went wrong is the
+ * error: a host never keeps a site its boardctrld refused. Says what it did.
  */
 async function takeSite(exec: Executor, sudo: string, port: number, reloads: boolean, newProviders: boolean, progress: (line: string) => void, waitSeconds: number): Promise<string> {
   let why: string
@@ -227,15 +227,15 @@ async function takeSite(exec: Executor, sudo: string, port: number, reloads: boo
       const read = `boardctrld 重新读了站点：${result.sdks?.length ?? 0} 个 SDK，${result.socs?.length ?? 0} 个 SoC`
       // New provider code is new Python: the host has to start again to run it (`site.reload` is data only).
       if (!newProviders) { await keepSite(exec, sudo); return read }
-      progress('站点的 provider 代码变了：重启 bspd 让新代码生效…')
+      progress('站点的 provider 代码变了：重启 boardctrld 让新代码生效…')
       const failed = await restart(exec, sudo, port, waitSeconds)
-      if (!failed) { await keepSite(exec, sudo); return `${read}；provider 代码变了，重启了 bspd` }
+      if (!failed) { await keepSite(exec, sudo); return `${read}；provider 代码变了，重启了 boardctrld` }
       why = failed
-    } else why = `bspd 没读进新站点：${said(reloaded)}`
+    } else why = `boardctrld 没读进新站点：${said(reloaded)}`
   } else {
-    progress('这个 bspd 还不会重读站点，改为重启它…')
+    progress('这个 boardctrld 还不会重读站点，改为重启它…')
     const failed = await restart(exec, sudo, port, waitSeconds)
-    if (!failed) { await keepSite(exec, sudo); return '重启了 bspd，它读了新站点' }
+    if (!failed) { await keepSite(exec, sudo); return '重启了 boardctrld，它读了新站点' }
     why = failed
   }
   progress(`${why}；放回原来的站点…`)
@@ -243,15 +243,15 @@ async function takeSite(exec: Executor, sudo: string, port: number, reloads: boo
   if (back) throw new SiteSyncError(`${why}；放回原来的站点也失败了：${back}`, 'unknown')
   if (reloads) {
     const again = await ask(exec, sudo, port, 'site_reload')
-    throw new SiteSyncError(`${why}；主机上放回了原来的站点${again.ok ? '' : `（bspd 重读它也没成：${said(again)}）`}`)
+    throw new SiteSyncError(`${why}；主机上放回了原来的站点${again.ok ? '' : `（boardctrld 重读它也没成：${said(again)}）`}`)
   }
   const again = await restart(exec, sudo, port, waitSeconds)
-  throw new SiteSyncError(`${why}；主机上放回了原来的站点，${again ? `bspd 还是没起来：${again}` : 'bspd 又起来了'}`)
+  throw new SiteSyncError(`${why}；主机上放回了原来的站点，${again ? `boardctrld 还是没起来：${again}` : 'boardctrld 又起来了'}`)
 }
 
-/** A lab's way in and bspd port, from its url (`bspd+ssh://user@host:port`, or this machine's `bspd+http://127.0.0.1:port`). */
+/** A lab's way in and boardctrld port, from its url (`boardctrld+ssh://user@host:port`, or this machine's `boardctrld+http://127.0.0.1:port`). */
 export function hostOf(url: string | null | undefined): { access: Access, port: number } | null {
-  const plain = (url ?? '').replace(/^bspd\+/, '')
+  const plain = (url ?? '').replace(/^boardctrld\+/, '')
   if (!/^(ssh|http):\/\//.test(plain)) return null
   const parsed = new URL(plain)
   const port = Number(parsed.port) || 8765
@@ -260,9 +260,9 @@ export function hostOf(url: string | null | undefined): { access: Access, port: 
 }
 
 /**
- * Ship a site bundle to one host and have its bspd take it: unpacked beside the host's site, swapped in once bspd is
+ * Ship a site bundle to one host and have its boardctrld take it: unpacked beside the host's site, swapped in once boardctrld is
  * free to take it, and put back when it does not (a `SiteSyncError` says what the host has then). `waitSeconds`: how
- * long a restarted bspd has to answer.
+ * long a restarted boardctrld has to answer.
  */
 export async function syncHost(hosts: Hosts, url: string | null | undefined, bundle: string, progress: (line: string) => void, waitSeconds = 30): Promise<string> {
   const where = hostOf(url)
@@ -283,11 +283,11 @@ export async function syncHost(hosts: Hosts, url: string | null | undefined, bun
 }
 
 /**
- * `site`: makes the site bundle in the directory given, or says there is none to ship; shipped before bspd starts.
+ * `site`: makes the site bundle in the directory given, or says there is none to ship; shipped before boardctrld starts.
  * `hostTools`: the host tools this distribution carries (host-tools.ts), beside the boardctrl tree; none when it is absent.
  */
-export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetup, token: string | null, progress: (line: string) => void, site?: (dir: string) => Promise<string | null>, hostTools = join(bspTree, '../../host-tools'), siteHosts?: SiteHostConfig | null): Promise<Installed> {
-  if (!existsSync(join(bspTree, 'deploy/bspd-install.sh'))) throw new Error(`这个 boardlab 没带 bsp（${bspTree}/deploy/bspd-install.sh 不在）`)
+export async function installHost(hosts: Hosts, boardctrlTree: string, setup: HostSetup, token: string | null, progress: (line: string) => void, site?: (dir: string) => Promise<string | null>, hostTools = join(boardctrlTree, '../../host-tools'), siteHosts?: SiteHostConfig | null): Promise<Installed> {
+  if (!existsSync(join(boardctrlTree, 'deploy/install.sh'))) throw new Error(`这个 boardlab 没带 boardctrl（${boardctrlTree}/deploy/install.sh 不在）`)
   progress(`连 ${setup.access.address}…`)
   const exec = await hosts.reach(setup.access, progress)
   const sudo = await root(exec)
@@ -297,13 +297,13 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
   try {
     const bundle = join(dir, 'boardctrl.tgz')
     progress('打包 boardctrl…')
-    await tar(bspTree, bundle)
+    await tar(boardctrlTree, bundle)
     const remote = `/tmp/boardlab-boardctrl-${randomBytes(4).toString('hex')}`
     progress('传过去…')
     await exec.run(`mkdir -p ${remote}`)
     await exec.put(bundle, `${remote}/boardctrl.tgz`)
     await shipHostTools(exec, sudo, hostTools, facts.stdout.split('\n')[0] ?? '', remote, progress)
-    // The network's certificate, if this distribution carries one: put beside the bundle, installed by bspd-install.
+    // The network's certificate, if this distribution carries one: put beside the bundle, installed by deploy/install.sh.
     let ca = ''
     if (setup.ca && existsSync(setup.ca)) {
       await exec.put(setup.ca, `${remote}/ca.crt`)
@@ -323,12 +323,12 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     }
     const made = setup.noToken ? '' : token ?? randomBytes(24).toString('hex')
     const port = setup.port ?? 8765
-    progress('在那台机器上装 bspd（第一次要建 Python 环境，几分钟）…')
+    progress('在那台机器上装 boardctrld（第一次要建 Python 环境，几分钟）…')
     // The installer starts each stage with `--> [n/N] <what>`: passed on as `[n/N] <what>` (the page shows step n of N
     // and a bar), and the lines under it carry the stage too, so the lab's busy line stays at the latest stage.
     let stage: string | null = null
     const run = await exec.run(
-      `set -e; cd ${remote}; tar -xzf boardctrl.tgz; ${sudo}bash deploy/bspd-install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg} ${setup.force === true ? '--force' : ''}; cd /; rm -rf ${remote}`,
+      `set -e; cd ${remote}; tar -xzf boardctrl.tgz; ${sudo}bash deploy/install.sh --id '${setup.id}' --port ${port} --bind 0.0.0.0 ${made ? `--token '${made}'` : '--no-token'} ${setup.board ? `--board '${setup.board}'` : ''} ${ca} ${siteHostsArg} ${setup.force === true ? '--force' : ''}; cd /; rm -rf ${remote}`,
       {
         timeoutMs: 1_800_000, onLine: line => {
           if (!line.trim()) return
@@ -341,9 +341,9 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     // hosts, whose installer only says that).
     const ready = /(?:BOARDCTRLD|BSPD)-READY (\S+) (\d+) (\S+)/.exec(run.stdout)
     if (run.code !== 0 || !ready) {
-      const failed = `装 bspd 失败：${(run.stderr || run.stdout).trim().split('\n').slice(-4).join(' / ')}`
+      const failed = `装 boardctrld 失败：${(run.stderr || run.stdout).trim().split('\n').slice(-4).join(' / ')}`
       if (!siteBundle) throw new Error(failed)
-      // It may be the new site bspd could not start on: the one the host had goes back, and a bspd that is down
+      // It may be the new site boardctrld could not start on: the one the host had goes back, and a boardctrld that is down
       // starts again on it.
       const back = await restoreSite(exec, sudo)
       if (back) throw new Error(`${failed}；放回原来的站点也失败了：${back}`)
@@ -352,7 +352,7 @@ export async function installHost(hosts: Hosts, bspTree: string, setup: HostSetu
     }
     if (siteBundle) await keepSite(exec, sudo)
     // This very machine: its loopback port. Another: through an ssh tunnel to its loopback port, as boardd's key gets in.
-    const url = exec.local ? `bspd+http://127.0.0.1:${port}` : `bspd+ssh://${exec.target}:${port}`
+    const url = exec.local ? `boardctrld+http://127.0.0.1:${port}` : `boardctrld+ssh://${exec.target}:${port}`
     return { target: exec.target, port, token: made, version: ready[3]!, url }
   } finally { rmSync(dir, { recursive: true, force: true }) }
 }
@@ -363,7 +363,7 @@ export async function uninstallHost(hosts: Hosts, access: Access, purge: boolean
   // The installer where it is installed now, else where it was before the names changed (an older host's tree has
   // the same file under /opt/bspd): either one uninstalls cleanly.
   const run = await exec.run(`set -e; d=$(mktemp -d); cd $d; ` +
-    `if [ -x /opt/boardctrl/current/app/deploy/bspd-install.sh ]; then ${sudo}bash /opt/boardctrl/current/app/deploy/bspd-install.sh --uninstall ${purge ? '--purge' : ''}; ` +
+    `if [ -x /opt/boardctrl/current/app/deploy/install.sh ]; then ${sudo}bash /opt/boardctrl/current/app/deploy/install.sh --uninstall ${purge ? '--purge' : ''}; ` +
     `elif [ -x /opt/bspd/current/app/deploy/bspd-install.sh ]; then ${sudo}bash /opt/bspd/current/app/deploy/bspd-install.sh --uninstall ${purge ? '--purge' : ''}; ` +
     // The installer waits for running jobs first (BOARDCTRL_UPGRADE_WAIT, 600 s by default) and says so line by
     // line: the timeout outlasts that wait, and the lines are the progress.

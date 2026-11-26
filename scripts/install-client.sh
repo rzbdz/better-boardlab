@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install (or update) the boardlab CLI and its agent skill on a compile machine (a build server, a laptop), set up to
 # use the central boardd. Compile machines need nothing else: boards, SDK trees and builds are all reached through
-# boardlab, and only boardd's machine runs the bsp CLI.
+# boardlab, and only boardd's machine runs the boardctrl CLI.
 #
 #   scripts/install-client.sh <user@host|local> --remote <url> [--user NAME] [--grant ADMIN@BOARDD_HOST] [--allow-dirty]
 #

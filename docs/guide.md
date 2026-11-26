@@ -23,7 +23,7 @@ Home Assistant 控制器管不到的板子（例如接在米家插座上、靠�
 
 每个实验室是某个后端模块的一个实例，实例名写在 boardd 的配置里（见「模块和配置」），板子登记成 `<实例名>-<设备名>`。现在有的后端：
 
-- `boardctrl` 模块：boardctrl 管理的板卡主机（[boardctrl](https://github.com/rzbdz/boardctrl)，子模块 `externals/boardctrl`）。boardd 只通过 boardctrl 命令行（`--json --stateless`）操作它们：列表、租约、复位、进下载模式、`stage`、`boot` 都是 `boardctrl dut …` 命令，串口走 `boardctrl dut pipe`（在板卡主机上把 serial-mux 的协议原样转过来，boardd 用自己的 serial-mux 客户端读写）。一个实验室可以直接填 `bspd+http://<主机>:8765`，让 boardctrl 走主机的 HTTP API；网络只通 SSH 时填 `bspd+ssh://<用户>@<主机>:8765`。也可以经 boardctrl registry 的 rendezvous 找到主机，但 registry 不参与每次登记表读取。拿锁时 boardd 同时持有这块板的 boardctrl 租约（持有人 `boardlab:<你>`），每分钟续一次，锁转给别人时改名，放锁后归还；有人直接在 boardctrl 里租着板子时，卡片上显示「实验室占用」，拿锁会排队，等对方释放后自动交给排第一的人。`boot` 整个交给 `boardctrl dut boot --files`，由 boardctrl 的忙碌保护和日志覆盖整个过程。
+- `boardctrl` 模块：boardctrl 管理的板卡主机（[boardctrl](https://github.com/rzbdz/boardctrl)，子模块 `externals/boardctrl`）。boardd 只通过 boardctrl 命令行（`--json --stateless`）操作它们：列表、租约、复位、进下载模式、`stage`、`boot` 都是 `boardctrl dut …` 命令，串口走 `boardctrl dut pipe`（在板卡主机上把 serial-mux 的协议原样转过来，boardd 用自己的 serial-mux 客户端读写）。一个实验室可以直接填 `boardctrld+http://<主机>:8765`，让 boardctrl 走主机的 HTTP API；网络只通 SSH 时填 `boardctrld+ssh://<用户>@<主机>:8765`。也可以经 boardctrl registry 的 rendezvous 找到主机，但 registry 不参与每次登记表读取。拿锁时 boardd 同时持有这块板的 boardctrl 租约（持有人 `boardlab:<你>`），每分钟续一次，锁转给别人时改名，放锁后归还；有人直接在 boardctrl 里租着板子时，卡片上显示「实验室占用」，拿锁会排队，等对方释放后自动交给排第一的人。`boot` 整个交给 `boardctrl dut boot --files`，由 boardctrl 的忙碌保护和日志覆盖整个过程。
 
 在网页「设置」里开启实验室，填后台地址、账号和密码（`boardctrl` 实验室这三项都可以留空）；「只用这些板子」填设备名或带 `*` 的模式（例如 `sub0-* sub1-*`），留空列出全部。
 

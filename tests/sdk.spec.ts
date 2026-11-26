@@ -6,7 +6,7 @@ import { openDatabase } from 'boardlab-core/core/db.ts'
 import { serve } from 'boardlab-core/server/http.ts'
 import { BoardsClient } from 'boardlab-core/shared/client.ts'
 import { sdkCommand } from '../src/shared/boardctrl-client.ts'
-import { bspSdk, type SdkReach } from '../src/modules/boardctrl/sdk.ts'
+import { sdkRunner, type SdkReach } from '../src/modules/boardctrl/sdk.ts'
 import { Bench, dir, makeLab, sha, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -21,7 +21,7 @@ async function freePort(): Promise<number> {
 }
 
 describe('SDK work through boardd', () => {
-  it('runs bsp sdk for the caller, streams its output, and carries files both ways', async () => {
+  it('runs boardctrl sdk for the caller, streams its output, and carries files both ways', async () => {
     const runs: Array<{ args: string[], holder: string, json: boolean }> = []
     const sdk = {
       async run(args: string[], options: { holder: string, json: boolean, group?: string, onOutput: (stream: 'stdout' | 'stderr', text: string) => void }) {
@@ -60,7 +60,7 @@ describe('SDK work through boardd', () => {
       await sdk(['recipe', 'k2-asr', 'download', '-f', `@${ref}`], false, () => {}, 'catalog')
       expect(runs.at(-1)).toMatchObject({ args: ['recipe', 'k2-asr', 'download', '-f', svc.files.get(sha('patched main.c'))!.path], group: 'catalog' })
       await expect(sdk(['export', '--dir', '/tmp/x'], false, () => {}, 'catalog')).rejects.toThrow(/不支持的 registry sdk 操作/)
-      // Any bsp command goes through, except those that change boardd's own machine.
+      // Any boardctrl command goes through, except those that change boardd's own machine.
       await sdk(['-r', 'h1', 'dut', 'status', 'k3-a'], true, () => {}, 'raw')
       expect(runs.at(-1)).toMatchObject({ args: ['-r', 'h1', 'dut', 'status', 'k3-a'], json: true, group: 'raw' })
       await expect(sdk(['remote', 'add', 'x', 'http://x'], false, () => {}, 'raw')).rejects.toThrow(/boardd 所在机器自己的配置/)
@@ -72,7 +72,7 @@ describe('SDK work through boardd', () => {
 
   /**
    * A command that asks the host itself (`gpio list`, a site provider's) needs the host's token: boardd holds it for the
-   * lab, so the passthrough gives it to bsp the way every other bsp call gets it, instead of leaving bsp to refuse.
+   * lab, so the passthrough gives it to boardctrl the way every other boardctrl call gets it, instead of leaving boardctrl to refuse.
    */
   it('a raw command reaches the host of the lab it names, with that lab\'s token', async () => {
     const reaches: Array<{ args: string[], reach?: unknown, env: NodeJS.ProcessEnv }> = []
@@ -101,12 +101,12 @@ describe('SDK work through boardd', () => {
       expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host1' }] })
       // Two labs, none named: both are reached, so a command can be about either.
       await svc.backends.add('user:alice', 'host2', 'boardctrl')
-      await svc.backends.configure('user:alice', 'host2', { enabled: true, url: 'bspd+ssh://root@host2.dc:8765', username: '', password: 'two-secret', devices: '' })
+      await svc.backends.configure('user:alice', 'host2', { enabled: true, url: 'boardctrld+ssh://root@host2.dc:8765', username: '', password: 'two-secret', devices: '' })
       await raw(['gpio', 'list'])
-      expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host1', url: 'http://registry.test:8765' }, { name: 'lab-host2', url: 'bspd+ssh://root@host2.dc:8765', token: 'two-secret' }] })
+      expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host1', url: 'http://registry.test:8765' }, { name: 'lab-host2', url: 'boardctrld+ssh://root@host2.dc:8765', token: 'two-secret' }] })
       await raw(['-r', 'host2', 'gpio', 'list'])
       expect(reaches.at(-1)!.reach).toMatchObject({ hosts: [{ name: 'lab-host2' }] })
-      // A name that is no lab is bsp's own remote, not an error from boardd.
+      // A name that is no lab is boardctrl's own remote, not an error from boardd.
       await raw(['-r', 'some-other-host', 'gpio', 'list'])
       expect(reaches.at(-1)!.reach).toBeNull()
       // `sdk` and `catalog` work on build servers and the registry: they get no reach even when a lab exists.
@@ -116,7 +116,7 @@ describe('SDK work through boardd', () => {
   })
 })
 
-describe('the bsp runner for a command that talks to hosts', () => {
+describe('the boardctrl runner for a command that talks to hosts', () => {
   /** A stand-in `boardctrl` that records what it was given and says ok. */
   function fakeBoardctrl(): { bin: string, seen: Array<{ argv: string[], env: NodeJS.ProcessEnv }> } {
     const bin = join(dir, 'boardctrl')
@@ -132,42 +132,42 @@ process.stdout.write('ok\\n')
     return { bin, get seen() { return existsSync(log) ? JSON.parse(readFileSync(log, 'utf8')) as Array<{ argv: string[], env: NodeJS.ProcessEnv }> : [] } }
   }
 
-  it('runs the same CLI as the rest of the bsp driver, not a name this machine may not have', async () => {
+  it('runs the same CLI as the rest of the boardctrl driver, not a name this machine may not have', async () => {
     // A machine with only the older name (`bsp`) had no `boardctrl`: the runner spawned `boardctrl`, which fails, and
     // the command never ran. What it spawns is decided the way the driver decides it.
-    const bsp = fakeBoardctrl()
+    const boardctrl = fakeBoardctrl()
     const path = process.env.PATH
     const onlyOld = join(dir, 'bin')
     mkdirSync(onlyOld, { recursive: true })
-    symlinkSync(bsp.bin, join(onlyOld, 'bsp'))
+    symlinkSync(boardctrl.bin, join(onlyOld, 'boardctrl'))
     process.env.PATH = onlyOld
     try {
-      const runner = bspSdk({ stateDir: join(dir, 'state2') })
+      const runner = sdkRunner({ stateDir: join(dir, 'state2') })
       expect(await runner.run(['hosts'], { holder: 'claude:c', json: false, group: 'raw', reach: null, onOutput: () => {} })).toBe(0)
-      expect(bsp.seen.at(-1)!.argv).toEqual(['hosts'])
+      expect(boardctrl.seen.at(-1)!.argv).toEqual(['hosts'])
     } finally { process.env.PATH = path }
   })
 
   it('hands a host command the lab\'s address and token, and leaves a command that names its own host alone', async () => {
-    const bsp = fakeBoardctrl()
-    const runner = bspSdk({ bin: bsp.bin, stateDir: join(dir, 'state') })
+    const boardctrl = fakeBoardctrl()
+    const runner = sdkRunner({ bin: boardctrl.bin, stateDir: join(dir, 'state') })
     const reach: SdkReach = { hosts: [{ name: 'lab-host1', url: 'http://registry.test:8765', token: 'host-secret' }], names: { host1: 'lab-host1' } }
     const said: string[] = []
     expect(await runner.run(['gpio', 'list'], { holder: 'claude:r', json: true, group: 'raw', reach, onOutput: (_s, text) => said.push(text) })).toBe(0)
-    // The command runs unchanged; the labs are where bsp reads its remotes, each with its own token.
-    expect(bsp.seen.at(-1)).toMatchObject({ argv: ['--json', '-r', 'lab-host1', 'gpio', 'list'], env: { BSP_HOLDER: 'bsp:claude:r' } })
-    const config = bsp.seen.at(-1)!.env.BSP_CONFIG!
+    // The command runs unchanged; the labs are where boardctrl reads its remotes, each with its own token.
+    expect(boardctrl.seen.at(-1)).toMatchObject({ argv: ['--json', '-r', 'lab-host1', 'gpio', 'list'], env: { BSP_HOLDER: 'boardctrl:claude:r' } })
+    const config = boardctrl.seen.at(-1)!.env.BSP_CONFIG!
     expect(config).toMatch(new RegExp(`^${join(dir, 'state', 'boardctrl-holders')}/[0-9a-f]{16}/remotes\\.json$`))
     expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ registry: null, remotes: { 'lab-host1': { url: 'http://registry.test:8765', token: 'host-secret' } } })
     expect(said).toEqual(['ok\n'])
     // `-r` keeps the command's choice, said the way a person says it (`host1`), written as the remote's own name.
     await runner.run(['-r', 'host1', 'gpio', 'list'], { holder: 'claude:r', json: false, group: 'raw', reach, onOutput: () => {} })
-    expect(bsp.seen.at(-1)!.argv).toEqual(['-r', 'lab-host1', 'gpio', 'list'])
-    // A name that is no lab is left alone: it may be bsp's own remote.
+    expect(boardctrl.seen.at(-1)!.argv).toEqual(['-r', 'lab-host1', 'gpio', 'list'])
+    // A name that is no lab is left alone: it may be boardctrl's own remote.
     await runner.run(['-r', 'elsewhere', 'gpio', 'list'], { holder: 'claude:r', json: false, group: 'raw', reach, onOutput: () => {} })
-    expect(bsp.seen.at(-1)!.argv).toEqual(['-r', 'elsewhere', 'gpio', 'list'])
+    expect(boardctrl.seen.at(-1)!.argv).toEqual(['-r', 'elsewhere', 'gpio', 'list'])
     // A lab on a board host: its own address first (never loopback, which may be a hostd on the boardd's machine),
-    await runner.run(['dut', 'list'], { holder: 'claude:r', json: false, group: 'raw', reach: { hosts: [{ name: 'b', url: 'bspd+ssh://root@host-a.example:8765', token: 't' }], names: {} }, onOutput: () => {} })
+    await runner.run(['dut', 'list'], { holder: 'claude:r', json: false, group: 'raw', reach: { hosts: [{ name: 'b', url: 'boardctrld+ssh://root@host-a.example:8765', token: 't' }], names: {} }, onOutput: () => {} })
     expect(JSON.parse(readFileSync(config, 'utf8'))).toEqual({ registry: null, remotes: { b: { url: 'http://host-a.example:8765', ssh: 'root@host-a.example', token: 't' } } })
     // The site's own remotes.json may point its `registry` at a machine and name the same hosts: a registry entry
     // merges over everything else and carries no token, so the reach speaks for the labs alone and under its own names.
@@ -175,7 +175,7 @@ process.stdout.write('ok\\n')
     expect(Object.keys(JSON.parse(readFileSync(config, 'utf8')).remotes)).toEqual(['b'])
     // No reach (`sdk`, `catalog`, or no lab to tell): the command runs as before, with no token of a lab's.
     await runner.run(['list'], { holder: 'claude:r', json: false, group: 'sdk', reach: null, onOutput: () => {} })
-    expect(bsp.seen.at(-1)).toMatchObject({ argv: ['sdk', 'list'], env: { BSP_HOLDER: 'boardlab:claude:r' } })
-    expect(bsp.seen.at(-1)!.env.BSP_TOKEN).toBeUndefined()
+    expect(boardctrl.seen.at(-1)).toMatchObject({ argv: ['sdk', 'list'], env: { BSP_HOLDER: 'boardlab:claude:r' } })
+    expect(boardctrl.seen.at(-1)!.env.BSP_TOKEN).toBeUndefined()
   })
 })

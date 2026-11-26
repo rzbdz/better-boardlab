@@ -47,7 +47,7 @@ my-site/
 
 ## 同步
 
-「同步到所有主机」会先取镜像（`bsp images sync`），再把上面那几样打包发到每台 boardctrl 主机的 `/etc/bsp/site`，然后让 boardctrld 重新读取。站点有问题时不让同步，页面上会列出问题；问题都是按 bsp 读取站点的规则检查出来的，所以能同步过去的站点，主机上一定读得进去。
+「同步到所有主机」会先取镜像（`boardctrl images sync`），再把上面那几样打包发到每台 boardctrl 主机的 `/etc/boardctrl/site`，然后让 boardctrld 重新读取。站点有问题时不让同步，页面上会列出问题；问题都是按 boardctrl 读取站点的规则检查出来的，所以能同步过去的站点，主机上一定读得进去。
 
 空站点也可以同步：主机拿到的就是一套空配置，只用 boardctrl 自带的 SoC 资料和编译方式。
 
@@ -61,7 +61,7 @@ SoC 资料里可以列一些探测用的镜像（例如 K1 的 FSBL 和 U-Boot�
 
 ## SDK 自己的说明（skill）
 
-SDK 可以带一份自己的 `SKILL.md`，说明一份源码树在这个 SDK 里怎么用（例如同一份 bsp 源码的不同启动配置：edk2、u-boot、ACPI）。它放在站点的 `skills/<sdk>.md`；boardctrl 自带的 platform 也可以放 `<platform>/skills/<sdk>.md`，站点里的同 id 覆盖 platform 的。这是 Markdown，不是目录里的 YAML，所以不参与目录校验，同步时也不发给板卡主机。
+SDK 可以带一份自己的 `SKILL.md`，说明一份源码树在这个 SDK 里怎么用（例如同一份 boardctrl 源码的不同启动配置：edk2、u-boot、ACPI）。它放在站点的 `skills/<sdk>.md`；boardctrl 自带的 platform 也可以放 `<platform>/skills/<sdk>.md`，站点里的同 id 覆盖 platform 的。这是 Markdown，不是目录里的 YAML，所以不参与目录校验，同步时也不发给板卡主机。
 
 在 SDK 的仓库里工作时，agent 可以这样取到它：
 

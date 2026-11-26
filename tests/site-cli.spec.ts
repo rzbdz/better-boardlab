@@ -1,5 +1,5 @@
 /**
- * `boardlab site`: the command against a fake boardd answering the site endpoints. No bsp, no hosts.
+ * `boardlab site`: the command against a fake boardd answering the site endpoints. No boardctrl, no hosts.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

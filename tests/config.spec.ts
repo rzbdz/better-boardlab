@@ -23,7 +23,7 @@ describe('boardd configuration', () => {
   })
 
   it('makes the modules selected from the catalog, with their settings, under the names a site knows its hosts by', () => {
-    // A lab server with only remote hosts: two bsp board hosts.
+    // A lab server with only remote hosts: two boardctrl board hosts.
     const lab = new BoardLab({ db: openDatabase(join(dir, 'config.sqlite')), modules: createModules(CATALOG, { boardctrl: { instances: ['site-a', 'site-b'] } }, context()) })
     expect(lab.modules().map(item => item.id)).toEqual(['boardctrl'])
     expect(lab.backends.labSettings().map(item => item.id)).toEqual(['site-a', 'site-b'])

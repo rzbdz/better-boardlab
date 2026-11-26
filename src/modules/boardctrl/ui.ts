@@ -1,6 +1,6 @@
 /**
- * The bsp module's part of the page: in settings, its board hosts. Add one (a name and how to reach the machine: an
- * address, a user, a password or nothing when boardd's key or this machine's ssh setup gets in), install bspd on it
+ * The boardctrl module's part of the page: in settings, its board hosts. Add one (a name and how to reach the machine: an
+ * address, a user, a password or nothing when boardd's key or this machine's ssh setup gets in), install boardctrld on it
  * with its progress shown as it goes, update it (install again) or remove it. And the site the hosts read: where it
  * comes from, its SDKs and build servers (added, edited, removed), its SoC facts and the images they need, and
  * syncing it to every host.
@@ -18,11 +18,11 @@ const ACCESS = [
 ]
 
 function install(lab: LabSettings | null): Element[] {
-  // `bspd+ssh://user@host:port`, or this machine's own bspd on its loopback port.
-  const host = lab?.url?.startsWith('bspd+http://127.0.0.1') ? 'root@localhost' : lab?.url?.replace(/^bspd\+ssh:\/\//, '') ?? ''
+  // `boardctrld+ssh://user@host:port`, or this machine's own boardctrld on its loopback port.
+  const host = lab?.url?.startsWith('boardctrld+http://127.0.0.1') ? 'root@localhost' : lab?.url?.replace(/^boardctrld\+ssh:\/\//, '') ?? ''
   const [user, address] = host.includes('@') ? host.split('@') as [string, string] : ['root', host]
   return [
-    text(lab ? `重新装一遍（升级、修好），或者换一台机器。` : '新的板卡主机：boardd 用 ssh 过去，装好 bspd（Python 服务，管这台机器的复位线、串口和下载口），接入成一个实验室。'),
+    text(lab ? `重新装一遍（升级、修好），或者换一台机器。` : '新的板卡主机：boardd 用 ssh 过去，装好 boardctrld（Python 服务，管这台机器的复位线、串口和下载口），接入成一个实验室。'),
     {
       kind: 'form',
       fields: [
@@ -65,7 +65,7 @@ interface BoardChoices {
   /** Its SoC and SDKs as registered, and the SoCs and SDKs the catalog offers (`sdks` empty: every SDK of its SoC). */
   soc: string | null, sdks: string[], socs: Array<{ value: string, label: string }>, sdkOptions: Array<{ value: string, label: string }>
 }
-/** A bsp board's record, edited as choices from its actual host, never hand-written GPIO/USB identifiers. */
+/** A boardctrl board's record, edited as choices from its actual host, never hand-written GPIO/USB identifiers. */
 const boardChoices = new Map<string, BoardChoices>()
 const boardAsking = new Map<string, Promise<BoardChoices>>()
 function readBoardChoices(board: string): Promise<BoardChoices> {
@@ -104,7 +104,7 @@ function boardForm(board: string, current: BoardChoices): Element[] {
       submit: action('save', '保存', async input => {
         // Only what changed is sent: an untouched field that is only observable in some state (the download port is
         // enumerated in download mode) must not make a save fail. Every save may say which SDKs explicitly; an
-        // empty list means every SDK of the SoC (bsp's own default).
+        // empty list means every SDK of the SoC (boardctrl's own default).
         const changed: Record<string, unknown> = { board }
         const sdks = input.sdks as string[] | undefined
         if (sdks !== undefined && sdks.join('\u0000') !== (current.sdks ?? []).join('\u0000')) changed.sdks = sdks
@@ -121,7 +121,7 @@ function boardForm(board: string, current: BoardChoices): Element[] {
 
 function openBoardForm(board: string) {
   const cached = boardChoices.get(board)
-  return open('edit', '改登记…', `${board.toUpperCase()} 的 bsp 登记`, () => cached ? boardForm(board, cached) : [], {
+  return open('edit', '改登记…', `${board.toUpperCase()} 的 boardctrl 登记`, () => cached ? boardForm(board, cached) : [], {
     load: () => readBoardChoices(board).then(current => boardForm(board, current)),
   })
 }
@@ -138,7 +138,7 @@ interface SiteStatus {
   docs: SiteDoc[], skills?: SiteSkill[], socs: Array<{ soc: string, layer: string }>, problems: string[], hosts: Record<string, HostSync>, syncing: boolean
   images: ImagesState | null
 }
-// The host models bsp has a header map for, as boardd's bsp tree lists them; loaded once.
+// The host models boardctrl has a header map for, as boardd's boardctrl tree lists them; loaded once.
 let hostModels: Array<{ id: string, name: string }> = []
 void call<{ boards: Array<{ id: string, name: string }> }>('GET', 'api/boardctrl/boards').then(got => { if (Array.isArray(got?.boards)) hostModels = got.boards }).catch(() => {})
 const modelOptions = () => [{ value: 'auto', label: '自动识别（从设备树）' }, ...hostModels.map(item => ({ value: item.id, label: `${item.name}（${item.id}）` })),
@@ -205,7 +205,7 @@ download:                      # 刷机：写进存储，再冷启动
 
 function sdkForm(doc: SiteDoc | null, preset: { server?: string } = {}): Element[] {
   const f = doc?.fields ?? {}
-  const pick = (kind: Kind, none?: string) => [...(none ? [{ value: '', label: none }] : []), ...docs(kind).map(item => ({ value: item.id, label: fromPack(item) ? `${item.id}（bsp 自带）` : item.id }))]
+  const pick = (kind: Kind, none?: string) => [...(none ? [{ value: '', label: none }] : []), ...docs(kind).map(item => ({ value: item.id, label: fromPack(item) ? `${item.id}（boardctrl 自带）` : item.id }))]
   const socs = [...new Set([...(site?.socs ?? []).map(item => item.soc), ...(f.soc ? [f.soc] : [])])]
   const server = f.server ?? (doc ? '' : preset.server ?? docs('servers')[0]?.id ?? '')
   return [
@@ -213,10 +213,10 @@ function sdkForm(doc: SiteDoc | null, preset: { server?: string } = {}): Element
     {
       kind: 'form',
       fields: [
-        { kind: 'text', id: 'id', label: '名字', initial: doc?.id ?? '', required: true, pattern: ID_PATTERN, placeholder: '例如 vendor-bsp-a' },
+        { kind: 'text', id: 'id', label: '名字', initial: doc?.id ?? '', required: true, pattern: ID_PATTERN, placeholder: '例如 vendor-a' },
         { kind: 'choice', id: 'family', label: '编译方式', doc: 'sdk-families', options: pick('families'), initial: f.family ?? docs('families')[0]?.id ?? '' },
         { kind: 'choice', id: 'server', label: '编译服务器', doc: 'sdk-servers', options: pick('servers', '（用源码树）'), initial: server },
-        { kind: 'text', id: 'path', label: '源码路径', initial: f.path ?? '', placeholder: '编译服务器上的目录，例如 /home/dev/work/bsp-a' },
+        { kind: 'text', id: 'path', label: '源码路径', initial: f.path ?? '', placeholder: '编译服务器上的目录，例如 /home/dev/work/vendor-a' },
         { kind: 'choice', id: 'workspace', label: '源码树（可选）', options: pick('workspaces', '（不用，按服务器和路径）'), initial: f.workspace ?? '' },
         { kind: 'choice', id: 'soc', label: 'SoC', doc: 'soc-profiles', options: [{ value: '', label: '（不限）' }, ...socs.map(soc => ({ value: soc, label: soc }))], initial: f.soc ?? '' },
         { kind: 'text', id: 'description', label: '说明', initial: f.description ?? '', wide: true },
@@ -232,7 +232,7 @@ function sdkForm(doc: SiteDoc | null, preset: { server?: string } = {}): Element
 function serverForm(doc: SiteDoc | null): Element[] {
   const f = doc?.fields ?? {}
   return [
-    text(doc ? `改 ${doc.file}。表单里没有的键（home_aliases、env）和注释都保留。` : '新的编译服务器：bsp 用 ssh（user@host）到这里编 SDK。boardd 和板卡主机都要能用密钥登录它。'),
+    text(doc ? `改 ${doc.file}。表单里没有的键（home_aliases、env）和注释都保留。` : '新的编译服务器：boardctrl 用 ssh（user@host）到这里编 SDK。boardd 和板卡主机都要能用密钥登录它。'),
     {
       kind: 'form',
       fields: [
@@ -277,7 +277,7 @@ function docActions(kind: Kind, doc: SiteDoc, form?: (doc: SiteDoc) => Element[]
 function docList(kind: Kind, items: SiteDoc[], describe: (doc: SiteDoc) => string, form?: (doc: SiteDoc) => Element[], empty?: string): Element {
   return {
     kind: 'list', empty: empty ?? `还没有${KIND_NAME[kind]}`,
-    items: items.map(doc => ({ key: `${doc.layer}/${doc.id}`, title: doc.id, description: describe(doc), tag: fromPack(doc) ? `bsp 自带（${doc.layer}）` : undefined, actions: docActions(kind, doc, form) })),
+    items: items.map(doc => ({ key: `${doc.layer}/${doc.id}`, title: doc.id, description: describe(doc), tag: fromPack(doc) ? `boardctrl 自带（${doc.layer}）` : undefined, actions: docActions(kind, doc, form) })),
   }
 }
 
@@ -303,7 +303,7 @@ function siteContext(s: SiteStatus): string {
   const yaml = (kind: Kind) => docs(kind).filter(doc => !fromPack(doc)).map(doc => `# ${doc.file}\n${doc.text.trim()}`).join('\n---\n')
   const out = [
     `来源：${s.source === 'git' ? `git ${s.url} 分支 ${s.branch}` : '这台 boardd 管理'}；版本 ${s.revision ?? '还没有'}`,
-    `编译方式：${docs('families').map(doc => doc.id + (fromPack(doc) ? '（bsp 自带）' : '')).join('、') || '无'}`,
+    `编译方式：${docs('families').map(doc => doc.id + (fromPack(doc) ? '（boardctrl 自带）' : '')).join('、') || '无'}`,
     `源码树：${docs('workspaces').map(doc => doc.id).join('、') || '无'}`,
     `SoC 资料：${[...new Set(s.socs.map(item => item.soc))].join('、') || '无'}`,
     ...(s.skills?.length ? [`SDK skill：${s.skills.map(skill => skill.id).join('、')}`] : []),
@@ -318,7 +318,7 @@ function serverGroup(server: SiteDoc, sdks: SiteDoc[], sdkText: (doc: SiteDoc, s
   const mine = sdks.filter(doc => !doc.fields.workspace && doc.fields.server === server.id)
   return {
     kind: 'group', title: server.id, status: { tone: 'neutral', text: `${mine.length} 个 SDK` }, help: 'sdk-instances', body: [
-      text([{ code: `${server.fields.user ?? '?'}@${server.fields.host ?? '?'}` }, ...(server.fields.description ? [` · ${server.fields.description}`] : []), ...(fromPack(server) ? [{ muted: ` · bsp 自带（${server.layer}）` }] : [])]),
+      text([{ code: `${server.fields.user ?? '?'}@${server.fields.host ?? '?'}` }, ...(server.fields.description ? [` · ${server.fields.description}`] : []), ...(fromPack(server) ? [{ muted: ` · boardctrl 自带（${server.layer}）` }] : [])]),
       docList('instances', mine, doc => sdkText(doc, false), doc => sdkForm(doc), '这台服务器上还没有 SDK'),
       { kind: 'actions', actions: [
         open(`add-sdk-${server.id}`, '添加 SDK', `在 ${server.id} 上添加 SDK`, () => sdkForm(null, { server: server.id }), { intent: 'primary' }),
@@ -342,11 +342,11 @@ function advanced(s: SiteStatus): Element {
       ] },
       { kind: 'group', title: 'SoC 资料', help: 'soc-profiles', body: [
         text('在站点的 socs/<soc>/ 里改：站点放在 git 仓库里时，在仓库里改、提交，再拉取。'),
-        { kind: 'list', empty: '没有 SoC 资料', items: s.socs.map(item => ({ key: `${item.layer}/${item.soc}`, title: item.soc, description: item.layer === 'site' ? `站点的 socs/${item.soc}` : `bsp 自带（${item.layer}）` })) },
+        { kind: 'list', empty: '没有 SoC 资料', items: s.socs.map(item => ({ key: `${item.layer}/${item.soc}`, title: item.soc, description: item.layer === 'site' ? `站点的 socs/${item.soc}` : `boardctrl 自带（${item.layer}）` })) },
       ] },
       { kind: 'group', title: 'SDK skill', body: [
-        text('SDK 可以带自己的 SKILL.md（站点的 skills/<id>.md，或 bsp 自带平台里的 skills/<id>.md）：agent 在那个 SDK 的仓库里工作时，用 boardlab sdk skill <id> 打印，或 --install 装到 .claude/skills/<id>/SKILL.md。'),
-        { kind: 'list', empty: '还没有 SDK skill', items: (s.skills ?? []).map(skill => ({ key: `${skill.layer}/${skill.id}`, title: skill.id, description: `${skill.file}${skill.title !== skill.id ? ` · ${skill.title}` : ''}`, tag: skill.layer === 'site' ? undefined : `bsp 自带（${skill.layer}）` })) },
+        text('SDK 可以带自己的 SKILL.md（站点的 skills/<id>.md，或 boardctrl 自带平台里的 skills/<id>.md）：agent 在那个 SDK 的仓库里工作时，用 boardlab sdk skill <id> 打印，或 --install 装到 .claude/skills/<id>/SKILL.md。'),
+        { kind: 'list', empty: '还没有 SDK skill', items: (s.skills ?? []).map(skill => ({ key: `${skill.layer}/${skill.id}`, title: skill.id, description: `${skill.file}${skill.title !== skill.id ? ` · ${skill.title}` : ''}`, tag: skill.layer === 'site' ? undefined : `boardctrl 自带（${skill.layer}）` })) },
       ] },
       { kind: 'group', title: '编辑原文', body: [
         text('站点里的每个文档都可以直接改 YAML，和 boardlab site set 一样：写进去前先检查，主机读不进去的改动不写。'),
@@ -377,7 +377,7 @@ function siteView(labs: LabSettings[]): View {
     id: 'boardctrl-site', slot: 'settings', title: 'SDK 与站点', help: 'site', order: 20,
     summary: 'SDK 在哪、怎么刷，同步到每台板卡主机。',
     // The guidance levels are read from this site; the help says how an agent asks for them.
-    extra: { 'bsp.guidanceHelp': 'guidance' },
+    extra: { 'boardctrl.guidanceHelp': 'guidance' },
     hint: {
       commands: ['boardlab site show', 'boardlab site set server <id> --file <yaml>', 'boardlab site set sdk <id> --file <yaml>', 'boardlab site remove <sdk|server|family|workspace> <id>', 'boardlab site sync', 'boardlab sdk plan <sdk> --boot load|download'],
       context: () => s ? siteContext(s) : '（站点还没读到）',
@@ -435,13 +435,13 @@ export const ui: ModuleUi = {
     const labs = state.labs.filter(lab => lab.addedAs === 'boardctrl')
     const board = context.board ? state.boards.find(item => item.name === context.board) : undefined
     if (board) {
-      const bspBoard = !!board.lab && !board.lab.empty && labs.some(lab => lab.id === board.lab!.id)
-      const home = bspBoard ? labs.find(lab => lab.id === board.lab!.id) : undefined
-      if (!bspBoard) return []
+      const labBoard = !!board.lab && !board.lab.empty && labs.some(lab => lab.id === board.lab!.id)
+      const home = labBoard ? labs.find(lab => lab.id === board.lab!.id) : undefined
+      if (!labBoard) return []
       // A board its host can debug carries the debug block: the path is asked for once, then kept.
       if (hasDebug(board)) void readDebug(board.name)
       return [{
-        id: 'boardctrl-board', slot: 'board', title: 'bsp 登记',
+        id: 'boardctrl-board', slot: 'board', title: 'boardctrl 登记',
         body: [
           { kind: 'actions', actions: [openBoardForm(board.name)] },
           // The host's own page: its GPIO header, lines and events, opened on the host itself.
@@ -455,20 +455,20 @@ export const ui: ModuleUi = {
       summary: '接着板子的机器（也可以就是这台）：给地址和登录方式，boardd 过去装好。',
       status: labs.length ? { tone: labs.every(lab => lab.enabled && lab.verifyOk !== false) ? 'ok' : 'warn', text: `${labs.length} 台` } : undefined,
       body: [
-        text('接着板子的机器。每台装上 bspd，就是一个实验室：它的复位线、串口和下载口由 boardd 管，锁和排队在这里。'),
+        text('接着板子的机器。每台装上 boardctrld，就是一个实验室：它的复位线、串口和下载口由 boardd 管，锁和排队在这里。'),
         ...(labs.length ? [{
           kind: 'list' as const,
           items: labs.map(lab => ({
             key: lab.id, title: lab.id,
-            description: [[lab.url?.replace(/^bspd\+/, '') ?? '还没装', lab.verifyMessage ? ` · ${lab.verifyMessage}` : '', hostSite(lab.id)].join(''),
+            description: [[lab.url?.replace(/^boardctrld\+/, '') ?? '还没装', lab.verifyMessage ? ` · ${lab.verifyMessage}` : '', hostSite(lab.id)].join(''),
               // The host's own page (GPIO header, lines, events), through boardd, which adds the token.
               ...(lab.enabled && lab.url ? [' · ', { link: 'GPIO 面板', href: gpioLink(lab.url, lab.id) }] : [])],
             status: lab.busy ? { tone: 'neutral' as const, text: lab.busy.line ? `${lab.busy.label}：${lab.busy.line.slice(0, 60)}` : `${lab.busy.label}…` }
               : !lab.enabled ? { tone: 'warn' as const, text: '还没装好' } : lab.verifyOk === false ? { tone: 'error' as const, text: '连不上' } : { tone: 'ok' as const, text: '在线' },
             actions: [
               open('reinstall', '重新安装', `重新安装 ${lab.id}`, () => install(lab)),
-              action('remove', '删除', async () => { await call('POST', 'api/boardctrl/uninstall', { id: lab.id }); return `删除了 ${lab.id}：主机上的 bspd 卸掉了` },
-                { intent: 'danger', confirm: { title: `删除 ${lab.id}`, body: '卸掉主机上的 bspd（它的板子记录留在主机上），并从 boardlab 删掉这个实验室和它的板子。有人拿着锁时不能删。', action: '删除' } }),
+              action('remove', '删除', async () => { await call('POST', 'api/boardctrl/uninstall', { id: lab.id }); return `删除了 ${lab.id}：主机上的 boardctrld 卸掉了` },
+                { intent: 'danger', confirm: { title: `删除 ${lab.id}`, body: '卸掉主机上的 boardctrld（它的板子记录留在主机上），并从 boardlab 删掉这个实验室和它的板子。有人拿着锁时不能删。', action: '删除' } }),
             ],
           })),
         }] : [notice('还没有板卡主机。添加一台：给出地址和登录方式，boardd 会装好它。', 'neutral')]),

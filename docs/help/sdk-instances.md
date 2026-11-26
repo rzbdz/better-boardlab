@@ -8,7 +8,7 @@
 
 ```yaml
 id: vendor-bsp-a
-family: make-bsp               # 编译方式（sdk/families/ 或 bsp 自带的）
+family: make-bsp               # 编译方式（sdk/families/ 或 boardctrl 自带的）
 server: build-a                # 编译服务器
 path: /home/dev/work/bsp-a     # 源码在服务器上的目录
 soc: soc-a                     # 这个 SoC 的板子能跑它

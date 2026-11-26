@@ -1,5 +1,5 @@
 /**
- * A board host's own page through boardd: requests pass to the lab's bspd with its token added, streams stay live,
+ * A board host's own page through boardd: requests pass to the lab's boardctrld with its token added, streams stay live,
  * and only people get in.
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -17,7 +17,7 @@ useTempDir()
 let server: Server | null = null
 afterEach(() => { server?.close(); server = null })
 
-/** bspd as far as its page goes: the page, a tool call that echoes, and an event stream that sends twice. */
+/** boardctrld as far as its page goes: the page, a tool call that echoes, and an event stream that sends twice. */
 async function fakeBspd() {
   const seen: Array<{ method: string, url: string, auth?: string, prefix?: string, body: string }> = []
   server = createServer((request, response) => {
@@ -57,17 +57,17 @@ async function labWith(url: string) {
 const text = async (reply: RawReply) => { let out = ''; for await (const chunk of reply.body ?? []) out += chunk.toString(); return out }
 
 describe('a board host\'s page through boardd', () => {
-  it('reads the bspd address of a lab, and refuses anything else', () => {
-    expect(panelTarget('bspd+ssh://root@host-a:8765')).toEqual({ kind: 'ssh', target: 'root@host-a', sshPort: null, port: 8765 })
-    expect(panelTarget('bspd+http://127.0.0.1:9000')).toEqual({ kind: 'http', host: '127.0.0.1', port: 9000 })
-    expect(() => panelTarget('bspd+ssh://root@host-a;id:8765')).toThrow(/不合法|没有 bspd 地址/)
-    expect(() => panelTarget(null)).toThrow(/没有 bspd 地址/)
+  it('reads the boardctrld address of a lab, and refuses anything else', () => {
+    expect(panelTarget('boardctrld+ssh://root@host-a:8765')).toEqual({ kind: 'ssh', target: 'root@host-a', sshPort: null, port: 8765 })
+    expect(panelTarget('boardctrld+http://127.0.0.1:9000')).toEqual({ kind: 'http', host: '127.0.0.1', port: 9000 })
+    expect(() => panelTarget('boardctrld+ssh://root@host-a;id:8765')).toThrow(/不合法|没有 boardctrld 地址/)
+    expect(() => panelTarget(null)).toThrow(/没有 boardctrld 地址/)
   })
 
 
   it('passes the page, tool calls and event streams on, with the lab\'s token added and the browser\'s own left out', async () => {
-    const bspd = await fakeBspd()
-    const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
+    const boardctrld = await fakeBspd()
+    const { call } = await labWith(`boardctrld+http://127.0.0.1:${boardctrld.port}`)
     const page = await call('GET', '/api/boardctrl/hosts/host1/panel/')
     expect(page.status).toBe(200)
     expect(await text(page)).toContain('static/style.css')
@@ -78,17 +78,17 @@ describe('a board host\'s page through boardd', () => {
     for await (const chunk of events.body ?? []) chunks.push(chunk.toString())
     expect(chunks.join('')).toBe('data: one\n\ndata: two\n\n')
     expect(chunks.length).toBeGreaterThan(1)                                       // streamed, not buffered
-    const forwarded = bspd.seen.filter(item => item.url !== '/api/v1/health')
+    const forwarded = boardctrld.seen.filter(item => item.url !== '/api/v1/health')
     expect(forwarded.every(item => item.auth === 'Bearer host-secret' && item.prefix === '/api/boardctrl/hosts/host1/panel')).toBe(true)
   })
 
   it('only reads while someone else holds a board of the lab: its lines are theirs', async () => {
-    const bspd = await fakeBspd()
-    const { lab, call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
+    const boardctrld = await fakeBspd()
+    const { lab, call } = await labWith(`boardctrld+http://127.0.0.1:${boardctrld.port}`)
     lab.kernel.db.prepare("INSERT INTO boards(name, slot, product, soc, source, lab, lab_device) VALUES('host1-dut1', 's1', '', 'soc-a', 'lab', 'host1', 'dut1')").run()
     lab.locks.grant('host1-dut1', 'user:bob', '调试')
     await expect(call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).rejects.toMatchObject({ code: 'forbidden', message: expect.stringMatching(/host1-dut1 正被 user:bob 使用/) })
-    expect(bspd.seen.some(item => item.url.includes('gpio_set'))).toBe(false)
+    expect(boardctrld.seen.some(item => item.url.includes('gpio_set'))).toBe(false)
     // Looking is still allowed, and the holder may change what is theirs.
     expect((await call('GET', '/api/boardctrl/hosts/host1/panel/')).status).toBe(200)
     expect((await call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:bob', { line: 5 })).status).toBe(200)
@@ -97,17 +97,17 @@ describe('a board host\'s page through boardd', () => {
     expect((await call('POST', '/api/boardctrl/hosts/host1/panel/api/v1/tools/gpio_set', 'user:alice', { line: 5 })).status).toBe(200)
   })
 
-  it('is for people only, and only for bsp labs', async () => {
-    const bspd = await fakeBspd()
-    const { call } = await labWith(`bspd+http://127.0.0.1:${bspd.port}`)
+  it('is for people only, and only for boardctrl labs', async () => {
+    const boardctrld = await fakeBspd()
+    const { call } = await labWith(`boardctrld+http://127.0.0.1:${boardctrld.port}`)
     await expect(call('GET', '/api/boardctrl/hosts/host1/panel/', 'claude:task-1')).rejects.toThrow(/只给人用/)
     await expect(call('GET', '/api/boardctrl/hosts/nope/panel/')).rejects.toThrow(/没有 boardctrl 实验室 nope/)
-    expect(bspd.seen).toEqual([])
+    expect(boardctrld.seen).toEqual([])
   })
 })
 
 describe('host models', () => {
-  it('lists the host models bsp has a header map for, by id and name', async () => {
+  it('lists the host models boardctrl has a header map for, by id and name', async () => {
     const { hostBoards } = await import('../src/modules/boardctrl/index.ts')
     const boards = hostBoards(join(import.meta.dirname, '../externals/boardctrl'))
     expect(boards.length).toBeGreaterThanOrEqual(2)

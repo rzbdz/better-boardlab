@@ -1,13 +1,13 @@
 /**
  * End to end: the real `boardlab` CLI against a real boardd that drives two real board hosts.
  *
- * Everything here is the thing itself — two `boardctrld`s on fake hardware (the bsp repo's mock GPIO backend), each
+ * Everything here is the thing itself — two `boardctrld`s on fake hardware (the boardctrl repo's mock GPIO backend), each
  * with its own token, a boardd that knows both labs, and the built CLI talking to it. Nothing is mocked, so it
- * exercises the whole chain a defect can hide in: the CLI's argument handling, the HTTP API, the bsp module's
- * wiring of a lab's address and token, the bsp CLI's own remote resolution, and the host's tool API.
+ * exercises the whole chain a defect can hide in: the CLI's argument handling, the HTTP API, the boardctrl module's
+ * wiring of a lab's address and token, the boardctrl CLI's own remote resolution, and the host's tool API.
  *
  * It exists because the bugs that shipped in 0.4.43 lived in exactly that seam and no unit test could see them: a
- * lab's token never reaching bsp, a site file's entry answering instead of boardd's, a host address that was
+ * lab's token never reaching boardctrl, a site file's entry answering instead of boardd's, a host address that was
  * loopback. Each of those breaks here and nowhere else.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -20,14 +20,14 @@ import { join, resolve } from 'node:path'
 const ROOT = resolve(__dirname, '..')
 const BSP = join(ROOT, 'externals/boardctrl')
 const CLI = join(ROOT, 'dist/cli.js')
-/** The bsp test venv: it has the server extras, the machine's own python may not. */
+/** The boardctrl test venv: it has the server extras, the machine's own python may not. */
 const PYTHON = process.env.BOARDLAB_E2E_PYTHON ?? '/root/workspace/bspvenv/bin/python'
 
-/** Whether this machine can run the test at all: the built CLI, bsp's sources, and a python with its server extras. */
+/** Whether this machine can run the test at all: the built CLI, boardctrl's sources, and a python with its server extras. */
 function usable(): string | null {
   if (!existsSync(CLI)) return `the CLI is not built (${CLI}): run pnpm run build`
   if (!existsSync(join(BSP, 'frontends/server/__main__.py'))) return `bsp's sources are not here (${BSP})`
-  if (!existsSync(PYTHON)) return `no python for bsp's server (${PYTHON}); set BOARDLAB_E2E_PYTHON`
+  if (!existsSync(PYTHON)) return `no python for boardctrl's server (${PYTHON}); set BOARDLAB_E2E_PYTHON`
   const probe = spawnSync(PYTHON, ['-c', 'import fastapi, uvicorn'], { encoding: 'utf8' })
   if (probe.status !== 0) return `${PYTHON} has no fastapi/uvicorn: ${(probe.stderr || '').trim().split('\n').pop()}`
   return null
@@ -47,7 +47,7 @@ async function freePort(): Promise<number> {
 interface Host { id: string, url: string, token: string, process: ChildProcess }
 
 /**
- * One board host: bspd on the mock GPIO backend, with its own token. `site` is bsp's own layered configuration, so
+ * One board host: boardctrld on the mock GPIO backend, with its own token. `site` is boardctrl's own layered configuration, so
  * each host is a separate instance with its own boards — the two labs a boardlab has are two of these.
  */
 function startHost(dir: string, id: string, token: string, port: number): Promise<Host> {
@@ -56,7 +56,7 @@ function startHost(dir: string, id: string, token: string, port: number): Promis
   mkdirSync(join(site, 'hosts'), { recursive: true })
   mkdirSync(join(site, 'duts'), { recursive: true })
   spawnSync('cp', ['-a', join(BSP, 'tests/fixtures/site/boards'), join(BSP, 'tests/fixtures/site/socs'), site])
-  // This host's boards, named after this host: bsp's example DUT, which the mock GPIO backend knows how to reset.
+  // This host's boards, named after this host: boardctrl's example DUT, which the mock GPIO backend knows how to reset.
   const example = readFileSync(join(BSP, 'tests/fixtures/site/duts/mock-slot.yaml'), 'utf8').replace(/^host: .*$/m, `host: ${id}`)
   writeFileSync(join(site, 'duts', 'mock-board.yaml'), example)
   writeFileSync(join(site, 'boardctrl.yaml'), '{}\n')
@@ -134,16 +134,16 @@ async function startBoardd(dir: string, hosts: Array<{ id: string, url: string, 
   }
   for (const host of hosts) {
     await call('/api/labs/add', { id: host.id, kind: 'boardctrl' })
-    // `bspd+http://…`: this boardd reaches that host directly, the way it reaches a host it set up itself.
-    await call('/api/labs', { id: host.id, enabled: true, url: `bspd+${host.url}`, password: host.token })
+    // `boardctrld+http://…`: this boardd reaches that host directly, the way it reaches a host it set up itself.
+    await call('/api/labs', { id: host.id, enabled: true, url: `boardctrld+${host.url}`, password: host.token })
     const tested = await call('/api/labs/test', { id: host.id }) as { verifyOk?: boolean, verifyMessage?: string }
     if (tested.verifyOk !== true) throw new Error(`${host.id} could not be reached: ${tested.verifyMessage}`)
   }
   return { url, process: child }
 }
 
-// Skipping is for a machine that cannot run it (no python with bsp's server extras); it is said, never silent, since
-// what this covers — a lab's token and address reaching bsp — is exactly where 0.4.43's defects hid.
+// Skipping is for a machine that cannot run it (no python with boardctrl's server extras); it is said, never silent, since
+// what this covers — a lab's token and address reaching boardctrl — is exactly where 0.4.43's defects hid.
 if (why) console.warn(`e2e skipped: ${why}`)
 
 describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts', () => {
@@ -153,7 +153,7 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'boardlab-e2e-'))
-    // Two hosts with different tokens: the defect was one lab's token never reaching bsp, which one host cannot show.
+    // Two hosts with different tokens: the defect was one lab's token never reaching boardctrl, which one host cannot show.
     hosts.push(await startHost(dir, 'host-a', 'token-for-a', await freePort()))
     hosts.push(await startHost(dir, 'host-b', 'token-for-b', await freePort()))
     boardd = await startBoardd(dir, hosts.map(host => ({ id: host.id, url: host.url, token: host.token })))
@@ -184,7 +184,7 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
 
   /**
    * The chain the defects lived in: a host command has to reach the host itself, with that host's token. A lab whose
-   * token did not reach bsp, whose address was loopback, or whose name a site entry claimed, answers "missing or
+   * token did not reach boardctrl, whose address was loopback, or whose name a site entry claimed, answers "missing or
    * wrong token" for — or silently talks to — the wrong host, and this is where that shows.
    */
   it('reads each host itself, with that host\'s token, through the raw boardctrl passthrough', () => {
@@ -201,13 +201,13 @@ describe.skipIf(why)('end to end: the CLI through boardd to two real board hosts
   it('names one lab the way the page names it, and reaches that one only', () => {
     const one = cli(['boardctrl', '-r', 'host-a', 'gpio', 'list'])
     expect(one.code, one.err).toBe(0)
-    // One host: bsp prints no section header, and what comes is that host's header and nothing else.
+    // One host: boardctrl prints no section header, and what comes is that host's header and nothing else.
     expect(one.out).not.toMatch(/^== /m)
     expect(one.out).toMatch(/^P\d+/m)
     expect(one.out + one.err).not.toMatch(/unknown remote|missing or wrong token/)
   })
 
-  it('reads a host\'s console log by line number, finds every match and every boot, through boardd and bsp', () => {
+  it('reads a host\'s console log by line number, finds every match and every boot, through boardd and boardctrl', () => {
     const boots = cli(['boots', 'host-a-mock-slot', '--json'])
     expect(boots.code, boots.err).toBe(0)
     expect(JSON.parse(boots.out).map((mark: { line: number, id: string }) => [mark.line, mark.id])).toEqual([[0, 'spl'], [1, 'opensbi'], [2, 'uboot'], [3, 'linux'], [5, 'spl'], [6, 'opensbi'], [7, 'uboot'], [8, 'linux']])

@@ -1,6 +1,6 @@
 /**
- * A board host's own page (bspd's GPIO panel, events, tool list) through boardd. bspd listens only on its host's
- * loopback, so boardd reaches it the way it drives it: a `bspd+http://` lab directly, a `bspd+ssh://` lab through one
+ * A board host's own page (boardctrld's GPIO panel, events, tool list) through boardd. boardctrld listens only on its host's
+ * loopback, so boardd reaches it the way it drives it: a `boardctrld+http://` lab directly, a `boardctrld+ssh://` lab through one
  * ssh tunnel per lab, opened on first use with boardd's key and kept while it is used. boardd adds the lab's token to
  * every request, so the browser never holds it, and only people may open it.
  *
@@ -28,12 +28,12 @@ const freePort = () => new Promise<number>((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => { const { port } = server.address() as { port: number }; server.close(() => resolve(port)) })
 })
 
-/** `bspd+ssh://user@host:port` or `bspd+http://127.0.0.1:port`, as provision writes them. */
+/** `boardctrld+ssh://user@host:port` or `boardctrld+http://127.0.0.1:port`, as provision writes them. */
 export function panelTarget(url: string | null): { kind: 'http', host: string, port: number } | { kind: 'ssh', target: string, sshPort: number | null, port: number } {
-  const match = /^bspd\+(http|ssh):\/\/(?:([^@/]+)@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
-  if (!match) throw new BoardError('invalid', `这个实验室没有 bspd 地址（${url ?? '空'}）：先装好主机`)
+  const match = /^boardctrld\+(http|ssh):\/\/(?:([^@/]+)@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
+  if (!match) throw new BoardError('invalid', `这个实验室没有 boardctrld 地址（${url ?? '空'}）：先装好主机`)
   const [, scheme, user, host, port] = match
-  if (!/^[A-Za-z0-9._-]+$/.test(host!) || (user && !/^[A-Za-z0-9._-]+$/.test(user))) throw new BoardError('invalid', `bspd 地址不合法：${url}`)
+  if (!/^[A-Za-z0-9._-]+$/.test(host!) || (user && !/^[A-Za-z0-9._-]+$/.test(user))) throw new BoardError('invalid', `boardctrld 地址不合法：${url}`)
   return scheme === 'http' ? { kind: 'http', host: host!, port: Number(port ?? 8765) }
     : { kind: 'ssh', target: `${user ? `${user}@` : ''}${host}`, sshPort: null, port: Number(port ?? 8765) }
 }
@@ -44,11 +44,11 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
   const sweep = setInterval(() => { for (const [id, tunnel] of tunnels) if (Date.now() - tunnel.used > IDLE_MS) close(id) }, 60_000)
   sweep.unref()
 
-  /** Where on this machine the lab's bspd answers: its own address, or a tunnel's local end. */
+  /** Where on this machine the lab's boardctrld answers: its own address, or a tunnel's local end. */
   const local = async (id: string, url: string | null): Promise<number> => {
     const target = panelTarget(url)
     if (target.kind === 'http') {
-      if (!['127.0.0.1', 'localhost'].includes(target.host)) throw new BoardError('invalid', 'bspd 只在它自己机器的回环地址上听')
+      if (!['127.0.0.1', 'localhost'].includes(target.host)) throw new BoardError('invalid', 'boardctrld 只在它自己机器的回环地址上听')
       return target.port
     }
     let tunnel = tunnels.get(id)
@@ -64,7 +64,7 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
         const poll = () => {
           if (child.exitCode !== null) return reject(new BoardError('hardware', `连不上 ${target.target}：${stderr.trim() || `ssh 退出 ${child.exitCode}`}`))
           const probe = httpRequest({ host: '127.0.0.1', port, path: '/api/v1/health', timeout: 2000 }, response => { response.resume(); resolve() })
-          probe.on('error', () => { if (Date.now() > deadline) { child.kill(); reject(new BoardError('hardware', `${target.target} 的 bspd 没有应答`)) } else setTimeout(poll, 300) })
+          probe.on('error', () => { if (Date.now() > deadline) { child.kill(); reject(new BoardError('hardware', `${target.target} 的 boardctrld 没有应答`)) } else setTimeout(poll, 300) })
           probe.end()
         }
         poll()
@@ -111,7 +111,7 @@ export function panelEndpoints(lab: BoardLab, options: { sshKey?: string | null,
     if (token) sent.authorization = `Bearer ${token}`
     const response = await new Promise<IncomingMessage>((resolve, reject) => {
       const outgoing = httpRequest({ host: '127.0.0.1', port, method, path: rest + (search ? `?${search}` : ''), headers: sent }, resolve)
-      outgoing.on('error', error => reject(new BoardError('hardware', `bspd 没有应答：${error.message}`)))
+      outgoing.on('error', error => reject(new BoardError('hardware', `boardctrld 没有应答：${error.message}`)))
       signal.addEventListener('abort', () => outgoing.destroy(), { once: true })
       outgoing.end(payload ?? undefined)
     })

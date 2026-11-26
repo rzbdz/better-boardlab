@@ -1,13 +1,13 @@
 /**
- * The boardctrl site boardd keeps: one working copy, at `<state>/bsp/site`, of what every bsp board host reads from
+ * The boardctrl site boardd keeps: one working copy, at `<state>/bsp/site`, of what every boardctrl board host reads from
  * /etc/boardctrl/site besides its own `hosts/` file: SoC facts (`socs/`), the SDK catalog (`sdk/`), hooks, the
  * images the platforms stage (`.blobs/`), DUT records (`duts/`) and site providers (`providers/`, a `provider.py` per
  * one the host loads; `modules/` is the name sites used before providers). Its source is a git repository (cloned,
  * pulled and pushed with boardd's key, then this
  * machine's ssh setup) or boardd itself ("managed here"); the copy is a git repository either way, and every edit made
- * through boardd is a commit by whoever made it. Edits are checked the way bsp loads its SDK catalog, so a site that
+ * through boardd is a commit by whoever made it. Edits are checked the way boardctrl loads its SDK catalog, so a site that
  * reaches a host loads there. Images the SoC facts list but the site keeps out of git are fetched into `.blobs/` by
- * the boardctrl CLI (`bsp images sync`) after each pull and before each sync, so the hosts get them with the site.
+ * the boardctrl CLI (`boardctrl images sync`) after each pull and before each sync, so the hosts get them with the site.
  */
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -37,7 +37,7 @@ export interface SiteDoc { kind: Kind, id: string, file: string, layer: string, 
 /** An SDK's own instructions, `skills/<id>.md` in the site or a shipped platform. */
 export interface SiteSkill { id: string, layer: string, file: string, title: string }
 export interface HostSync { revision: string, at: string, ok: boolean, message: string }
-/** The last `bsp images sync` on the copy: which images are there, which could not be fetched, which nobody can fetch. */
+/** The last `boardctrl images sync` on the copy: which images are there, which could not be fetched, which nobody can fetch. */
 export type { ImagesState } from './images.ts'
 export interface SiteStatus {
   source: 'managed' | 'git', url: string, branch: string
@@ -71,7 +71,7 @@ const str = (value: unknown) => value === undefined || value === null ? '' : typ
 /** A Markdown skill's title: its first `# ` heading, or its id. */
 const titleOf = (text: string, id: string) => /^#\s+(.+?)\s*$/m.exec(text)?.[1]?.trim() || id
 
-/** Whether `docs` loads the way bsp's SdkCatalog loads it; what is wrong, by file, when not. */
+/** Whether `docs` loads the way boardctrl's SdkCatalog loads it; what is wrong, by file, when not. */
 export function validate(docs: Docs): string[] {
   const out: string[] = []
   const has = (kind: Kind, id: unknown) => typeof id === 'string' && docs[kind].has(id)
@@ -522,7 +522,7 @@ export class Site {
 
   /**
    * Write an SDK's skill as `skills/<id>.md` (`original`: the id it had, when editing). Refused when empty or badly
-   * named; skills are not part of the catalog bsp loads, so nothing else is checked. Committed like every other edit.
+   * named; skills are not part of the catalog boardctrl loads, so nothing else is checked. Committed like every other edit.
    */
   putSkill(holder: string, id: string, text: string, original?: string): Promise<SiteSkill> {
     return this.serial(async () => {
@@ -730,7 +730,7 @@ export class Site {
   shippable(): boolean { return this.ready && SHIPPED.some(name => existsSync(join(this.dir, name))) && !this.problems().length }
 
   /**
-   * The parts the hosts get, as a gzipped tar (no .git; not what the site's .bspignore names, nor a Python provider's
+   * The parts the hosts get, as a gzipped tar (no .git; not what the site's .boardctrl-ignore names, nor a Python provider's
    * build litter). Only those: whatever else the site's repository holds (hosts/, docs, notes, deploy scripts) stays
    * here. A site with none of them is an empty bundle, and a host synced with it has an empty site.
    *
@@ -743,7 +743,7 @@ export class Site {
     const empty = emptyVendors(this.dir)
     if (empty.length) throw new BoardError('invalid', `站点的插件缺它带的代码（${empty.join('、')}）：先 \`git submodule update --init --recursive\``)
     const present = SHIPPED.filter(name => existsSync(join(this.dir, name)))
-    const ignore = join(this.dir, '.bspignore')
+    const ignore = join(this.dir, '.boardctrl-ignore')
     // A provider developed in place leaves a virtualenv, a test cache and bytecode in the site: none of them is
     // the provider, and a virtualenv is large enough to matter on every host.
     const made = await exec('tar', ['-czf', out, '--exclude=.git', '--exclude=__pycache__', '--exclude=.pytest_cache',

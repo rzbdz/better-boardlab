@@ -59,6 +59,6 @@ describe('guidance', () => {
   it('the site view carries the guidance help page', () => {
     const state = { boards: [], labs: [], modules: [] } as never
     const site = bspUi.views(state, {}).find((view: View) => view.id === 'boardctrl-site')
-    expect(site?.extra).toEqual({ 'bsp.guidanceHelp': 'guidance' })
+    expect(site?.extra).toEqual({ 'boardctrl.guidanceHelp': 'guidance' })
   })
 })

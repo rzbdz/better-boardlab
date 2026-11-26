@@ -1,6 +1,6 @@
 /**
- * The `bsp` module, boardlab's wrapper of bsp: bsp board hosts become a backend (boards, leases, relay, download,
- * consoles, builds, discovery, free ports, news), and bsp's SDK work and its registry's catalog are offered to boardlab's
+ * The `boardctrl` module, boardlab's wrapper of boardctrl: boardctrl board hosts become a backend (boards, leases, relay, download,
+ * consoles, builds, discovery, free ports, news), and boardctrl's SDK work and its registry's catalog are offered to boardlab's
  * clients (`boardlab sdk`, `boardlab registry`, `boardlab boardctrl`), all through the boardctrl CLI on boardd's machine. The site
  * every host reads (SoC facts, the SDK catalog, hooks) is kept here and synced to the hosts (site.ts, site-api.ts).
  */
@@ -19,7 +19,7 @@ import { panelEndpoints } from './panel.ts'
 import { Site } from './site.ts'
 import { readMarkets } from './markets.ts'
 import { siteEndpoints } from './site-api.ts'
-import { bspSdk, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkReach, type SdkRunner, type SdkStream } from './sdk.ts'
+import { sdkRunner, CATALOG_ACTIONS, RAW_REFUSED, SDK_ACTIONS, type SdkGroup, type SdkReach, type SdkRunner, type SdkStream } from './sdk.ts'
 
 export interface BoardctrlApi {
   /**
@@ -30,7 +30,7 @@ export interface BoardctrlApi {
   sdk(holder: string, args: string[], options: { json: boolean, group?: SdkGroup, onOutput: (stream: SdkStream, text: string) => void, signal?: AbortSignal }): Promise<{ code: number, download: string | null }>
 }
 
-/** `tree`: the bsp source this distribution carries (externals/boardctrl), shipped to the hosts it sets up. */
+/** `tree`: the boardctrl source this distribution carries (externals/boardctrl), shipped to the hosts it sets up. */
 export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkRunner, instances?: string[], tree?: string | null } = {}): Module<BoardctrlApi> {
   return {
     id: 'boardctrl',
@@ -39,7 +39,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
       const hosts = options.stateDir ? hostsFor(options.stateDir) : null
       const sshKey = hosts?.keyFile
       for (const id of options.instances ?? ['boardctrl']) lab.backends.register(id, boardctrlLab({ bin: options.bin, sshKey, stateDir: options.stateDir }))
-      // A bsp lab is one board host: added on the page, set up there by installing bspd on the host over ssh.
+      // A boardctrl lab is one board host: added on the page, set up there by installing boardctrld on the host over ssh.
       lab.backends.offer({ kind: 'boardctrl', title: 'boardctrl 板卡主机', about: '一台接着板子的 Linux 机器（复位线、串口、下载口）：boardd 用 ssh 给它装上 boardctrld 并接入', create: () => boardctrlLab({ bin: options.bin, sshKey, stateDir: options.stateDir }) })
       const access = (body: Record<string, unknown>) => {
         const address = String(body.address ?? '').trim()
@@ -49,7 +49,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
       // The site every host gets (SoC facts, the SDK catalog, hooks, images), kept here: see site.ts.
       // Its images are fetched with the same boardctrl CLI as everything else.
       const site = options.stateDir ? new Site(join(options.stateDir, 'boardctrl', 'site'), lab.kernel.settings('boardctrl.site'), {
-        tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BOARDCTRL ?? 'bsp',
+        tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BOARDCTRL ?? 'boardctrl',
       }) : null
       // The image markets the site sets up (markets/<id>.yaml): read now and again after every change to the site's files.
       // A file that is not a market, or a market its driver refuses, is listed with what is wrong; the rest still load.
@@ -82,15 +82,15 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
         } : undefined
         return { bundle, revision: () => revision }
       }
-      const runner = options.sdk ?? (options.stateDir ? bspSdk({ bin: options.bin, stateDir: options.stateDir }) : null)
+      const runner = options.sdk ?? (options.stateDir ? sdkRunner({ bin: options.bin, stateDir: options.stateDir }) : null)
       const api: BoardctrlApi = {
         async sdk(holder, args, run) {
           if (!runner) throw new BoardError('invalid', '这个 boardd 没有 boardctrl 命令行，不能做 SDK 操作')
           const group = run.group ?? 'sdk'
           if (group === 'raw') {
             const words = args.filter(arg => !arg.startsWith('-'))
-            if (!words.length) throw new BoardError('invalid', '要给 bsp 命令，例如 boardlab boardctrl hosts')
-            if (RAW_REFUSED.has(words[0]!) || (words[0] === 'catalog' && words[1] === 'export')) throw new BoardError('forbidden', `bsp ${words[0]} 会改 boardd 所在机器自己的配置，不能经 boardlab 跑`)
+            if (!words.length) throw new BoardError('invalid', '要给 boardctrl 命令，例如 boardlab boardctrl hosts')
+            if (RAW_REFUSED.has(words[0]!) || (words[0] === 'catalog' && words[1] === 'export')) throw new BoardError('forbidden', `boardctrl ${words[0]} 会改 boardd 所在机器自己的配置，不能经 boardlab 跑`)
           } else {
             const allowed = group === 'catalog' ? CATALOG_ACTIONS : SDK_ACTIONS
             if (!allowed.has(args[0] ?? '')) throw new BoardError('invalid', `不支持的 ${group === 'catalog' ? 'registry sdk' : 'sdk'} 操作：${args[0] ?? '（空）'}（可用：${[...allowed].join('、')}）`)
@@ -103,7 +103,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
             return arg
           })
           const code = await runner.run(mapped, { holder, ...run, group, reach: group === 'raw' ? reachOf(lab, args) : null })
-          lab.kernel.record(holder, null, group === 'catalog' ? 'catalog' : group === 'raw' ? 'bsp' : 'sdk', args.filter(arg => !arg.startsWith('@')).join(' ').slice(0, 200), code === 0, code ? `退出码 ${code}` : null)
+          lab.kernel.record(holder, null, group === 'catalog' ? 'catalog' : group === 'raw' ? 'boardctrl' : 'sdk', args.filter(arg => !arg.startsWith('@')).join(' ').slice(0, 200), code === 0, code ? `退出码 ${code}` : null)
           let sha: string | null = null
           if (download) {
             const saved: string = download
@@ -118,20 +118,20 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
         },
       }
       lab.api.add('boardctrl', [{
-        method: 'POST', path: '/api/boardctrl/install', about: '给一个 bsp 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token；主机上有任务在跑时安装等它跑完，等不到就不装，force=true 时不等、直接重启，那些任务会中断）：ssh 过去装 bspd，接入实验室，输出边装边推送',
+        method: 'POST', path: '/api/boardctrl/install', about: '给一个 boardctrl 实验室装好它的主机（id、address、user、password、jump、board；noToken 时主机不要 token；主机上有任务在跑时安装等它跑完，等不到就不装，force=true 时不等、直接重启，那些任务会中断）：ssh 过去装 boardctrld，接入实验室，输出边装边推送',
         handle: ({ body, caller }) => {
-          if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 bsp，不能装主机')
+          if (!hosts || !options.tree) throw new BoardError('invalid', '这个 boardd 没带 boardctrl，不能装主机')
           const id = String(body.id ?? '')
           const lab_ = lab.backends.get(id)
           if (lab_.kind !== 'boardctrl') throw new BoardError('invalid', `${id} 不是 boardctrl 实验室`)
           const how = access(body)
           return new EventStream(async (emit, end) => {
             try {
-              // Installing starts this host's bspd again, which drops whatever runs on its boards: a board in use (a
+              // Installing starts this host's boardctrld again, which drops whatever runs on its boards: a board in use (a
               // lease, a console, a boot) is the board's holder's, and the holder lets go of it, not an install. Told
               // through the stream, as every other reason an install cannot start is.
               const inUse = lab.boards.list().find(item => item.lab?.id === id && lab.locks.held(item.name))
-              if (inUse) throw new BoardError('locked', `${inUse.name} 正被 ${lab.locks.held(inUse.name)!.holder} 使用，重装会重启那台主机的 bspd；放锁以后再装`)
+              if (inUse) throw new BoardError('locked', `${inUse.name} 正被 ${lab.locks.held(inUse.name)!.holder} 使用，重装会重启那台主机的 boardctrld；放锁以后再装`)
               // The lab shows it is being installed, with the latest line, to every page until it is done.
               const { done, tested } = await lab.kernel.doing([`lab:${id}`], 'install', '安装中', caller.holder, async line => {
                 const say = (text: string) => { emit('out', { text }); line(text) }
@@ -144,7 +144,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
                 if (shipped.bundle) forgetBootMarks()
                 const revision = shipped.revision()
                 if (site && revision) site.recordHost(id, { revision, at: new Date().toISOString(), ok: true, message: '安装时放的' })
-                say(`bspd ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
+                say(`boardctrld ${done.version} 在 ${done.target} 上跑起来了，接入实验室 ${id}…`)
                 // A host installed without a token takes none: the old one is forgotten, so the lab (and the next
                 // reinstall's form) says so, rather than keeping a token the host no longer asks for.
                 await lab.backends.configure(caller.holder, id, { enabled: true, url: done.url, username: '', password: done.token || null, clearPassword: !done.token, devices: '' })
@@ -161,7 +161,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
           })
         },
       }, {
-        method: 'POST', path: '/api/boardctrl/uninstall', about: '从主机上卸掉 bspd（id；purge=true 连它的数据一起删），并删掉实验室',
+        method: 'POST', path: '/api/boardctrl/uninstall', about: '从主机上卸掉 boardctrld（id；purge=true 连它的数据一起删），并删掉实验室',
         handle: async ({ body, caller }) => {
           if (!hosts) throw new BoardError('invalid', '这个 boardd 不能连主机')
           const id = String(body.id ?? '')
@@ -173,7 +173,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
           if (!lab_.kind) throw new BoardError('invalid', `实验室 ${id} 是在 boardd 的配置里写的，不能在这里删`)
           const board = lab.boards.list().find(item => item.lab?.id === id && lab.locks.held(item.name))
           if (board) throw new BoardError('locked', `${board.name} 正被 ${lab.locks.held(board.name)!.holder} 使用，放锁以后才能卸掉实验室`)
-          const url = settings.url?.replace(/^bspd\+/, '') ?? ''
+          const url = settings.url?.replace(/^boardctrld\+/, '') ?? ''
           await lab.kernel.doing([`lab:${id}`], 'remove', '删除中', caller.holder, async line => {
             if (url.startsWith('ssh://')) {
               const parsed = new URL(url)
@@ -241,7 +241,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
           return (route.backend as BoardctrlBackend).boardConfig(route.config, route.target.device)
         },
       }, {
-        method: 'GET', path: '/api/boardctrl/hosts/:id/cache', about: '一个 bsp 实验室每台主机的产物缓存：用了多少、上限、留多久、磁盘还剩多少（主机太旧时 cache 为 null）',
+        method: 'GET', path: '/api/boardctrl/hosts/:id/cache', about: '一个 boardctrl 实验室每台主机的产物缓存：用了多少、上限、留多久、磁盘还剩多少（主机太旧时 cache 为 null）',
         handle: async ({ params }) => {
           const id = String(params.id ?? '')
           const backend = lab.backends.get(id)
@@ -249,13 +249,13 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
           return (backend.backend as BoardctrlBackend).caches(lab.backends.config(id))
         },
       }, {
-        method: 'GET', path: '/api/boardctrl/boards', about: 'bsp 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',
+        method: 'GET', path: '/api/boardctrl/boards', about: 'boardctrl 认识的板卡主机型号（有 GPIO 排针图的）：装主机时选',
         handle: () => ({ boards: hostBoards(options.tree ?? null) }),
       }, {
         method: 'GET', path: '/api/boardctrl/key', about: 'boardd 登录主机用的公钥（放到主机的 authorized_keys 里，就不用密码）',
         handle: async () => ({ key: hosts ? await hosts.publicKey() : null }),
       }, {
-        method: 'POST', path: '/api/sdk', about: '跑 bsp sdk|catalog|任意 bsp 命令（group），输出边跑边推送',
+        method: 'POST', path: '/api/sdk', about: '跑 boardctrl sdk|catalog|任意 boardctrl 命令（group），输出边跑边推送',
         handle: ({ body, caller, signal }) => {
           if (!Array.isArray(body.args) || body.args.some((arg: unknown) => typeof arg !== 'string')) throw new BoardError('invalid', 'args 要是字符串数组')
           const group: SdkGroup = body.group === 'catalog' || body.group === 'raw' ? body.group : 'sdk'
@@ -279,7 +279,7 @@ function boardChoice(value: unknown): string | undefined {
   return board
 }
 
-/** The host a raw bsp command names: `-r`/`--remote` (one name, or none for all of them), or `--url`. */
+/** The host a raw boardctrl command names: `-r`/`--remote` (one name, or none for all of them), or `--url`. */
 function namedHost(args: string[]): { host: string | null, url: string | null } {
   let host: string | null = null, url: string | null = null
   for (let at = 0; at < args.length; at++) {
@@ -294,9 +294,9 @@ function namedHost(args: string[]): { host: string | null, url: string | null } 
 }
 
 /**
- * How a raw bsp command reaches board hosts: every lab boardlab has, as the remotes bsp reads — narrowed to those the
+ * How a raw boardctrl command reaches board hosts: every lab boardlab has, as the remotes boardctrl reads — narrowed to those the
  * command names (`-r`/`--url`), which then keeps its own argument. `null` when there is no lab: `sdk` and `catalog`
- * need none, and a name that is no lab is left to bsp's own remotes rather than refused here.
+ * need none, and a name that is no lab is left to boardctrl's own remotes rather than refused here.
  */
 function reachOf(lab: Lab, args: string[]): SdkReach | null {
   const { host, url } = namedHost(args)

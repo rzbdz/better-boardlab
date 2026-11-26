@@ -17,7 +17,7 @@ export type SdkGroup = 'sdk' | 'catalog' | 'raw'
 export interface ReachedHost {
   /** The name the command's `-r` uses: the lab's id. */
   name: string
-  /** Reach it as `driver.ts` does: one bspd directly (`bspd+http://…`), or over ssh (`bspd+ssh://user@host:8765`). */
+  /** Reach it as `driver.ts` does: one boardctrld directly (`boardctrld+http://…`), or over ssh (`boardctrld+ssh://user@host:8765`). */
   url: string
   token: string
 }
@@ -60,8 +60,8 @@ function readFile(path: string): string | null {
 function reachRemotes(reach: SdkReach): string {
   const remotes: Record<string, unknown> = {}
   for (const host of reach.hosts) {
-    const url = host.url.startsWith('bspd+') ? host.url.slice('bspd+'.length) : host.url
-    // `ssh://user@host:port` is bspd on that machine's loopback port, through ssh: what the board host setup is.
+    const url = host.url.startsWith('boardctrld+') ? host.url.slice('boardctrld+'.length) : host.url
+    // `ssh://user@host:port` is boardctrld on that machine's loopback port, through ssh: what the board host setup is.
     if (url.startsWith('ssh://')) {
       const target = new URL(url)
       // The address boardctrl tries first must be the host's own, never loopback: a boardd may run a hostd on its own
@@ -78,7 +78,7 @@ function hasRouting(args: string[]): boolean {
     || arg.startsWith('--url=') || arg.startsWith('--remote=') || (arg.startsWith('-r') && arg.length > 2))
 }
 
-export function bspSdk(options: { bin?: string, stateDir: string }): SdkRunner {
+export function sdkRunner(options: { bin?: string, stateDir: string }): SdkRunner {
   // The same CLI boardd's other boardctrl calls use: `boardctrl` when this machine has it, else `bsp`. A bare `boardctrl`
   // would fail to spawn on a machine that has only the older name, and the command would never run.
   const bin = options.bin ?? process.env.BOARDS_BOARDCTRL ?? cliName()
@@ -112,12 +112,12 @@ export function bspSdk(options: { bin?: string, stateDir: string }): SdkRunner {
       const child = spawn(bin, [...(json ? ['--json'] : []), ...(group === 'raw' ? [] : [group]), ...routed, ...chosen], {
         // BOARDCTRL_CONFIG names the holder's own configuration directory: boardctrl keeps lease tokens next to it. The
         // `BSP_*` names are sent too, for a host's older boardctrl that only reads those. Leases taken through the raw
-        // passthrough are `bsp:<holder>` — the holder name of the lease a board shows in boardctrl — which boardd sees as
+        // passthrough are `boardctrl:<holder>` — the holder name of the lease a board shows in boardctrl — which boardd sees as
         // someone using the board there (its own leases are `boardlab:<holder>`).
         // BOARDCTRL_SITE: the site boardd keeps and ships to its board hosts (SDKs, build servers), same to both names.
         env: { ...process.env, ...(existsSync(site) ? { BSP_SITE: site, BOARDCTRL_SITE: site } : {}),
           BSP_CONFIG: config, BOARDCTRL_CONFIG: config,
-          BSP_HOLDER: `${group === 'raw' ? 'bsp' : 'boardlab'}:${holder}`, BOARDCTRL_HOLDER: `${group === 'raw' ? 'bsp' : 'boardlab'}:${holder}`,
+          BSP_HOLDER: `${group === 'raw' ? 'boardctrl' : 'boardlab'}:${holder}`, BOARDCTRL_HOLDER: `${group === 'raw' ? 'boardctrl' : 'boardlab'}:${holder}`,
           PYTHONUNBUFFERED: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
       })

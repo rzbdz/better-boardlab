@@ -14,8 +14,8 @@ import { forgetBootMarks } from './logs.ts'
 import { SiteSyncError, syncHost } from './provision.ts'
 import type { Site } from './site.ts'
 
-/** The labs that are bsp board hosts. */
-const bspLabs = (lab: BoardLab) => lab.backends.labSettings().filter(item => item.addedAs === 'boardctrl')
+/** The labs that are boardctrl board hosts. */
+const boardctrlLabs = (lab: BoardLab) => lab.backends.labSettings().filter(item => item.addedAs === 'boardctrl')
 
 export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): Endpoint[] {
   const done = <T>(holder: string, what: string, run: () => Promise<T>, say: (out: T) => string = out => String(out)) => run().then(
@@ -26,7 +26,7 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
   /** Bundle the site once, then ship it to each lab in turn; every host is tried, each result kept. */
   const sync = async (holder: string, only: string | null, out: (line: string) => void) => {
     if (!hosts) throw new BoardError('invalid', '这个 boardd 不能连主机')
-    const labs = bspLabs(lab).filter(item => !only || item.id === only)
+    const labs = boardctrlLabs(lab).filter(item => !only || item.id === only)
     if (only && !labs.length) throw new BoardError('not-found', `没有 boardctrl 主机 ${only}`)
     if (!labs.length) throw new BoardError('invalid', '还没有 boardctrl 主机：先添加一台')
     const problems = site.problems()
@@ -79,8 +79,8 @@ export function siteEndpoints(lab: BoardLab, site: Site, hosts: Hosts | null): E
       }
     },
   }, {
-    method: 'GET', path: '/api/boardctrl/site', about: 'bsp 站点：来源、版本、SDK、编译服务器、编译方式、源码树、SoC 资料、问题，和每台主机上的站点版本',
-    handle: () => site.status(bspLabs(lab).map(item => item.id)),
+    method: 'GET', path: '/api/boardctrl/site', about: 'boardctrl 站点：来源、版本、SDK、编译服务器、编译方式、源码树、SoC 资料、问题，和每台主机上的站点版本',
+    handle: () => site.status(boardctrlLabs(lab).map(item => item.id)),
   }, {
     method: 'POST', path: '/api/boardctrl/site/source', about: '换站点的来源（source：managed 在这里管，或 git 加 url、branch：现在就取下来；这里的站点有它没有的改动时拒绝，discard=true 才丢掉）',
     handle: async ({ body, caller }) => ({ message: await done(caller.holder, `source ${text(body.source)} ${text(body.url)}`, () => site.setSource(caller.holder, { source: text(body.source), url: text(body.url), branch: text(body.branch), discard: body.discard === true })) }),

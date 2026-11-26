@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Make a release of this distribution: one tarball with everything boardd and the CLI need and nothing they don't (the
- * built CLI and pages need only Node itself), plus the bsp tree boardd installs on board hosts, install.sh (the bootstrap
+ * built CLI and pages need only Node itself), plus the boardctrl tree boardd installs on board hosts, install.sh (the bootstrap
  * that fetches a release) and setup.sh (this release's installer, which install.sh runs).
  *
  *   node scripts/release.mjs [--out release] [--version 0.2.0] [--source <where it is published>] [--since <ref>]
@@ -55,16 +55,16 @@ mkdirSync(stage, { recursive: true })
 // index rather than the worktree: an ignored or untracked file under one of those directories — a key, a token, a log —
 // is in the worktree but is not part of the release, and must never travel in it.
 const dirs = ['skills', 'docs/help', 'firmware'].filter(path => existsSync(join(root, path)))
-if (existsSync(join(root, 'host-tools'))) dirs.push('host-tools')      // tools board hosts get beside bspd
+if (existsSync(join(root, 'host-tools'))) dirs.push('host-tools')      // tools board hosts get beside boardctrld
 execFileSync('sh', ['-c', `tar -cf - dist | tar -xf - -C '${stage}'`], { cwd: root })
 const tracked = dirs.concat('LICENSE', 'README.md')
 execFileSync('sh', ['-c', `git ls-files -z -- ${tracked.join(' ')} | tar --null -cf - -T - | tar -xf - -C '${stage}'`], { cwd: root })
-// The bsp tree board hosts are set up from: the files git tracks there, with serial-mux's.
-const bsp = join(root, 'externals/boardctrl')
-if (existsSync(join(bsp, 'deploy/bspd-install.sh'))) {
+// The boardctrl tree board hosts are set up from: the files git tracks there, with serial-mux's.
+const boardctrl = join(root, 'externals/boardctrl')
+if (existsSync(join(boardctrl, 'deploy/install.sh'))) {
   mkdirSync(join(stage, 'externals/boardctrl'), { recursive: true })
-  execFileSync('sh', ['-c', `git ls-files -z --recurse-submodules | tar --null -cf - -T - | tar -xf - -C '${join(stage, 'externals/boardctrl')}'`], { cwd: bsp })
-  writeFileSync(join(stage, 'externals/boardctrl/REVISION'), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: bsp, encoding: 'utf8' }))
+  execFileSync('sh', ['-c', `git ls-files -z --recurse-submodules | tar --null -cf - -T - | tar -xf - -C '${join(stage, 'externals/boardctrl')}'`], { cwd: boardctrl })
+  writeFileSync(join(stage, 'externals/boardctrl/REVISION'), execFileSync('git', ['rev-parse', 'HEAD'], { cwd: boardctrl, encoding: 'utf8' }))
 }
 writeFileSync(join(stage, 'VERSION'), `${version}\n`)
 // Modules this distribution has on top of the shared ones (the internal one's CA module), for the installer to load.

@@ -248,9 +248,9 @@ EOF
   touch "$PREFIX/releases/$VERSION-$REV"
   ls -1dt "$PREFIX"/releases/* | grep -vxF "$PREFIX/releases/$VERSION-$REV" | tail -n +3 | xargs -r rm -rf
   say "boardd $VERSION is up: http://127.0.0.1:$PORT/ (on this machine; open it from elsewhere with --host <address> or through a proxy)"
-  command -v python3 >/dev/null || say "WARNING: no python3 here: the bsp module (board hosts, SDKs) runs the bsp CLI with it; install python3"
+  command -v python3 >/dev/null || say "WARNING: no python3 here: the boardctrl module (board hosts, SDKs) runs the boardctrl CLI with it; install python3"
   command -v ssh >/dev/null || say "WARNING: no ssh client here: boardd reaches board hosts and CLI machines with it; install openssh-client"
-  say "next, on the page: Settings → bsp 板卡主机 → 添加板卡主机"
+  say "next, on the page: Settings → boardctrl 板卡主机 → 添加板卡主机"
 else
   ln -sfn "releases/$VERSION-$REV" "$PREFIX/current.new" && mv -Tf "$PREFIX/current.new" "$PREFIX/current"
   say "boardlab $VERSION CLI is in $BIN (add it to PATH); point it at a boardd: boardlab remote set ssh://user@boardd-host"

@@ -98,7 +98,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
     expect(calls.some(call => call.path === 'api/scan/cancel')).toBe(true)
   })
 
-  it('a first bsp install the page left does not remove the lab boardd is still installing', async () => {
+  it('a first boardctrl install the page left does not remove the lab boardd is still installing', async () => {
     const { ui } = await import('../src/modules/boardctrl/ui.ts')
     const views = ui.views(state as never, {})
     const find = (elements: unknown[]): { submit: { id: string, start: Function, cancellable?: boolean } } | null => {

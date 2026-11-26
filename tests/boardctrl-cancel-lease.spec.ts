@@ -1,5 +1,5 @@
 /**
- * Cancelling a bsp board's flash after its lock ended: the board's backend lease stays while the flash runs, so the
+ * Cancelling a boardctrl board's flash after its lock ended: the board's backend lease stays while the flash runs, so the
  * host takes the cancel (a board host cancels a board's job only under that board's lease), and a cancel the host
  * refuses is reported as refused, never as accepted.
  */
@@ -87,7 +87,7 @@ async function setup() {
   return { lab, host, call }
 }
 
-describe('cancelling a bsp flash whose lock ended', () => {
+describe('cancelling a boardctrl flash whose lock ended', () => {
   it('keeps the backend lease while the flash runs, so the cancel reaches the host under it', async () => {
     const { lab, host, call } = await setup()
     const board = 'live-k3-a'
@@ -129,7 +129,7 @@ describe('cancelling a bsp flash whose lock ended', () => {
   })
 })
 
-describe('removing a bsp lab', () => {
+describe('removing a boardctrl lab', () => {
   it('is refused while the lab is being installed, and the uninstall that removes it is not refused by its own run', async () => {
     const lab = new BoardLab({ db: openDatabase(join(dir, 'u.sqlite')), modules: [boardctrl({ stateDir: join(dir, 'state'), sdk: { run: async () => 0 } as never, instances: [] })] })
     lab.backends.add('user:alice', 'host1', 'boardctrl')

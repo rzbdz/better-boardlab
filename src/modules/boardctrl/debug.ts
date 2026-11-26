@@ -17,7 +17,7 @@ interface BoardctrlDebug {
   state?: Record<string, unknown>
 }
 
-/** What the bsp driver already knows: how to run a command on the host, and how to spawn a stream from it. */
+/** What the boardctrl driver already knows: how to run a command on the host, and how to spawn a stream from it. */
 export interface BoardctrlDebugSeams {
   run<T>(config: LabConfig, args: string[]): Promise<T>
   /** A pipe to a process on the host: its stdout/stdin, and what it said on stderr. */
@@ -44,7 +44,7 @@ export interface DebugCapabilityImpl {
   stream(config: LabConfig, target: BoardTarget): Promise<ConsoleSession>
 }
 
-export function bspDebug(seams: BoardctrlDebugSeams): DebugCapabilityImpl {
+export function boardctrlDebug(seams: BoardctrlDebugSeams): DebugCapabilityImpl {
   const status = (config: LabConfig, target: BoardTarget) => seams.run<BoardctrlDebug>(config, ['debug', 'status', target.device])
 
   return {

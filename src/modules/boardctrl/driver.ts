@@ -1,8 +1,8 @@
 /**
- * bsp board hosts as a lab. boardd drives them only through the `bsp` CLI (`--json --stateless`), never through bsp's
+ * boardctrl board hosts as a lab. boardd drives them only through the `boardctrl` CLI (`--json --stateless`), never through boardctrl's
  * files or code: listing, leases, reset, download mode, staging and RAM boot are `boardctrl dut …` commands, and the console
  * is `boardctrl dut pipe`, which carries serial-mux's own protocol from the board host to boardd's serial-mux client. Which
- * hosts there are comes from bsp's own configuration (its site and host registry), so new hosts need nothing here.
+ * hosts there are comes from boardctrl's own configuration (its site and host registry), so new hosts need nothing here.
  */
 import { Duplex } from 'node:stream'
 import { existsSync } from 'node:fs'
@@ -14,7 +14,7 @@ import type { ConsoleSession } from 'boardlab-core/core/console.ts'
 import { muxSession } from '../serial-mux/client.ts'
 import { askedIn } from 'boardlab-core/core/relay.ts'
 import { cliEnv } from './cli-env.ts'
-import { bspDebug } from './debug.ts'
+import { boardctrlDebug } from './debug.ts'
 import { bootMarksOf, logArgs, logRange, newerQuery, OLD_HOST_LINES, oldHostLog, olderHost, type HostLog } from './logs.ts'
 import { openRaw } from './console.ts'
 import { cancellable, EXIT_CANCELLED, runCli, spawnPipe } from './process.ts'
@@ -41,34 +41,34 @@ export function cliName(): string {
 }
 
 /**
- * `onStderr` gets the progress lines bsp prints while it works; `signal` kills it, and every process it started (the
+ * `onStderr` gets the progress lines boardctrl prints while it works; `signal` kills it, and every process it started (the
  * driver aborts it only when there is nothing on the host left to wait for).
  */
 export type BoardctrlRunner = (args: string[], options: { env: NodeJS.ProcessEnv, timeoutMs: number, onStderr?: (line: string) => void, signal?: AbortSignal }) => Promise<BoardctrlResult>
-/** Starts `bsp … dut pipe`; its stdin and stdout are the pipe. */
+/** Starts `boardctrl … dut pipe`; its stdin and stdout are the pipe. */
 export type BoardctrlSpawner = (args: string[], env: NodeJS.ProcessEnv) => { stream: Duplex, stderr: () => string }
 
 /**
- * `sshKey`: the key boardd logs in to hosts it set up with (bspd+ssh:// labs). `cancelGraceMs`: how long a cancelled
+ * `sshKey`: the key boardd logs in to hosts it set up with (boardctrld+ssh:// labs). `cancelGraceMs`: how long a cancelled
  * job's CLI may take to follow the job to its end before it is killed.
  */
 export interface BoardctrlOptions { bin?: string, run?: BoardctrlRunner, spawn?: BoardctrlSpawner, sshKey?: string, stateDir?: string, cancelGraceMs?: number }
 
-/** How a board's bsp record may be changed from boardlab (`boardctrl dut set`); fields left out stay as they are. */
+/** How a board's boardctrl record may be changed from boardlab (`boardctrl dut set`); fields left out stay as they are. */
 export interface BoardctrlBoardChange {
   board?: string, soc?: string, description?: string, usb?: string,
   resetPin?: string, pulseMs?: number, fdl?: 'strapped' | 'button' | 'unset', fdlPin?: string, sdks?: string[],
 }
 export const FDL_STRATEGIES = ['strapped', 'button', 'unset'] as const
 
-/** The bsp backend, and what only the bsp module asks of it. */
+/** The boardctrl backend, and what only the boardctrl module asks of it. */
 /** What a host's artifact cache holds against its bounds, as the host's status reports it (bytes, but `entries`, `held`). */
 export interface HostCache { path: string, used: number, entries: number, held: number, max_bytes: number, ttl_s: number, min_free_bytes: number, free: number | null }
 
 export interface BoardctrlBackend extends Backend {
   /** Each host of the lab and its artifact cache (null from a host without the policy, an error for one not reached). */
   caches(config: LabConfig): Promise<Array<{ host: string, cache: HostCache | null, error: string | null }>>
-  /** Change a board's record in bspd, holding its lease (`token`); says which fields changed. */
+  /** Change a board's record in boardctrld, holding its lease (`token`); says which fields changed. */
   change(config: LabConfig, device: string, token: string | null, change: BoardctrlBoardChange): Promise<string[]>
   /** The board's own record and the actual choices on its host for a dropdown editor. */
   boardConfig(config: LabConfig, device: string, fresh?: boolean): Promise<{
@@ -89,17 +89,17 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
    * `url` names a boardctrl host registry, `username` the hosts to use (`-r`), `password` the hosts' API token. Commands on a
    * host's own hardware (its relay controller) go to that host alone.
    */
-  // `url` is either one bspd reached directly (`bspd+http://127.0.0.1:8765`, this machine's on a board host), or a bsp
-  // registry that lists several hosts (a plain URL, or empty for bsp's own site).
-  const direct = (config: LabConfig) => config.url.startsWith('bspd+')
-  // `bspd+ssh://root@host:8765` (a host boardlab set up): the boardctrl CLI's `ssh://`, through boardd's own key.
-  const bspdUrl = (config: LabConfig) => config.url.slice('bspd+'.length)
+  // `url` is either one boardctrld reached directly (`boardctrld+http://127.0.0.1:8765`, this machine's on a board host), or a boardctrl
+  // registry that lists several hosts (a plain URL, or empty for boardctrl's own site).
+  const direct = (config: LabConfig) => config.url.startsWith('boardctrld+')
+  // `boardctrld+ssh://root@host:8765` (a host boardlab set up): the boardctrl CLI's `ssh://`, through boardd's own key.
+  const boardctrldUrl = (config: LabConfig) => config.url.slice('boardctrld+'.length)
   const registryUrl = (config: LabConfig) => config.url
-  const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', bspdUrl(config)]
+  const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', boardctrldUrl(config)]
     : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
   const site = options.stateDir ? join(options.stateDir, 'boardctrl', 'site') : null
   const env = (config: LabConfig) => cliEnv({ config, site, sshKey: options.sshKey, direct: direct(config), url: registryUrl(config) })
-  /** Run a bsp command; `signal` stops it as `cancellable` says (`dut`/`job cancel` under the lease of `on`, the board). */
+  /** Run a boardctrl command; `signal` stops it as `cancellable` says (`dut`/`job cancel` under the lease of `on`, the board). */
   const boardctrlCli = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal, on?: { readonly device: string, readonly lease: string | null }): Promise<T> => {
     const result = await cancellable(
       (onLine, kill) => run([...global(config, host), ...args], { env: env(config), timeoutMs, onStderr: onLine, signal: kill }),
@@ -107,7 +107,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       { onStderr, signal, stop: on ? () => ['dut', 'cancel', on.device, ...lease(on.lease)] : undefined, jobArgs: on ? () => lease(on.lease) : undefined, graceMs: cancelGraceMs })
     let envelope: { ok: boolean, result?: T, warnings?: string[], error?: { code?: string, message?: string, hint?: string, details?: Record<string, unknown> } } | null = null
     try { envelope = JSON.parse(result.stdout) } catch {}
-    const what = `bsp ${args.slice(0, 2).join(' ')}`
+    const what = `boardctrl ${args.slice(0, 2).join(' ')}`
     const cancelling = !!signal?.aborted && signal.reason instanceof CancelledError && !signal.reason.refused
     if (result.code === EXIT_CANCELLED || envelope?.error?.code === 'cancelled') {
       throw cancelling ? signal!.reason : new CancelledError(`已取消：${what}：${envelope?.error?.message ?? '主机上的任务被取消了'}`)
@@ -117,21 +117,21 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       // Asked to stop, it finished anyway (it was past its last step): what it did stands.
       if (!envelope?.ok) throw signal.reason
     }
-    // A host bsp could not reach leaves `ok: true` and the failure only in the warnings (and exit code 3): a stale token
+    // A host boardctrl could not reach leaves `ok: true` and the failure only in the warnings (and exit code 3): a stale token
     // then looks like a lab with no boards, and boardd drops every one of them. Any unreachable host is an error, so
     // the listing is never taken as complete and the boards already known stay.
     if (envelope?.ok) {
       const unreachable = (envelope.warnings ?? []).filter(line => /unreachable/i.test(line))
-      if (unreachable.length) throw new Error(`bsp ${args.slice(0, 2).join(' ')}：${unreachable.join('；')}`)
+      if (unreachable.length) throw new Error(`boardctrl ${args.slice(0, 2).join(' ')}：${unreachable.join('；')}`)
       return envelope.result as T
     }
     const error = envelope?.error
-    if (error) throw Object.assign(new Error(`bsp ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`), { boardctrl: error })
+    if (error) throw Object.assign(new Error(`boardctrl ${args.slice(0, 2).join(' ')}：${error.message}${error.hint ? `（${error.hint}）` : ''}`), { boardctrl: error })
     const text = `${result.stdout}\n${result.stderr}`.trim().split('\n').slice(-4).join('\n')
-    throw new Error(`bsp ${args.slice(0, 2).join(' ')} 失败${result.code === null ? '（超时或没能运行）' : `（退出码 ${result.code}）`}${text ? `：${text}` : ''}`)
+    throw new Error(`boardctrl ${args.slice(0, 2).join(' ')} 失败${result.code === null ? '（超时或没能运行）' : `（退出码 ${result.code}）`}${text ? `：${text}` : ''}`)
   }
 
-  /** A `boardctrl probe` run (a discovery or a rebuild): boards bsp registered as it went, and the rest as findings. */
+  /** A `boardctrl probe` run (a discovery or a rebuild): boards boardctrl registered as it went, and the rest as findings. */
   const probed = async (config: LabConfig, args: string[], progress: (line: string) => void,
     registered: ((device: string) => void) | undefined, host?: string, signal?: AbortSignal): Promise<{ found: LabFinding[], message: string }> => {
     const onLine = (line: string) => {
@@ -142,7 +142,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     type Result = { proposals?: Array<{ spec: BoardctrlSpec, warnings?: string[], registered?: { dut: string } }>, registered?: Array<{ dut: string }>, reasons?: string[] }
     const out = await boardctrlCli<{ results: Record<string, Result> }>(config, args, BOOT_TIMEOUT_MS, onLine, host, signal)
     const results = Object.entries(out.results ?? {})
-    // What bsp could not register (a name taken, say) is left for a person to apply as a proposal.
+    // What boardctrl could not register (a name taken, say) is left for a person to apply as a proposal.
     const found = results.flatMap(([at, result]) => (result.proposals ?? []).filter(item => !item.registered).map(({ spec, warnings }) => ({
       host: at, name: spec.id, warnings: warnings ?? [], detail: spec,
       summary: `${at} 上的新板子：${spec.board || '型号未知'}${spec.soc ? `（${spec.soc}）` : ''}，串口 ${spec.console?.alias ?? spec.console?.device ?? '?'}，下载口 ${spec.fastboot?.usb ?? '?'}，${spec.control?.backend === 'human' ? '由人复位' : `复位线 ${spec.control?.reset?.pin ?? '?'}`}`,
@@ -165,7 +165,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
   const breaksAsking = new Map<string, Promise<{ load: string[], download: string[] }>>()
   const bootMarks = bootMarksOf((config, device) => boardctrlCli<{ marks?: BootMark[] }>(config, ['dut', 'boot-marks', device], 30_000))
   /**
-   * A person is asked to press something: bspd says what in the DUT's status (`needs_human`), while the reset (or
+   * A person is asked to press something: boardctrld says what in the DUT's status (`needs_human`), while the reset (or
    * entering download mode) waits. The command's own output only reports it in passing, so it is polled here and the
    * page is told as it comes and goes.
    */
@@ -194,7 +194,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     }
   }
 
-  /** Progress lines of a reset: what a person is asked to do (with bsp's request id), and when it is done. */
+  /** Progress lines of a reset: what a person is asked to do (with boardctrl's request id), and when it is done. */
   const attention = (notice?: Notice) => notice && ((line: string) => {
     const asked = askedIn(line)
     if (asked) notice(asked.message, asked.request)
@@ -223,14 +223,14 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       await asking
     }
     const found = boardOf.get(device)
-    if (!found) throw new Error(`bsp 里没有板子 ${device}`)
+    if (!found) throw new Error(`boardctrl 里没有板子 ${device}`)
     return found
   }
   const hostOfBoard = async (config: LabConfig, device: string) => (await recordOfBoard(config, device)).host
 
   // A registration dialog is a read of the host's inventory, not a discovery. Keep each host's GPIO list and watched
   // USB snapshot briefly, and share concurrent board dialogs (and a save's validation) instead of spawning three more
-  // bsp processes per board. Cable news invalidates the USB snapshot; the current registration is revalidated on save.
+  // boardctrl processes per board. Cable news invalidates the USB snapshot; the current registration is revalidated on save.
   const CHOICES_TTL_MS = 10_000
   type HostChoices = { gpios: Array<{ value: string, label: string }>, ports: Array<{ value: string, label: string }> }
   const choicesCache = new Map<string, { at: number, value: HostChoices }>()
@@ -286,16 +286,16 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     const listed = await boardctrlCli<Array<{ id: string, soc: string | null }>>(config, ['sdk', 'list'], 60_000).catch(() => [] as Array<{ id: string, soc: string | null }>)
     return Array.isArray(listed) ? listed : []
   }
-  /** A context's slot as bsp's `--slots` takes it (`/s2` → `s2`). */
+  /** A context's slot as boardctrl's `--slots` takes it (`/s2` → `s2`). */
   const slotId = (slot?: string | null) => slot?.split('/').at(-1) ?? null
 
   return {
     kind: 'boardctrl 板卡主机',
-    about: 'boardd 经 bsp 操作这台主机上的板子：复位线、下载口、串口、刷机和启动都由主机上的 bspd 做，锁和排队以这台 boardd 为准（拿锁时它同时持有 bspd 的租约）。',
+    about: 'boardd 经 boardctrl 操作这台主机上的板子：复位线、下载口、串口、刷机和启动都由主机上的 boardctrld 做，锁和排队以这台 boardd 为准（拿锁时它同时持有 boardctrld 的租约）。',
     fields: {
-      url: { label: 'bspd 地址', placeholder: '本机的 bspd：bspd+http://127.0.0.1:8765（或 bsp registry 的地址）', required: false },
+      url: { label: 'boardctrld 地址', placeholder: '本机的 boardctrld：boardctrld+http://127.0.0.1:8765（或 boardctrl registry 的地址）', required: false },
       username: { label: '只用这些 boardctrl 主机', placeholder: '经 registry 时：逗号分隔的主机名；留空用全部', required: false },
-      password: { label: 'bspd token', placeholder: 'bspd 要求 token 时填', required: false },
+      password: { label: 'boardctrld token', placeholder: 'boardctrld 要求 token 时填', required: false },
     },
     defaultJump: () => '',
 
@@ -355,7 +355,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       remove: async (config, device) => { await boardctrlCli(config, ['dut', 'remove', device]) },
     },
 
-    // The DUT's name in bspd changes too, its console alias and reset/fdl aliases with it. bsp drops the lease on a
+    // The DUT's name in boardctrld changes too, its console alias and reset/fdl aliases with it. boardctrl drops the lease on a
     // rename, so boardd takes it again for the new name afterwards.
     rename: {
       async rename(config, { device, lease: token }, to) {
@@ -372,7 +372,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     },
 
     relay: {
-      // A board reset by a person makes bsp print what to do (`ACTION NEEDED: …`) and wait for `boardctrl dut confirm`, until
+      // A board reset by a person makes boardctrl print what to do (`ACTION NEEDED: …`) and wait for `boardctrl dut confirm`, until
       // the lock it runs under ends.
       reset: async (config, at, notice, signal) => {
         const { device, lease: token } = at
@@ -387,7 +387,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
         try { await boardctrlCli(config, ['dut', 'reset', device, ...lease(token), '--timeout', '1800'], RESET_TIMEOUT_MS, attention(tell), undefined, signal, at) } finally { watching() }
       },
       confirm: async (config, { device }, note, request) => {
-        // The request id makes it idempotent: answered already (the board showed it on its own), bsp says so.
+        // The request id makes it idempotent: answered already (the board showed it on its own), boardctrl says so.
         const result = await boardctrlCli<{ confirmed: string, waited_s: number, request?: string, repeat?: boolean, how?: string }>(
           config, ['dut', 'confirm', device, ...(note ? [note] : []), ...(request ? ['--request', request] : [])])
         if (result.repeat) {
@@ -401,8 +401,8 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     },
 
     /**
-     * The DUT's lines on its host's relay controller (bsp gpio_relay): every pin with an alias under `<dut>/` — the
-     * `reset` and `fdl` lines bsp registers for it, and any others the site aliases there (`<dut>/power`, …).
+     * The DUT's lines on its host's relay controller (boardctrl gpio_relay): every pin with an alias under `<dut>/` — the
+     * `reset` and `fdl` lines boardctrl registers for it, and any others the site aliases there (`<dut>/power`, …).
      */
     channels: {
       async list(config, { device }) {
@@ -414,7 +414,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       },
       async set(config, { device }, channel, action, ms) {
         if (!channel.startsWith(`${device}/`)) throw new Error(`${channel} 不是 ${device} 的线（要以 ${device}/ 开头）`)
-        // bsp groups the actions by channel kind: relays switch and pulse, buttons are pressed and clicked.
+        // boardctrl groups the actions by channel kind: relays switch and pulse, buttons are pressed and clicked.
         const [group, verb] = ({ on: ['relay', 'on'], off: ['relay', 'off'], toggle: ['relay', 'toggle'], pulse: ['relay', 'pulse'], press: ['button', 'press'], release: ['button', 'release'], click: ['button', 'click'] } as const)[action]
         const timed = verb === 'pulse' || verb === 'click'
         const result = await boardctrlCli<{ target?: string, state?: string }>(config, [group, verb, channel, ...(timed && ms ? ['--ms', String(ms)] : [])], TIMEOUT_MS + (ms ?? 0), undefined, await hostOfBoard(config, device))
@@ -425,7 +425,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     serial: {
       // What the board's SoC prints as it boots (its boot ROM's lines, and any the site adds): the host's SoC facts.
       bootMarks: (config, { device }) => bootMarks(config, device),
-      // The board host keeps each console's log by day; bsp reads a range of it there and searches it, or reads a
+      // The board host keeps each console's log by day; boardctrl reads a range of it there and searches it, or reads a
       // window of it around a line, each line numbered and named by its place in the day's file.
       async logs(config, { device }, query) {
         try { return logRange(await boardctrlCli<HostLog>(config, logArgs(device, query), 120_000), query.at != null) }
@@ -443,7 +443,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
         if (record?.console_provider && record.console_provider !== 'serial-mux') {
           return openRaw(child, device, record.console_provider)
         }
-        // A pipe that could not start prints bsp's error envelope instead of protocol frames.
+        // A pipe that could not start prints boardctrl's error envelope instead of protocol frames.
         let first = ''
         const peek = (chunk: Buffer) => { first += chunk.toString('utf8'); if (first.length > 4096) child.stream.off('data', peek) }
         child.stream.on('data', peek)
@@ -484,7 +484,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     },
 
     discovery: {
-      // What bsp can do here, in bsp's own terms: probe the host's free reset lines itself, or take a board a person
+      // What boardctrl can do here, in boardctrl's own terms: probe the host's free reset lines itself, or take a board a person
       // already put in download mode. boardd only shows these; it knows neither the titles nor the fields.
       async methods(config, context) {
         const host = context.host ?? (context.slot ? context.slot.split('/')[0]! : null)
@@ -533,7 +533,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
         }
         // A board a probe cannot find, because what it has is not USB or a cabled console: a person says what it is and
         // gets a DUT record, which the next sync lists like any other board. The host is the one the caller is asking
-        // about (the lab knows its hosts), and the SoC list is the catalog's; `services` is bsp's own record, passed
+        // about (the lab knows its hosts), and the SoC list is the catalog's; `services` is boardctrl's own record, passed
         // through unchanged.
         const knownHost = context.host ?? context.slot?.split('/')[0] ?? (config.username ? config.username.split(',')[0]!.trim() : '')
         const catalog = await sdkCatalog(config)
@@ -573,7 +573,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
           return probed(config, args, progress, registered, host ?? undefined, signal)
         }
         if (method === 'bind') {
-          // The board is in download mode already: bsp makes a DUT of the console and the port it appeared on. Its SoC
+          // The board is in download mode already: boardctrl makes a DUT of the console and the port it appeared on. Its SoC
           // (and optionally one SDK) is what gives it a boot recipe; without it the board has no SDK at all.
           if (!host) throw new Error('人工刷机要知道板子在哪台主机上：选一台主机')
           const usb = values.usb?.trim() ?? '', consoleId = values.console?.trim() ?? ''
@@ -593,9 +593,9 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
           registered?.(name)
           return { message: `登记了 ${name}（${host}：串口 ${consoleId}，下载口 ${usb}${soc ? `，SoC ${soc}` : ''}${sdk ? `，SDK ${sdk}` : ''}；由人复位）`, found: [] }
         }
-        throw new Error(`bsp 后端没有发现方法 ${method}`)
+        throw new Error(`boardctrl 后端没有发现方法 ${method}`)
       },
-      // bsp starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
+      // boardctrl starts the host over itself: it forgets the boards it probed there and their slots, makes a slot of each
       // console plugged in now, and probes them all, registering each board as found. With --keep-used it keeps the
       // boards that are leased or busy and redoes only what moved.
       async rebuild(config, host, progress, registered, options, signal) {
@@ -610,11 +610,11 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       /**
        * A board no probe can see: its console, download port and debug path are not USB things, so a person says what
        * they are. The method is `manual` below, and every field is one a DUT record has (the same ones `boardctrl dut set`
-       * takes), so the record bsp gets is the one a site file would carry — boardlab writes no bsp vocabulary of its
+       * takes), so the record boardctrl gets is the one a site file would carry — boardlab writes no boardctrl vocabulary of its
        * own, it passes the person's answers through.
        */
       async compose(config, method, values, context) {
-        if (method !== 'manual') throw new Error(`bsp 后端没有手工登记方法 ${method}`)
+        if (method !== 'manual') throw new Error(`boardctrl 后端没有手工登记方法 ${method}`)
         const host = values.host?.trim() || context.host?.trim()
         if (!host) throw new Error('手工登记要知道板子在哪台主机上')
         const name = values.name?.trim() ?? ''
@@ -665,7 +665,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
         return (job.lines ?? []).join('\n')
       },
       async breaks(config, sdk) {
-        // The recipe's `breaker:` steps, from the CATALOG (not the host): bsp sdk show lists them. The page asks as
+        // The recipe's `breaker:` steps, from the CATALOG (not the host): boardctrl sdk show lists them. The page asks as
         // soon as the boot dialog opens and again on every change, and the catalog changes at most when it syncs:
         // a short cache keeps the dialog instant, and concurrent asks share one call.
         const key = `${config.url}\u0000${sdk}`
@@ -686,7 +686,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
       accepts: { schemes: ['http', 'https', 'ssh'], suffixes: ['.zip', '.tar.gz', '.tgz', '.tar'] },
       async flash(config, at, pkg, progress, signal, report) {
         const { device, lease: token } = at
-        // A link is downloaded by the board host itself; a file here is uploaded by bsp, checked against its sha256.
+        // A link is downloaded by the board host itself; a file here is uploaded by boardctrl, checked against its sha256.
         const job = await boardctrlCli<{ job?: string, lines?: string[], flasher?: string, elapsed_s?: number }>(config, ['dut', 'flash', device,
           '--package', pkg.url ?? pkg.path!, ...(pkg.sha256 ? ['--sha256', pkg.sha256] : []), ...(pkg.flasher ? ['--flasher', pkg.flasher] : []), ...(pkg.refresh && pkg.url ? ['--refresh'] : []),
           ...(pkg.partitions?.length ? ['--partitions', pkg.partitions.join(',')] : []),
@@ -707,7 +707,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
 
     news: {
       watch(config, onNews, ended) {
-        // One bspd: its own events. Several hosts: they tell the registry when their cables change, one stream for all.
+        // One boardctrld: its own events. Several hosts: they tell the registry when their cables change, one stream for all.
         const child = start([...global(config), 'watch', ...(direct(config) ? [] : ['--registry'])], env(config))
         let buffer = '', stopped = false
         child.stream.setEncoding('utf8')
@@ -729,9 +729,9 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
             else if (at && /^dut\.(added|removed|renamed|slots|leased|released|attention|rebuilt)/.test(event.topic ?? '')) onNews({ kind: 'hosts', host: at })
           }
         })
-        // The stream is half bsp's stdin, which never ends: its output ending (or the stream failing) is the end.
+        // The stream is half boardctrl's stdin, which never ends: its output ending (or the stream failing) is the end.
         let over = false
-        const finish = () => { if (over) return; over = true; if (!stopped) ended(child.stderr().trim().split('\n').at(-1) || 'bsp watch 结束了') }
+        const finish = () => { if (over) return; over = true; if (!stopped) ended(child.stderr().trim().split('\n').at(-1) || 'boardctrl watch 结束了') }
         child.stream.on('end', finish)
         child.stream.on('close', finish)
         child.stream.on('error', finish)
@@ -740,7 +740,7 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
     },
 
     // The board's debug path, whatever its host provides: ask what it offers, run its actions, stream its trace.
-    debug: bspDebug({
+    debug: boardctrlDebug({
       run: <T>(config: LabConfig, args: string[]) => boardctrlCli<T>(config, args, 120_000),
       spawnStream: (config, args) => start([...global(config), ...args], env(config)),
     }),

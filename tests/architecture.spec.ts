@@ -22,7 +22,7 @@ describe('architecture', () => {
       cpSync(join(root, 'frontends'), join(copy, 'frontends'), { recursive: true })
       const write = (path: string, text: string) => { mkdirSync(join(copy, path, '..'), { recursive: true }); writeFileSync(join(copy, path), text) }
       // A module using another it neither declares nor requires, and reaching into a frontend.
-      write('src/modules/home-assistant/leak.ts', "import { bsp } from '../boardctrl/index.ts'\nimport { mountPage } from '../../../frontends/modern/main.tsx'\nexport { bsp, mountPage }\n")
+      write('src/modules/home-assistant/leak.ts', "import { boardctrl } from '../boardctrl/index.ts'\nimport { mountPage } from '../../../frontends/modern/main.tsx'\nexport { boardctrl, mountPage }\n")
       // A frontend reaching into a module's server side.
       write('frontends/modern/leak.ts', "import { LOCAL } from '../../src/modules/local/index.ts'\nexport { LOCAL }\n")
       // A module's commands using the core's server side, and its page part a module's server side.

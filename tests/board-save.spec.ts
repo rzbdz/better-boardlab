@@ -15,11 +15,11 @@ import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 
-/** A bsp host's driver whose dialog choices are fixed and whose `change` is recorded. */
+/** A boardctrl host's driver whose dialog choices are fixed and whose `change` is recorded. */
 function recordingBsp(choices: Record<string, unknown>) {
   const saved: Array<Record<string, unknown>> = []
   const backend = {
-    title: 'bsp', serial: { open: async () => { throw new Error('no console') } },
+    title: 'boardctrl', serial: { open: async () => { throw new Error('no console') } },
     relay: { reset: async () => {}, enterDownload: async () => {}, confirm: async () => '' },
     inventory: {
       verify: async () => 'ok',

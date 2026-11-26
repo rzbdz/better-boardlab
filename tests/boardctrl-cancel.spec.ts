@@ -1,5 +1,5 @@
 /**
- * Cancelling what the bsp driver runs: the host is told to stop its job and the driver follows it to its end, a job
+ * Cancelling what the boardctrl driver runs: the host is told to stop its job and the driver follows it to its end, a job
  * that ended cancelled is reported as cancelled, and a CLI that has to be killed takes everything it started with it.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -22,7 +22,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 /** A fake `bsp` on disk: a shell script, run for real. */
 function script(body: string): string {
-  const file = join(dir, 'bsp')
+  const file = join(dir, 'boardctrl')
   writeFileSync(file, `#!/bin/sh\n${body}\n`)
   chmodSync(file, 0o755)
   return file
@@ -33,13 +33,13 @@ const until = async (test: () => boolean, ms = 5000) => {
   return test()
 }
 
-describe('cancelling bsp jobs', () => {
+describe('cancelling boardctrl jobs', () => {
   it('reports a job that ended cancelled (exit 4, error.code cancelled) as cancelled, not as done or failed', async () => {
     const bin = script(`echo '${cancelledEnvelope}'; exit 4`)
     const lab = boardctrlLab({ bin })
     const flashing = lab.builds!.flash!(config, on('k3-a', 'T1'), { url: 'https://images.test/pkg.zip', flasher: null }, () => {})
     await expect(flashing).rejects.toBeInstanceOf(CancelledError)
-    await expect(flashing).rejects.toThrow(/^已取消：bsp dut flash：job flash-1-1 cancelled/)
+    await expect(flashing).rejects.toThrow(/^已取消：boardctrl dut flash：job flash-1-1 cancelled/)
     // Either sign alone is enough: an older CLI's exit code, or the envelope.
     const coded = boardctrlLab({ run: async () => ({ code: 4, stdout: '', stderr: '' }) })
     await expect(coded.builds!.boot(config, on('k3-a'), { sdk: 's', method: 'load', variant: null }, () => {})).rejects.toBeInstanceOf(CancelledError)
@@ -144,7 +144,7 @@ describe('cancelling bsp jobs', () => {
   })
 })
 
-describe('the bsp process runner', () => {
+describe('the boardctrl process runner', () => {
   it('kills the CLI\'s whole process group, so what it started (ssh, scp) does not outlive it', async () => {
     const pidFile = join(dir, 'child.pid')
     const bin = script(`sleep 60 &\necho $! > ${pidFile}\nwait`)

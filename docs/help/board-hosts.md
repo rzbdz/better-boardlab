@@ -17,7 +17,7 @@
 
 boardd 会 ssh 过去，传一份 boardctrl，装好 boardctrld 服务，再把站点同步过去。主机上要有 Python 3 和 `fastboot`。装好以后点「发现」，boardd 会按复位线、看串口，认出接着的板子；扫描会复位它触及的板子，只在明确要发现时才运行。
 
-装好以后，boardd 通过 boardctrl CLI 使用这台主机的 boardctrld HTTP API。实验室地址可以填 `bspd+http://<主机>:8765`，让 boardd 直连主机；直连不可达时才需要 `bspd+ssh://<用户>@<主机>:8765` 的 SSH 隧道，或 boardctrl registry 的主机 rendezvous。安装用 SSH 不代表每次普通读请求都要走 SSH。实验室的 token 保存在 boardd 的设置里，主机只监听回环地址时仍需 SSH 隧道。
+装好以后，boardd 通过 boardctrl CLI 使用这台主机的 boardctrld HTTP API。实验室地址可以填 `boardctrld+http://<主机>:8765`，让 boardd 直连主机；直连不可达时才需要 `boardctrld+ssh://<用户>@<主机>:8765` 的 SSH 隧道，或 boardctrl registry 的主机 rendezvous。安装用 SSH 不代表每次普通读请求都要走 SSH。实验室的 token 保存在 boardd 的设置里，主机只监听回环地址时仍需 SSH 隧道。
 
 「重新安装」用于升级或修复；「删除」会卸掉主机上的 boardctrld（板子记录留在主机上），并从 boardlab 删掉这个实验室。有人拿着锁时不能删除。
 

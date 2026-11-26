@@ -1,5 +1,5 @@
 /**
- * A board host's console log as boardlab reads it: the `bsp dut logs` arguments a log query becomes, and its answer
+ * A board host's console log as boardlab reads it: the `boardctrl dut logs` arguments a log query becomes, and its answer
  * (in the host's words) as a log range. The host keeps each console's log by day and indexes it, so it reads a window
  * around a line, the numbers of every match and the boot lines where the log is.
  */
@@ -7,14 +7,14 @@ import type { LabConfig, LogQuery } from 'boardlab-core/core/backend.ts'
 import type { BootMark, LogRange } from 'boardlab-core/shared/types.ts'
 import { readLog } from 'boardlab-core/core/consoles.ts'
 
-/** A board host's answer to `bsp dut logs`: its lines, numbered and placed (an older host gives only the lines). */
+/** A board host's answer to `boardctrl dut logs`: its lines, numbered and placed (an older host gives only the lines). */
 export interface HostLog {
   lines: string[], matched?: number, truncated?: boolean, positions?: Array<string | null>, numbers?: number[], total?: number
   hits?: number[], hits_truncated?: boolean, marks?: Array<{ line: number, id: string, text: string }>, marks_truncated?: boolean
   at?: string | null, more_before?: boolean, more_after?: boolean, snapped?: boolean
 }
 
-/** The `bsp dut logs <device>` arguments for a query: a window around `at`, or a search with what it also asks for. */
+/** The `boardctrl dut logs <device>` arguments for a query: a window around `at`, or a search with what it also asks for. */
 export function logArgs(device: string, query: LogQuery): string[] {
   if (query.at != null) return ['dut', 'logs', device, '--at', query.at, '--before', String(query.before ?? 0), '--after', String(query.after ?? 0)]
   return ['dut', 'logs', device,
@@ -49,7 +49,7 @@ const knownMarks = new Map<string, { at: number, value: Promise<BootMark[]> }>()
 export function forgetBootMarks() { knownMarks.clear() }
 
 /**
- * A board's boot marks (`bsp dut boot-marks`: its SoC's boot ROM lines and any the site adds), asked once a while per
+ * A board's boot marks (`boardctrl dut boot-marks`: its SoC's boot ROM lines and any the site adds), asked once a while per
  * board. An older host has none, and the core's still apply.
  */
 export function bootMarksOf(ask: (config: LabConfig, device: string) => Promise<{ marks?: BootMark[] }>) {

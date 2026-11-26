@@ -10,6 +10,6 @@ export const entry: CatalogEntry = {
     bin: text(settings, 'bin') ?? process.env.BOARDS_BOARDCTRL ?? context.shipped('externals/boardctrl/bin/boardctrl')
       ?? context.shipped('externals/boardctrl/bin/bsp') ?? undefined,
     stateDir: context.stateDir, instances: settings.instances === undefined ? [] : instances(settings, 'boardctrl'),
-    tree: context.shipped('externals/boardctrl/deploy/bspd-install.sh')?.replace(/\/deploy\/bspd-install\.sh$/, '') ?? null,
+    tree: context.shipped('externals/boardctrl/deploy/install.sh')?.replace(/\/deploy\/install\.sh$/, '') ?? null,
   }),
 }

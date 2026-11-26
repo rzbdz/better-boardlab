@@ -51,9 +51,9 @@ let hosts = 0
 /** A host boardd on a port the system picks (`portOf` reads it back), so two test files never ask for the same one. */
 async function host() {
   const bench = new Bench(), n = ++hosts
-  const lab = new BoardLab({ db: openDatabase(join(dir, `host-${n}.sqlite`)), modules: [{ id: 'bench', title: '假主机', setup: lab => lab.backends.register('bsp', bench) }] })
-  await lab.backends.configure('user:root', 'bsp', { enabled: true, url: 'http://bench', username: '', password: '', devices: '' })
-  await lab.backends.sync('bsp')
+  const lab = new BoardLab({ db: openDatabase(join(dir, `host-${n}.sqlite`)), modules: [{ id: 'bench', title: '假主机', setup: lab => lab.backends.register('boardctrl', bench) }] })
+  await lab.backends.configure('user:root', 'boardctrl', { enabled: true, url: 'http://bench', username: '', password: '', devices: '' })
+  await lab.backends.sync('boardctrl')
   const running = await serve(lab, { port: 0, socketPath: join(dir, `host-${n}.sock`), uiDir: null })
   return { lab, bench, running }
 }
@@ -76,20 +76,20 @@ describe('a hub over host boardds', () => {
     try {
       const central = await hub({ lab1: portOf(one.running), lab2: portOf(two.running) })
       const names = central.boards.list().map(board => board.name).sort()
-      expect(names).toEqual(['lab1-bsp-k1-b', 'lab1-bsp-k3-a', 'lab2-bsp-k1-b', 'lab2-bsp-k3-a'])
+      expect(names).toEqual(['lab1-boardctrl-k1-b', 'lab1-boardctrl-k3-a', 'lab2-boardctrl-k1-b', 'lab2-boardctrl-k3-a'])
 
-      const { token } = await central.locks.lock('lab1-bsp-k3-a', 'codex:uboot-net-fix', 'boot test')
-      expect(one.lab.locks.held('bsp-k3-a')).toMatchObject({ holder: 'codex:uboot-net-fix', purpose: 'boot test' })
-      expect(two.lab.locks.held('bsp-k3-a')).toBeNull()                       // the other host is untouched
+      const { token } = await central.locks.lock('lab1-boardctrl-k3-a', 'codex:uboot-net-fix', 'boot test')
+      expect(one.lab.locks.held('boardctrl-k3-a')).toMatchObject({ holder: 'codex:uboot-net-fix', purpose: 'boot test' })
+      expect(two.lab.locks.held('boardctrl-k3-a')).toBeNull()                       // the other host is untouched
 
       // Working the board goes to its host, under the hub's lock.
-      await central.relay.reset('lab1-bsp-k3-a', { holder: 'codex:uboot-net-fix', token })
+      await central.relay.reset('lab1-boardctrl-k3-a', { holder: 'codex:uboot-net-fix', token })
       expect(one.bench.calls).toContain('reset k3-a')
 
       // Released through the hub: released on the host.
-      await central.locks.unlock('lab1-bsp-k3-a', { holder: 'codex:uboot-net-fix', token })
+      await central.locks.unlock('lab1-boardctrl-k3-a', { holder: 'codex:uboot-net-fix', token })
       await central.backends.sync('lab1')
-      expect(one.lab.locks.held('bsp-k3-a')).toBeNull()
+      expect(one.lab.locks.held('boardctrl-k3-a')).toBeNull()
     } finally { await one.running.close(); await two.running.close() }
   })
 
@@ -97,17 +97,17 @@ describe('a hub over host boardds', () => {
     const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
-      await one.lab.locks.lock('bsp-k3-a', 'user:bob', '在主机页面上调试')
+      await one.lab.locks.lock('boardctrl-k3-a', 'user:bob', '在主机页面上调试')
       await central.backends.sync('lab1')
-      expect(central.boards.get('lab1-bsp-k3-a').lab).toMatchObject({ heldBy: 'user:bob' })
-      await expect(central.locks.lock('lab1-bsp-k3-a', 'user:alice', '我也要')).rejects.toThrow(/user:bob/)
+      expect(central.boards.get('lab1-boardctrl-k3-a').lab).toMatchObject({ heldBy: 'user:bob' })
+      await expect(central.locks.lock('lab1-boardctrl-k3-a', 'user:alice', '我也要')).rejects.toThrow(/user:bob/)
 
-      expect(central.boards.get('lab1-bsp-k1-b').lab).toMatchObject({ attention: '按一下 k1-b 的 RESET 键' })
-      await central.relay.confirm('lab1-bsp-k1-b', 'user:alice', '按好了')
+      expect(central.boards.get('lab1-boardctrl-k1-b').lab).toMatchObject({ attention: '按一下 k1-b 的 RESET 键' })
+      await central.relay.confirm('lab1-boardctrl-k1-b', 'user:alice', '按好了')
       expect(one.bench.calls).toContain('confirm k1-b')
-      await one.lab.backends.sync('bsp')                                         // the host hears from its hardware
+      await one.lab.backends.sync('boardctrl')                                         // the host hears from its hardware
       await central.backends.sync('lab1')
-      expect(central.boards.get('lab1-bsp-k1-b').lab).toMatchObject({ attention: null })
+      expect(central.boards.get('lab1-boardctrl-k1-b').lab).toMatchObject({ attention: null })
     } finally { await one.running.close() }
   })
 
@@ -115,12 +115,12 @@ describe('a hub over host boardds', () => {
     const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
-      await central.locks.lock('lab1-bsp-k3-a', 'user:alice', '看串口')
-      const session = await central.consoles.open('lab1-bsp-k3-a')
+      await central.locks.lock('lab1-boardctrl-k3-a', 'user:alice', '看串口')
+      const session = await central.consoles.open('lab1-boardctrl-k3-a')
       expect(session.history.join('\n')).toContain('k3-a login:')
       const seen: string[] = []
       session.onOutput(data => seen.push(data.toString()))
-      await central.consoles.input('lab1-bsp-k3-a', { holder: 'user:alice' }, { data: 'root\r' })
+      await central.consoles.input('lab1-boardctrl-k3-a', { holder: 'user:alice' }, { data: 'root\r' })
       for (let i = 0; i < 50 && !seen.join('').includes('echo root'); i++) await new Promise(resolve => setTimeout(resolve, 20))
       expect(one.bench.calls).toContain('type k3-a root\r')
       expect(seen.join('')).toContain('echo root')
@@ -132,11 +132,11 @@ describe('a hub over host boardds', () => {
     const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
-      expect(await central.consoles.logs('lab1-bsp-k3-a', undefined, { grep: 'login', hits: true })).toMatchObject({ matched: 1, hits: [0], total: 1, source: 'backend' })
-      const window = await central.consoles.logs('lab1-bsp-k3-a', undefined, { at: 'line:0', before: 3, after: 3 })
+      expect(await central.consoles.logs('lab1-boardctrl-k3-a', undefined, { grep: 'login', hits: true })).toMatchObject({ matched: 1, hits: [0], total: 1, source: 'backend' })
+      const window = await central.consoles.logs('lab1-boardctrl-k3-a', undefined, { at: 'line:0', before: 3, after: 3 })
       expect(window).toMatchObject({ lines: ['k3-a login:'], numbers: [0], moreBefore: false, moreAfter: false })
       // The host's position for the line, passed back through the hub, names the same line.
-      expect(await central.consoles.logs('lab1-bsp-k3-a', undefined, { at: window.positions![0] })).toMatchObject({ lines: ['k3-a login:'], snapped: false })
+      expect(await central.consoles.logs('lab1-boardctrl-k3-a', undefined, { at: window.positions![0] })).toMatchObject({ lines: ['k3-a login:'], snapped: false })
     } finally { await one.running.close() }
   }, 30_000)
 
@@ -144,15 +144,15 @@ describe('a hub over host boardds', () => {
     const one = await host()
     try {
       const central = await hub({ lab1: portOf(one.running) })
-      await one.lab.locks.lock('bsp-k3-a', 'user:bob', '在主机页面上调试')
+      await one.lab.locks.lock('boardctrl-k3-a', 'user:bob', '在主机页面上调试')
       await central.backends.sync('lab1')
-      const queued = await central.locks.lock('lab1-bsp-k3-a', 'claude:kernel-bisect', '等它空出来', { queue: 'join' })
+      const queued = await central.locks.lock('lab1-boardctrl-k3-a', 'claude:kernel-bisect', '等它空出来', { queue: 'join' })
       expect(queued.queued).toEqual({ position: 1 })
-      await one.lab.locks.unlock('bsp-k3-a', { holder: 'user:bob' })
+      await one.lab.locks.unlock('boardctrl-k3-a', { holder: 'user:bob' })
       await central.backends.sync('lab1')
-      for (let i = 0; i < 50 && !one.lab.locks.held('bsp-k3-a'); i++) await new Promise(resolve => setTimeout(resolve, 20))
-      expect(central.locks.held('lab1-bsp-k3-a')).toMatchObject({ holder: 'claude:kernel-bisect' })
-      expect(one.lab.locks.held('bsp-k3-a')).toMatchObject({ holder: 'claude:kernel-bisect', purpose: '等它空出来' })
+      for (let i = 0; i < 50 && !one.lab.locks.held('boardctrl-k3-a'); i++) await new Promise(resolve => setTimeout(resolve, 20))
+      expect(central.locks.held('lab1-boardctrl-k3-a')).toMatchObject({ holder: 'claude:kernel-bisect' })
+      expect(one.lab.locks.held('boardctrl-k3-a')).toMatchObject({ holder: 'claude:kernel-bisect', purpose: '等它空出来' })
     } finally { await one.running.close() }
   })
 

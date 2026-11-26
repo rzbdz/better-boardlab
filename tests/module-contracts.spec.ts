@@ -47,7 +47,7 @@ describe('module client contracts', () => {
     ])
   })
 
-  it('streams bsp commands through the generic client, with sdk as the default group', async () => {
+  it('streams boardctrl commands through the generic client, with sdk as the default group', async () => {
     const { client, streams } = transport()
     const write = () => {}
     expect(await sdkCommand(client, ['build'], false, write)).toEqual({ code: 0, download: null })

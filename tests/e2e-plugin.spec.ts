@@ -53,7 +53,7 @@ const BOARD = 'plug-host-plug-board'
 function usable(): string | null {
   if (!existsSync(CLI)) return `the CLI is not built (${CLI}): run pnpm run build`
   if (!existsSync(join(BSP, 'frontends/server/__main__.py'))) return `bsp's sources are not here (${BSP})`
-  if (!existsSync(PYTHON)) return `no python for bsp's server (${PYTHON}); set BOARDLAB_E2E_PYTHON`
+  if (!existsSync(PYTHON)) return `no python for boardctrl's server (${PYTHON}); set BOARDLAB_E2E_PYTHON`
   const probe = spawnSync(PYTHON, ['-c', 'import fastapi, uvicorn, yaml'], { encoding: 'utf8' })
   if (probe.status !== 0) return `${PYTHON} has no fastapi/uvicorn: ${(probe.stderr || '').trim().split('\n').pop()}`
   return null
@@ -291,11 +291,11 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
     const stateDir = join(dir, 'boardd')
     mkdirSync(stateDir, { recursive: true })
     writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { boardctrl: {} } }, null, 2))
-    // The bsp boardd drives is this checkout's, not whatever `bsp` happens to be on the machine's PATH: a stale
+    // The boardctrl boardd drives is this checkout's, not whatever `bsp` happens to be on the machine's PATH: a stale
     // install elsewhere has neither the rename nor the providers this test is about.
     const boarddChild = spawn(process.execPath, ['--no-warnings', CLI, 'serve', '--port', String(boarddPort), '--state-dir', stateDir, '--no-ui'], {
       cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, BOARDS_BOARDCTRL: join(BSP, 'bin', 'bsp'), PATH: `${join(BSP, 'bin')}:${process.env.PATH}` },
+      env: { ...process.env, BOARDS_BOARDCTRL: join(BSP, 'bin', 'boardctrl'), PATH: `${join(BSP, 'bin')}:${process.env.PATH}` },
     })
     const served = { url: `http://127.0.0.1:${boarddPort}`, process: boarddChild }
     boardd = served
@@ -314,7 +314,7 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
       return JSON.parse(text) as Record<string, unknown>
     }
     await call('/api/labs/add', { id: 'plug-host', kind: 'boardctrl' })
-    await call('/api/labs', { id: 'plug-host', enabled: true, url: `bspd+${host.url}`, password: token })
+    await call('/api/labs', { id: 'plug-host', enabled: true, url: `boardctrld+${host.url}`, password: token })
     const tested = await call('/api/labs/test', { id: 'plug-host' }) as { verifyOk?: boolean, verifyMessage?: string }
     expect(tested.verifyOk, tested.verifyMessage).toBe(true)
   }, 240_000)
@@ -395,7 +395,7 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
         Array<{ id: string, compose?: boolean, fields: Array<{ id: string }> }>
       const manual = methods.find(method => method.compose)
       expect(manual, JSON.stringify(methods)).toBeTruthy()
-      // It asks what the person knows and bsp needs: the host, a name, the roles, and optionally SoC/model/console/USB/reset.
+      // It asks what the person knows and boardctrl needs: the host, a name, the roles, and optionally SoC/model/console/USB/reset.
       expect(manual!.fields.map(field => field.id)).toEqual(['host', 'name', 'services', 'soc', 'board', 'console_alias', 'usb', 'reset_pin'])
       const { response, text } = await request('/api/labs/compose', { id: 'plug-host', method: manual!.id,
         values: { host: 'plug-host', name: 'by-hand', services: JSON.stringify({ debug: { provider: 'fake-sd' }, console: { provider: 'none' }, download: { provider: 'none' } }) } }, HOLDER)

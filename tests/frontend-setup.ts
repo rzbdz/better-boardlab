@@ -19,7 +19,7 @@ const history = {
   scans: [],
 }
 
-// The bsp site: one build server with one SDK, one SDK on a source tree, a SoC whose probe image is not there.
+// The boardctrl site: one build server with one SDK, one SDK on a source tree, a SoC whose probe image is not there.
 const doc = (kind: string, id: string, fields: Record<string, string>, layer = 'site') => ({ kind, id, file: `sdk/${kind}/${id}.yaml`, layer, text: `id: ${id}\n`, fields })
 const site = {
   source: 'managed', url: '', branch: 'main', ready: true, revision: 'abc1234', commit: { subject: 'Add SDK vendor-a', at: '2026-11-10T09:00:00Z' }, ahead: 0,

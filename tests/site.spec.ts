@@ -1,9 +1,9 @@
 /**
- * The bsp site boardd keeps and ships: its source (here, or a git repository: a local bare one stands in for it),
- * SDK and build server edits that keep the file's comments and are refused when bsp would not load the catalog, its
- * images fetched by the bsp CLI (a fake one) into .blobs/ with what is missing said, and
+ * The boardctrl site boardd keeps and ships: its source (here, or a git repository: a local bare one stands in for it),
+ * SDK and build server edits that keep the file's comments and are refused when boardctrl would not load the catalog, its
+ * images fetched by the boardctrl CLI (a fake one) into .blobs/ with what is missing said, and
  * syncing it to a board host (ssh, scp, sudo and systemctl faked over a directory standing in for the host, and a
- * fake bspd on a local port): the right files arrive, the host's hosts/ stays, and bspd is told to read it again.
+ * fake boardctrld on a local port): the right files arrive, the host's hosts/ stays, and boardctrld is told to read it again.
  */
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
@@ -298,7 +298,7 @@ describe('the boardctrl site', () => {
     expect(readFileSync(log, 'utf8')).toMatch(/^(refused\n)+(refused-too\n)+$/)
   })
 
-  it('adds, edits and removes SDKs and build servers as YAML bsp loads, keeping comments; refuses what would not load', async () => {
+  it('adds, edits and removes SDKs and build servers as YAML boardctrl loads, keeping comments; refuses what would not load', async () => {
     const site = new Site(join(dir, 'site'), memory())
     expect((await site.status()).source).toBe('managed')                          // a site kept here starts empty
     await site.putDoc('user:bob', 'families', 'make-bsp', readFileSync(join(EXAMPLE, 'sdk/families/make-bsp.yaml'), 'utf8'))
@@ -326,7 +326,7 @@ describe('the boardctrl site', () => {
     expect(server).toContain('# reached over ssh')
     expect(parse(server).user).toBe('builder')
 
-    // What bsp would refuse to load is refused here, and nothing is written.
+    // What boardctrl would refuse to load is refused here, and nothing is written.
     const head = git(site.dir, 'rev-parse', 'HEAD')
     const refused = [
       site.putSdk('user:bob', { id: 'vendor-b', family: 'no-such-family', server: 'build-a', path: '/p' }),
@@ -400,9 +400,9 @@ if [[ $1 == cat ]]; then [[ $2 == ${layout === 'old' ? 'bsp-hostd' : 'boardctrld
 type BoardctrldMode = 'reload' | 'refuse' | 'busy' | 'job' | 'leased' | 'old' | 'old-leased' | 'old-broken'
 
 /**
- * bspd on a local port: its tool list (`site_reload` only when new enough; `job_list` but for `old`), `site_reload`
+ * boardctrld on a local port: its tool list (`site_reload` only when new enough; `job_list` but for `old`), `site_reload`
  * (`refuse`: a catalog it will not load, the first time), `dut_list` with leases and busy boards, `job_list`, and
- * `health` (`old-broken`: only while the host's site is the one it had, as a bspd that cannot start on the new one).
+ * `health` (`old-broken`: only while the host's site is the one it had, as a boardctrld that cannot start on the new one).
  */
 async function fakeBspd(mode: BoardctrldMode, site?: string) {
   const calls: Array<{ path: string, auth: string | undefined }> = []
@@ -440,17 +440,17 @@ async function shippedSite(root: string) {
   mkdirSync(join(root, 'providers/plug/__pycache__'), { recursive: true })
   writeFileSync(join(root, 'providers/plug/provider.py'), 'def setup(ctx, api, config):\n    pass\n')
   writeFileSync(join(root, 'providers/plug/__pycache__/provider.cpython-313.pyc'), 'binary')
-  writeFileSync(join(root, 'socs/soc-a/notes.tmp'), 'scratch'); writeFileSync(join(root, '.bspignore'), '*.tmp\n')
+  writeFileSync(join(root, 'socs/soc-a/notes.tmp'), 'scratch'); writeFileSync(join(root, '.boardctrl-ignore'), '*.tmp\n')
   git(root, 'add', '-A'); git(root, 'commit', '-qm', 'site')
   return site
 }
 
 /**
- * The bsp CLI's `images sync` and `images list` on `$BSP_SITE`: `soc-a/helper` is fetched only over the second way into
+ * The boardctrl CLI's `images sync` and `images list` on `$BSP_SITE`: `soc-a/helper` is fetched only over the second way into
  * git (`ssh -F inherit`), `soc-a/rom` never is, and `soc-b/probe` has no source at all.
  */
 function fakeBsp() {
-  const bin = join(dir, 'fake-bsp'), log = join(dir, 'bsp.log')
+  const bin = join(dir, 'fake-bsp'), log = join(dir, 'boardctrl.log')
   writeFileSync(bin, `#!/bin/bash
 echo "$* | site=$BSP_SITE | config=$BSP_CONFIG | ssh=$GIT_SSH_COMMAND" >> ${log}
 case "$*" in
@@ -472,8 +472,8 @@ esac
 
 describe('the site\'s images', () => {
   it('are fetched into .blobs/ before the site is bundled; what is not there is said, and does not stop the bundle', async () => {
-    const bsp = fakeBsp(), settings = memory(), root = join(dir, 'state', 'boardctrl', 'site')
-    const site = new Site(root, settings, { bin: bsp.bin, sshCommands: bsp.sshCommands })
+    const boardctrl = fakeBsp(), settings = memory(), root = join(dir, 'state', 'boardctrl', 'site')
+    const site = new Site(root, settings, { bin: boardctrl.bin, sshCommands: boardctrl.sshCommands })
     expect((await site.status()).images).toBeNull()                                  // not fetched yet
     cpSync(join(EXAMPLE, 'socs'), join(root, 'socs'), { recursive: true })
     git(root, 'add', '-A'); git(root, 'commit', '-qm', 'socs')
@@ -485,7 +485,7 @@ describe('the site\'s images', () => {
     expect(lines).toEqual(['取到了镜像 soc-a/helper', '镜像 soc-a/rom 没取到：no rom.bin at v1', images!.message])
     expect(execFileSync('tar', ['-tzf', bundle], { encoding: 'utf8' })).toContain(`.blobs/${'a'.repeat(64)}/helper.bin`)
     // The CLI worked on this copy, with no user file of its own; each way into git tried while images failed.
-    const calls = bsp.log().trim().split('\n')
+    const calls = boardctrl.log().trim().split('\n')
     expect(calls).toEqual([
       `--json images sync | site=${root} | config=${join(dir, 'state', 'boardctrl', 'no-remotes.json')} | ssh=ssh -i key`,
       `--json images sync | site=${root} | config=${join(dir, 'state', 'boardctrl', 'no-remotes.json')} | ssh=ssh -F inherit`,
@@ -493,7 +493,7 @@ describe('the site\'s images', () => {
     ])
     expect((await site.status()).images).toEqual(images)                            // kept for the page
 
-    // No bsp CLI: said, kept, and the site still bundles.
+    // No boardctrl CLI: said, kept, and the site still bundles.
     const without = new Site(root, memory(), { bin: join(dir, 'no-such-bsp') })
     expect((await without.ship(bundle)).images).toMatchObject({ ok: false, message: expect.stringMatching(/^没取成镜像：.*no-such-bsp/) })
 
@@ -506,20 +506,20 @@ describe('the site\'s images', () => {
 })
 
 describe('syncing the site to board hosts', () => {
-  it('ships socs, sdk, hooks, duts, provider code and images, leaves the host\'s hosts/ alone, and has bspd read it again', async () => {
-    const host = fakeHost(), bspd = await fakeBspd('reload')
+  it('ships socs, sdk, hooks, duts, provider code and images, leaves the host\'s hosts/ alone, and has boardctrld read it again', async () => {
+    const host = fakeHost(), boardctrld = await fakeBspd('reload')
     try {
       const site = await shippedSite(join(dir, 'site'))
       const bundle = join(dir, 'site.tgz')
       await site.bundle(bundle)
       const lines: string[] = []
-      const message = await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, line => lines.push(line))
+      const message = await syncHost(new Hosts(join(dir, 'state')), `boardctrld+ssh://root@lab-1:${boardctrld.port}`, bundle, line => lines.push(line))
       // The host had no provider code: providers are read at startup, so the data reload alone is not enough.
-      expect(message).toBe('boardctrld 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 bspd')
-      expect(lines).toContain('站点的 provider 代码变了：重启 bspd 让新代码生效…')
+      expect(message).toBe('boardctrld 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 boardctrld')
+      expect(lines).toContain('站点的 provider 代码变了：重启 boardctrld 让新代码生效…')
       expect(readFileSync(join(host.site, 'sdk/instances/bsp-a.yaml'), 'utf8')).toBe(readFileSync(join(EXAMPLE, 'sdk/instances/bsp-a.yaml'), 'utf8'))
       expect(existsSync(join(host.site, 'socs/soc-a/soc.yaml'))).toBe(true)
-      expect(existsSync(join(host.site, 'socs/soc-a/notes.tmp'))).toBe(false)                // .bspignore
+      expect(existsSync(join(host.site, 'socs/soc-a/notes.tmp'))).toBe(false)                // .boardctrl-ignore
       expect(readFileSync(join(host.site, 'hooks/boot/say'), 'utf8')).toContain('echo hi')
       expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(false)             // replaced, not merged
       expect(readFileSync(join(host.site, '.blobs/4567/new.bin'), 'utf8')).toBe('new image')
@@ -530,10 +530,10 @@ describe('syncing the site to board hosts', () => {
       expect(existsSync(join(host.site, 'providers/plug/__pycache__')) || existsSync(join(host.site, 'providers/plug/.pytest_cache'))).toBe(false)
       expect(readFileSync(join(host.site, 'duts/board-9.yaml'), 'utf8')).toContain('id: board-9')
       expect(existsSync(join(host.site, '.git')) || existsSync(`${host.site}.incoming`) || existsSync(`${host.site}.previous`)).toBe(false)
-      expect(bspd.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/tools/job_list', '/api/v1/tools/site_reload', '/api/v1/health'])
-      expect(bspd.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
+      expect(boardctrld.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/tools/job_list', '/api/v1/tools/site_reload', '/api/v1/health'])
+      expect(boardctrld.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
       expect(host.log().match(/^systemctl restart boardctrld$/gm)).toHaveLength(1)
-    } finally { await bspd.close() }
+    } finally { await boardctrld.close() }
   }, 30_000)
 
   it('reloads the data and keeps running when the provider code did not change', async () => {
@@ -541,51 +541,51 @@ describe('syncing the site to board hosts', () => {
     // The host already runs this provider code: only the data around it moved.
     mkdirSync(join(host.site, 'providers/plug'), { recursive: true })
     writeFileSync(join(host.site, 'providers/plug/provider.py'), 'def setup(ctx, api, config):\n    pass\n')
-    const bspd = await fakeBspd('reload')
+    const boardctrld = await fakeBspd('reload')
     try {
       const site = await shippedSite(join(dir, 'site'))
       const bundle = join(dir, 'site.tgz')
       await site.bundle(bundle)
       const lines: string[] = []
-      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, line => lines.push(line)))
+      expect(await syncHost(new Hosts(join(dir, 'state')), `boardctrld+ssh://root@lab-1:${boardctrld.port}`, bundle, line => lines.push(line)))
         .toBe('boardctrld 重新读了站点：2 个 SDK，1 个 SoC')
-      expect(lines).not.toContain('站点的 provider 代码变了：重启 bspd 让新代码生效…')
+      expect(lines).not.toContain('站点的 provider 代码变了：重启 boardctrld 让新代码生效…')
       expect(host.log()).not.toContain('systemctl restart')
-    } finally { await bspd.close() }
+    } finally { await boardctrld.close() }
   }, 30_000)
 
-  it('asks a host taken over from bspd with the token it runs on now, not one left in the old place', async () => {
+  it('asks a host taken over from boardctrld with the token it runs on now, not one left in the old place', async () => {
     const host = fakeHost()
-    // The takeover left the old install's env file behind, with the token of the bspd that is gone: the current
+    // The takeover left the old install's env file behind, with the token of the boardctrld that is gone: the current
     // installer's file is what the daemon reads, and what a sync has to ask with.
     mkdirSync(join(dir, 'host/etc/bsp'), { recursive: true })
     writeFileSync(join(dir, 'host/etc/bsp/hostd.env'), 'BSP_TOKEN=token-of-the-old-install\n')
-    const bspd = await fakeBspd('reload')
+    const boardctrld = await fakeBspd('reload')
     try {
       const site = await shippedSite(join(dir, 'site'))
       const bundle = join(dir, 'site.tgz')
       await site.bundle(bundle)
-      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, () => {}))
-        .toBe('boardctrld 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 bspd')
-      expect(bspd.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
-    } finally { await bspd.close() }
+      expect(await syncHost(new Hosts(join(dir, 'state')), `boardctrld+ssh://root@lab-1:${boardctrld.port}`, bundle, () => {}))
+        .toBe('boardctrld 重新读了站点：2 个 SDK，1 个 SoC；provider 代码变了，重启了 boardctrld')
+      expect(boardctrld.calls.every(call => call.auth === 'Bearer host-token')).toBe(true)
+    } finally { await boardctrld.close() }
   }, 30_000)
 
   it('syncs a host installed before the names changed where it still keeps its site, and restarts its own unit', async () => {
-    const host = fakeHost('old'), bspd = await fakeBspd('old')
+    const host = fakeHost('old'), boardctrld = await fakeBspd('old')
     try {
       const site = await shippedSite(join(dir, 'site'))
       const bundle = join(dir, 'site.tgz')
       await site.bundle(bundle)
-      expect(await syncHost(new Hosts(join(dir, 'state')), `bspd+ssh://root@lab-1:${bspd.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
+      expect(await syncHost(new Hosts(join(dir, 'state')), `boardctrld+ssh://root@lab-1:${boardctrld.port}`, bundle, () => {})).toBe('重启了 boardctrld，它读了新站点')
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
       expect(existsSync(join(host.site, 'hosts/lab1.yaml'))).toBe(true)
       expect(existsSync(join(dir, 'host/etc/boardctrl'))).toBe(false)        // nothing made in the new place
       expect(host.log().match(/^systemctl restart bsp-hostd/gm)).toHaveLength(1)
-    } finally { await bspd.close() }
+    } finally { await boardctrld.close() }
   }, 30_000)
 
-  it('puts back the site the host had when bspd refuses the new one, and changes nothing while a board is busy', async () => {
+  it('puts back the site the host had when boardctrld refuses the new one, and changes nothing while a board is busy', async () => {
     const host = fakeHost()
     const site = await shippedSite(join(dir, 'site'))
     const bundle = join(dir, 'site.tgz')
@@ -596,11 +596,11 @@ describe('syncing the site to board hosts', () => {
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml')) || existsSync(join(host.site, 'socs'))).toBe(false)
       expect(existsSync(`${host.site}.incoming`) || existsSync(`${host.site}.previous`)).toBe(false)
     }
-    // A new bspd that will not load the catalog: not taken for an old one (no restart), the old site back and read again.
+    // A new boardctrld that will not load the catalog: not taken for an old one (no restart), the old site back and read again.
     const refusing = await fakeBspd('refuse')
     try {
       const lines: string[] = []
-      await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${refusing.port}`, bundle, line => lines.push(line))).rejects.toThrow(/^bspd 没读进新站点：no build server 'nowhere'；主机上放回了原来的站点$/)
+      await expect(syncHost(hosts, `boardctrld+ssh://root@lab-1:${refusing.port}`, bundle, line => lines.push(line))).rejects.toThrow(/^boardctrld 没读进新站点：no build server 'nowhere'；主机上放回了原来的站点$/)
       unchanged()
       expect(refusing.calls.map(call => call.path).filter(path => path.endsWith('site_reload'))).toHaveLength(2)
       expect(host.log()).not.toContain('systemctl')
@@ -609,21 +609,21 @@ describe('syncing the site to board hosts', () => {
     for (const [mode, said] of [['busy', /dut1：boot load.*没换站点/], ['job', /任务 flash-1：flash dut2.*没换站点/]] as const) {
       const busy = await fakeBspd(mode)
       try {
-        await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${busy.port}`, bundle, () => {})).rejects.toThrow(said)
+        await expect(syncHost(hosts, `boardctrld+ssh://root@lab-1:${busy.port}`, bundle, () => {})).rejects.toThrow(said)
         unchanged()
         expect(busy.calls.map(call => call.path)).not.toContain('/api/v1/tools/site_reload')
       } finally { await busy.close() }
     }
-    // New provider code, on a bspd that reloads data in place: applying it restarts bspd. A leased board does not stop
+    // New provider code, on a boardctrld that reloads data in place: applying it restarts boardctrld. A leased board does not stop
     // that (its lock and console outlive the restart); nothing is busy here, so the restart goes ahead.
     const leased = await fakeBspd('leased')
     try {
-      expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toContain('provider 代码变了，重启')
+      expect(await syncHost(hosts, `boardctrld+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toContain('provider 代码变了，重启')
     } finally { await leased.close() }
     expect(execFileSync('ls', [join(host.site, '..')], { encoding: 'utf8' }).trim().split('\n')).toEqual(['boardctrld.env', 'site'])
   }, 30_000)
 
-  it('restarts a bspd too old to reload even while a board is leased, and puts the old site back when it does not come up', async () => {
+  it('restarts a boardctrld too old to reload even while a board is leased, and puts the old site back when it does not come up', async () => {
     const host = fakeHost()
     const site = await shippedSite(join(dir, 'site'))
     const bundle = join(dir, 'site.tgz')
@@ -633,13 +633,13 @@ describe('syncing the site to board hosts', () => {
     // unit) outlive the restart, so an upgrade goes ahead while someone holds a board.
     const leased = await fakeBspd('old-leased')
     try {
-      expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
+      expect(await syncHost(hosts, `boardctrld+ssh://root@lab-1:${leased.port}`, bundle, () => {})).toBe('重启了 boardctrld，它读了新站点')
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
     } finally { await leased.close() }
     // It does not start on the new site: the old one goes back, and it is started again on that.
     const broken = await fakeBspd('old-broken', host.site)
     try {
-      await expect(syncHost(hosts, `bspd+ssh://root@lab-1:${broken.port}`, bundle, () => {}, 1)).rejects.toThrow(/1 秒内没起来；主机上放回了原来的站点，bspd 还是没起来/)
+      await expect(syncHost(hosts, `boardctrld+ssh://root@lab-1:${broken.port}`, bundle, () => {}, 1)).rejects.toThrow(/1 秒内没起来；主机上放回了原来的站点，boardctrld 还是没起来/)
       // What goes back is what the sync before this one left (it succeeded): the new site, not the host's first one.
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
       expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(false)
@@ -650,7 +650,7 @@ describe('syncing the site to board hosts', () => {
     } finally { await broken.close() }
     const old = await fakeBspd('old')
     try {
-      expect(await syncHost(hosts, `bspd+ssh://root@lab-1:${old.port}`, bundle, () => {})).toBe('重启了 bspd，它读了新站点')
+      expect(await syncHost(hosts, `boardctrld+ssh://root@lab-1:${old.port}`, bundle, () => {})).toBe('重启了 boardctrld，它读了新站点')
       expect(old.calls.map(call => call.path)).toEqual(['/api/v1/tools', '/api/v1/tools/dut_list', '/api/v1/health'])
       expect(host.log().match(/^systemctl restart boardctrld/gm)).toHaveLength(4)
       expect(existsSync(join(host.site, 'sdk/instances/bsp-a.yaml'))).toBe(true)
@@ -662,16 +662,16 @@ describe('syncing the site to board hosts', () => {
     expect(execFileSync('tar', ['-tzf', join(dir, 'x.tgz')], { encoding: 'utf8' })).toBe('')
   }, 30_000)
 
-  it('ships the site before an install, and puts the old one back when bspd does not come up on it', async () => {
+  it('ships the site before an install, and puts the old one back when boardctrld does not come up on it', async () => {
     const host = fakeHost()
     const site = await shippedSite(join(dir, 'site'))
     const bundle = join(dir, 'site.tgz')
     await site.bundle(bundle)
-    const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
-    const installer = (ok: boolean) => writeFileSync(join(tree, 'deploy/bspd-install.sh'), ok ? 'echo "BSPD-READY lab1 8765 f61b6f8"\n' : 'echo "!! bspd did not come up" >&2; exit 1\n')
+    const tree = join(dir, 'boardctrl'); mkdirSync(join(tree, 'deploy'), { recursive: true })
+    const installer = (ok: boolean) => writeFileSync(join(tree, 'deploy/install.sh'), ok ? 'echo "BSPD-READY lab1 8765 f61b6f8"\n' : 'echo "!! boardctrld did not come up" >&2; exit 1\n')
     const hosts = new Hosts(join(dir, 'state'))
     installer(false)
-    await expect(installHost(hosts, tree, { id: 'lab1', access: { address: 'lab-1', user: 'root' } }, 'token', () => {}, async () => bundle)).rejects.toThrow(/^装 bspd 失败：!! bspd did not come up；主机上放回了原来的站点$/)
+    await expect(installHost(hosts, tree, { id: 'lab1', access: { address: 'lab-1', user: 'root' } }, 'token', () => {}, async () => bundle)).rejects.toThrow(/^装 boardctrld 失败：!! boardctrld did not come up；主机上放回了原来的站点$/)
     expect(existsSync(join(host.site, 'sdk/instances/gone.yaml'))).toBe(true)
     expect(existsSync(join(host.site, 'socs')) || existsSync(`${host.site}.previous`) || existsSync(`${host.site}.incoming`)).toBe(false)
     installer(true)
@@ -680,8 +680,8 @@ describe('syncing the site to board hosts', () => {
     expect(existsSync(join(host.site, 'sdk/instances/gone.yaml')) || existsSync(`${host.site}.previous`)).toBe(false)
   }, 30_000)
 
-  it('is offered by boardd: the site shown, edited, refused while broken, and synced to every bsp host with its revision kept', async () => {
-    const host = fakeHost(), bspd = await fakeBspd('reload')
+  it('is offered by boardd: the site shown, edited, refused while broken, and synced to every boardctrl host with its revision kept', async () => {
+    const host = fakeHost(), boardctrld = await fakeBspd('reload')
     try {
       const stateDir = join(dir, 'state')
       const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ stateDir, bin: fakeBsp().bin, sdk: { run: async () => 0 } as never })] })
@@ -700,7 +700,7 @@ describe('syncing the site to board hosts', () => {
       expect(await call('GET', '/api/boardctrl/site')).toMatchObject({ source: 'managed', ready: true, docs: [], hosts: {} })
       expect((await events('/api/boardctrl/site/sync')).exit).toMatchObject({ ok: false, message: expect.stringMatching(/还没有 boardctrl 主机/) })
       await lab.backends.add('user:alice', 'lab1', 'boardctrl')
-      await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: `bspd+ssh://root@lab-1:${bspd.port}` })
+      await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: `boardctrld+ssh://root@lab-1:${boardctrld.port}` })
       // Nothing in the site yet: synced all the same (the host's site is then empty too).
       expect((await events('/api/boardctrl/site/sync')).exit).toMatchObject({ ok: true, results: [{ lab: 'lab1', ok: true }] })
 
@@ -735,50 +735,50 @@ describe('syncing the site to board hosts', () => {
       expect(status.docs.find((doc: { id: string }) => doc.id === 'bsp-a')).toMatchObject({ kind: 'instances', layer: 'site', fields: { soc: 'soc-a', server: 'build-a', load: 'ready' } })
       expect(lab.kernel.db.prepare("SELECT detail, ok FROM actions WHERE kind = 'boardctrl-site' ORDER BY id").all()).toEqual(expect.arrayContaining([{ detail: `sync lab1 ${revision}`, ok: 1 }]))
 
-      // A site the host's bspd refuses: the host keeps the one it had, and so does its record.
+      // A site the host's boardctrld refuses: the host keeps the one it had, and so does its record.
       await call('POST', '/api/boardctrl/site/server', { id: 'build-d', host: 'build-d.example.test', user: 'dev' })
-      bspd.state.mode = 'refuse'
+      boardctrld.state.mode = 'refuse'
       expect((await events('/api/boardctrl/site/sync')).exit).toMatchObject({ ok: false, results: [{ lab: 'lab1', ok: false, message: expect.stringMatching(/放回了原来的站点/) }] })
       expect(existsSync(join(host.site, 'sdk/servers/build-d.yaml'))).toBe(false)
       expect((await call('GET', '/api/boardctrl/site')).hosts.lab1).toMatchObject({ revision, ok: false })
-    } finally { await bspd.close() }
+    } finally { await boardctrld.close() }
   }, 30_000)
 
-  it('refuses to install a host again while a board on it is in use: an install restarts its bspd', async () => {
-    const host = fakeHost(), bspd = await fakeBspd('reload')
+  it('refuses to install a host again while a board on it is in use: an install restarts its boardctrld', async () => {
+    const host = fakeHost(), boardctrld = await fakeBspd('reload')
     try {
       const stateDir = join(dir, 'state')
       // The tree it would install is checked before anything else, so it has to be there to reach the board's lock.
-      mkdirSync(join(dir, 'bsp', 'deploy'), { recursive: true })
-      writeFileSync(join(dir, 'bsp', 'deploy/bspd-install.sh'), '#!/bin/sh\n')
-      const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ stateDir, bin: fakeBsp().bin, tree: join(dir, 'bsp'), sdk: { run: async () => 0 } as never })] })
+      mkdirSync(join(dir, 'boardctrl', 'deploy'), { recursive: true })
+      writeFileSync(join(dir, 'boardctrl', 'deploy/install.sh'), '#!/bin/sh\n')
+      const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ stateDir, bin: fakeBsp().bin, tree: join(dir, 'boardctrl'), sdk: { run: async () => 0 } as never })] })
       const call = async (method: 'GET' | 'POST', path: string, body: Record<string, unknown> = {}) => {
         const found = lab.api.match(method, path.split('?')[0]!)
         if (!found) throw new Error(`no ${method} ${path}`)
         return found.endpoint.handle({ query: new URLSearchParams(), params: found.params, body, caller: { holder: 'user:alice', local: true }, signal: new AbortController().signal, upload: null }) as Promise<any>
       }
       await lab.backends.add('user:alice', 'lab1', 'boardctrl')
-      await lab.backends.configure('user:alice', 'lab1', { enabled: true, url: `bspd+ssh://root@lab-1:${bspd.port}` })
+      await lab.backends.configure('user:alice', 'lab1', { enabled: true, url: `boardctrld+ssh://root@lab-1:${boardctrld.port}` })
       // The host lists its board; the person holding it holds it. (The record is boardd's own; the lock check reads it.)
       lab.kernel.db.prepare("INSERT INTO boards(name, slot, product, soc, source, lab) VALUES('lab1-dut1', 's1', '', 'soc-a', 'lab', 'lab1')").run()
       const board = lab.boards.list().find(item => item.lab?.id === 'lab1')
       expect(board).toBeDefined()
-      // The lock itself, as a holder's would be: the install must not restart bspd under it.
+      // The lock itself, as a holder's would be: the install must not restart boardctrld under it.
       lab.locks.grant(board!.name, 'user:bob', '调试')
       const reply = await call('POST', '/api/boardctrl/install', { id: 'lab1', address: 'lab-1', user: 'root' }) as { start: (emit: (event: string, data: any) => void, end: () => void, signal: AbortSignal) => Promise<void> }
       const out: Array<[string, any]> = []
       await new Promise<void>(resolve => { void reply.start((event, data) => out.push([event, data]), resolve, new AbortController().signal) })
-      expect(out.find(([event]) => event === 'exit')?.[1]).toMatchObject({ ok: false, message: expect.stringMatching(/正被 user:bob 使用，重装会重启那台主机的 bspd/) })
-      expect(host.log()).not.toContain('bspd-install.sh')              // nothing was installed over the holder's board
-    } finally { await bspd.close() }
+      expect(out.find(([event]) => event === 'exit')?.[1]).toMatchObject({ ok: false, message: expect.stringMatching(/正被 user:bob 使用，重装会重启那台主机的 boardctrld/) })
+      expect(host.log()).not.toContain('install.sh')              // nothing was installed over the holder's board
+    } finally { await boardctrld.close() }
   }, 30_000)
 })
 
 describe('installing a host without a token', () => {
   it('forgets the lab\'s old token, so the lab and the next reinstall\'s form say the host takes none', async () => {
     fakeHost()
-    const tree = join(dir, 'bsp'); mkdirSync(join(tree, 'deploy'), { recursive: true })
-    writeFileSync(join(tree, 'deploy/bspd-install.sh'), `#!/bin/bash
+    const tree = join(dir, 'boardctrl'); mkdirSync(join(tree, 'deploy'), { recursive: true })
+    writeFileSync(join(tree, 'deploy/install.sh'), `#!/bin/bash
 token=""; while [[ $# -gt 0 ]]; do case $1 in --token) token=$2; shift 2;; --force) echo "forced"; shift;; *) shift;; esac; done
 echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
 `)
@@ -788,7 +788,7 @@ echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
     const key = hostsFor(join(dir, 'state')).keyFile
     mkdirSync(dirname(key), { recursive: true }); writeFileSync(key, 'key\n'); writeFileSync(`${key}.pub`, 'ssh-ed25519 AAAA boardlab@test\n')
     await lab.backends.add('user:alice', 'lab1', 'boardctrl')
-    await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: 'bspd+ssh://root@lab-1:8765', password: 'old-token' })
+    await lab.backends.configure('user:alice', 'lab1', { enabled: false, url: 'boardctrld+ssh://root@lab-1:8765', password: 'old-token' })
     expect(lab.backends.labSettings().find(item => item.id === 'lab1')?.hasPassword).toBe(true)
     const install = async (body: Record<string, unknown>) => {
       const found = lab.api.match('POST', '/api/boardctrl/install')!

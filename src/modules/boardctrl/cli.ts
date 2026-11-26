@@ -1,6 +1,6 @@
 /**
- * The bsp module's commands, boardlab's wrapper of the boardctrl CLI: SDK work (`sdk`), the registry's SDK catalog
- * (`registry`), and any bsp command (`bsp`), each run by the bsp on boardd's machine, so this one needs no bsp; and the
+ * The boardctrl module's commands, boardlab's wrapper of the boardctrl CLI: SDK work (`sdk`), the registry's SDK catalog
+ * (`registry`), and any boardctrl command (`boardctrl`), each run by the boardctrl on boardd's machine, so this one needs no boardctrl; and the
  * site boardd keeps for its board hosts (`site`).
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ interface SkillText { id: string, layer: string, text: string }
 
 /**
  * `boardlab sdk skill …`: an SDK's own SKILL.md from the site, printed or installed where an agent working in that
- * SDK's repository will read it. Before any bsp argument, so `skill` is not passed on to bsp.
+ * SDK's repository will read it. Before any boardctrl argument, so `skill` is not passed on to boardctrl.
  */
 async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out: CommandContext['out']) {
   const words: string[] = []
@@ -76,14 +76,14 @@ async function sdkSkill(client: BoardsClient, raw: string[], json: boolean, out:
 }
 
 /**
- * `boardlab sdk <bsp sdk arguments>`: SDK work on the build servers, run by boardd's bsp. Local files given to `put` are
+ * `boardlab sdk <boardctrl sdk arguments>`: SDK work on the build servers, run by boardd's boardctrl. Local files given to `put` are
  * sent first, and `get -o FILE` comes back into FILE. Global options (--json, --as) go before `sdk`.
  */
 async function sdkCommand({ client, argv, json, out }: CommandContext) {
   const args = [...argv]
   if (args[0] === 'skill') return sdkSkill(client, args.slice(1), json, out)
   if (!args.length || args[0] === 'help' || args[0] === '--help') {
-    console.log(`用法：boardlab sdk <操作> …，和 bsp sdk 一样（由 boardd 那边的 bsp 执行）：
+    console.log(`用法：boardlab sdk <操作> …，和 boardctrl sdk 一样（由 boardd 那边的 boardctrl 执行）：
   list | show <sdk> | status <sdk> | plan <sdk> [<组件>] [--boot load|download]
   acquire <sdk> --task <名字> | release <sdk> | build <sdk> <组件> [--clean] [--no-wait] | jobs <sdk> | job <sdk> <id> [--follow]
   exec <sdk> [--cwd DIR] -- <命令> | get <sdk> <路径> [-o 本机文件] | put <sdk> <路径> <本机文件>
@@ -101,8 +101,8 @@ async function sdkCommand({ client, argv, json, out }: CommandContext) {
 }
 
 /**
- * `boardlab registry sdk <bsp catalog arguments>`: the SDK catalog the registry keeps and hands to every board host —
- * SDKs with their load and flash recipes, build servers, families. Run by boardd's bsp; `-f FILE` is sent from here,
+ * `boardlab registry sdk <boardctrl catalog arguments>`: the SDK catalog the registry keeps and hands to every board host —
+ * SDKs with their load and flash recipes, build servers, families. Run by boardd's boardctrl; `-f FILE` is sent from here,
  * `get -o FILE` comes back here. `boardlab registry hosts` shows the hosts and the catalog revision each has.
  */
 async function registryCommand(client: BoardsClient, raw: string[], json: boolean) {
@@ -312,7 +312,7 @@ const site: Command = {
 }
 
 const sdk: Command = {
-  name: 'sdk', noBoard: true, usage: ['sdk <操作> …\tSDK：在构建服务器上租源码树、编译、读写文件、跑命令；skill <sdk> 取 SDK 自己的 SKILL.md（boardd 那边的 bsp sdk 执行，见 boardlab sdk help）'],
+  name: 'sdk', noBoard: true, usage: ['sdk <操作> …\tSDK：在构建服务器上租源码树、编译、读写文件、跑命令；skill <sdk> 取 SDK 自己的 SKILL.md（boardd 那边的 boardctrl sdk 执行，见 boardlab sdk help）'],
   run: sdkCommand,
 }
 
@@ -322,7 +322,7 @@ const registry: Command = {
 }
 
 const set: Command = {
-  name: 'set', usage: ['set <boardctrl 板子> [--soc <SoC>] [--usb <下载口>] [--fdl button|strapped|unset] [--model <型号>] [--sdks <a,b>] [--reset-pin <P33>] [--pulse-ms <毫秒>] [--fdl-pin <P12>] [--description <说明>]\t补齐或修改实验室里一块 boardctrl 板子的登记（型号、SoC、下载口、怎么进下载模式）；boardd 拿你持有的锁的那份租约去改，你不用、也拿不到 bsp 的 token'],
+  name: 'set', usage: ['set <boardctrl 板子> [--soc <SoC>] [--usb <下载口>] [--fdl button|strapped|unset] [--model <型号>] [--sdks <a,b>] [--reset-pin <P33>] [--pulse-ms <毫秒>] [--fdl-pin <P12>] [--description <说明>]\t补齐或修改实验室里一块 boardctrl 板子的登记（型号、SoC、下载口、怎么进下载模式）；boardd 拿你持有的锁的那份租约去改，你不用、也拿不到 boardctrl 的 token'],
   async run({ client, target, flag, out, token }) {
     const { board } = target()
     const body: Record<string, unknown> = { board, token: token(board) }
@@ -381,15 +381,15 @@ const guidance: Command = {
   },
 }
 
-const bsp: Command = {
-  name: 'boardctrl', noBoard: true, usage: ['bsp <bsp 命令> …\t任何 bsp 命令，在 boardd 那边执行（本机不用装 bsp），例如 boardlab boardctrl hosts'],
+const boardctrl: Command = {
+  name: 'boardctrl', noBoard: true, usage: ['boardctrl <boardctrl 命令> …\t任何 boardctrl 命令，在 boardd 那边执行（本机不用装 boardctrl），例如 boardlab boardctrl hosts'],
   async run({ client, argv, json }) {
-    // Any bsp command, run by boardd's bsp: the whole lab without installing or configuring bsp here.
+    // Any boardctrl command, run by boardd's boardctrl: the whole lab without installing or configuring boardctrl here.
     const args = argv.filter(arg => arg !== '--json')
-    if (!args.length) return console.log('用法：boardlab boardctrl <boardctrl 的命令和参数>，例如 boardlab boardctrl hosts、boardlab boardctrl dut status <dut>、boardlab boardctrl job get <id> -r <主机>\n经 boardd 那边的 bsp 执行；拿板子请用 boardlab lock（直接在 bsp 里租的板子在 boardlab 里显示为实验室占用）。')
+    if (!args.length) return console.log('用法：boardlab boardctrl <boardctrl 的命令和参数>，例如 boardlab boardctrl hosts、boardlab boardctrl dut status <dut>、boardlab boardctrl job get <id> -r <主机>\n经 boardd 那边的 boardctrl 执行；拿板子请用 boardlab lock（直接在 boardctrl 里租的板子在 boardlab 里显示为实验室占用）。')
     const result = await sdkStream(client, args, json, write, 'raw')
     process.exitCode = result.code
   },
 }
 
-export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 bsp 命令', title: 'bsp：SDK 和构建', commands: [guidance, set, sdk, site, registry, bsp] }
+export const commands: CommandGroup = { id: 'sdk', summary: 'SDK 构建、站点、SDK 目录、任意 boardctrl 命令', title: 'boardctrl：SDK 和构建', commands: [guidance, set, sdk, site, registry, boardctrl] }

@@ -36,7 +36,7 @@ export interface TestOptions {
   sdk?: SdkRunner
 }
 
-/** A lab with every module a test may use: this machine's slots and consoles, HA, script slots and bsp's SDK runner. */
+/** A lab with every module a test may use: this machine's slots and consoles, HA, script slots and boardctrl's SDK runner. */
 export function makeLab(options: TestOptions): BoardLab {
   return new BoardLab({
     db: options.db, now: options.now, sleep: options.sleep, firmwareDir: options.firmwareDir, filesDir: options.filesDir, bootTiming: options.bootTiming,
