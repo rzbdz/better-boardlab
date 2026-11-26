@@ -124,7 +124,7 @@ boardlab module search nexus             # 装了的和市场上有的，一起�
 boardlab market update --all             # 拉新版本，列出哪个模块的代码变了
 ```
 
-市场克隆在 boardd 的状态目录里（`markets/<市场>`），boardd 启动时只 `import()` 配置选中的那几个，所以没有 `node_modules` 也能装。装什么由 `boardd.json` 说：
+市场克隆在 boardd 的状态目录里（`markets/<市场>`），boardd 启动时只 `import()` 配置选中的那几个，所以没有 `node_modules` 也能装。所以市场是 **boardd 那台机器**的：连的是别的机器上的 boardd 时，`boardlab market` 在那里跑，列出、拉取和删除的都是那边的市场；那边的 boardd 太旧、不能代跑时，命令会明说要在那台机器上运行，而不是把你本机的状态当成它的。装什么由 `boardd.json` 说：
 
 ```json
 { "modules": { "boardctrl": {}, "nexus-images": { "url": "https://nexus.example.org", "repository": "images" } } }
