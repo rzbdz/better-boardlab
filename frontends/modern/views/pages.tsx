@@ -313,7 +313,7 @@ export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: 
     ...views.map(view => ({ id: `m-${view.id}`, title: view.title ?? view.id, group: view.id === 'version' ? '系统' : '实验室和模块', body: <ViewPanel view={view} /> })),
     ...state.labs.filter(lab => !lab.addedAs).map(lab => ({ id: `lab-${lab.id}`, title: `实验室 ${lab.id}`, group: '实验室和模块', body: <LabSettingsPanel lab={lab} /> })),
     { id: 'files', title: '文件仓库', group: '系统', body: <FileStore /> },
-    { id: 'firmware', title: '自带固件', group: '系统', body: <section className="panel"><h2><Icon name="dl" />自带固件</h2><p className="lead">boardd 自带的固件，用的时候核对 sha256。</p>
+    { id: 'firmware', title: '自带固件', group: '系统', body: <section className="panel"><h2><Icon name="dl" />固件</h2><p className="lead">boardd 能加载的固件（发行版自带的，或模块带来的），用的时候核对 sha256。</p>
       {state.firmware.length ? state.firmware.map(f => <div key={`${f.soc}/${f.purpose}`} className="fw"><b>{f.soc.toUpperCase()} · {f.purpose}</b><span className="sub">{f.note ?? '—'}</span><code title={f.sha256}>{f.sha256.slice(0, 12)}…</code></div>) : <p className="sub small">这个 boardlab 没有自带固件。</p>}</section> },
   ]
   const order = ['实验室和模块', '你', '系统']
