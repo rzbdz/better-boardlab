@@ -6,7 +6,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
-import { job, type View } from '../src/ui/contract.ts'
+import { join } from 'node:path'
+import { job, type ModuleUi, type View } from '../src/ui/contract.ts'
+import { PUB_MARKET } from './public-market.ts'
 import { calls, state } from './frontend-setup.ts'
 
 vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), searchConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
@@ -85,7 +87,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
   })
 
   it('the scan says it can be stopped, and settles once it is', async () => {
-    const { ui } = await import('../src/modules/local/ui.ts')
+    const { ui } = await import(/* @vite-ignore */ join(PUB_MARKET, 'local/ui.js')) as { ui: ModuleUi }
     const page = { ...state, slots: [{ slot: 1, canFastboot: true }], scan: null, boards: state.boards.map(board => ({ ...board, lease: null })) } as never
     const scan = ui.views(page, {}).find(view => view.id === 'scan')!
     const start = (scan.body.find(element => element.kind === 'actions') as { actions: Array<{ id: string, kind: string, cancellable?: boolean, start?: Function }> }).actions.find(op => op.id === 'scan')!
@@ -99,7 +101,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
   })
 
   it('a first boardctrl install the page left does not remove the lab boardd is still installing', async () => {
-    const { ui } = await import('../src/modules/boardctrl/ui.ts')
+    const { ui } = await import(/* @vite-ignore */ join(PUB_MARKET, 'boardctrl/ui.js')) as { ui: ModuleUi }
     const views = ui.views(state as never, {})
     const find = (elements: unknown[]): { submit: { id: string, start: Function, cancellable?: boolean } } | null => {
       for (const element of elements as Array<Record<string, unknown>>) {

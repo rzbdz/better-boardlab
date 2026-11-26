@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { dir, useTempDir } from './fakes.ts'
+import { dir, useTempDir } from './helpers.ts'
 
 useTempDir()
 

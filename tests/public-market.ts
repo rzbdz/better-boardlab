@@ -25,6 +25,11 @@ export const MARKET_PAGES = [
   { id: 'feedback', ui: 'feedback/ui.js' },
   { id: 'market', ui: 'market/ui.js' },
   { id: 'terminal', ui: 'terminal/ui.js' },
+  // The lab itself: the boards on this machine and their scan, and the boardctrl hosts' own pages.
+  { id: 'local', ui: 'local/ui.js' },
+  { id: 'boardctrl', ui: 'boardctrl/ui.js' },
+  { id: 'home-assistant', ui: 'home-assistant/ui.js' },
+  { id: 'script-slots', ui: 'script-slots/ui.js' },
 ]
 
 /** The page parts, imported as the browser imports them. */

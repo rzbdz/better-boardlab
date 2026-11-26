@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
-import { dir, useTempDir } from './fakes.ts'
+import { dir, useTempDir } from './helpers.ts'
 
 useTempDir()
 
