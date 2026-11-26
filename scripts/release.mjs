@@ -17,6 +17,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { changelog, previousRelease, subjectsSince } from './changelog.mjs'
 import { checkCoreVersion } from './check-core-version.mjs'
+import { checkDerivable } from './check-derivable.mjs'
 import { releaseMetadata, releaseVersion, uncommittedInputs, verifyStagedRelease } from './release-metadata.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -37,6 +38,9 @@ if (!version.includes('rc')) {
   execFileSync('git', ['verify-tag', tag], { cwd: root, stdio: 'inherit' })
 }
 const core = checkCoreVersion({ root })
+// A release is what the public branch is derived from, so every commit after the base must be able to leave.
+const derivation = checkDerivable('github')
+if (derivation.blocked) throw new Error(`a release cannot be cut: ${derivation.blocked.commit.slice(0, 7)} ${derivation.blocked.subject} has no public form, so the public branch cannot be derived from ${derivation.base} commit by commit (${derivation.blocked.why.split('\n')[0]})`)
 // Always from a fresh build of this very tree: a release must never carry an older dist/.
 if (!args.includes('--no-build')) { rmSync(join(root, 'dist'), { recursive: true, force: true }); execFileSync('pnpm', ['run', 'build'], { cwd: root, stdio: 'inherit' }) }
 if (!existsSync(join(root, 'dist/cli.js')) || !existsSync(join(root, 'dist/ui/frontends.json'))) throw new Error('the build made no dist/')
