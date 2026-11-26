@@ -104,7 +104,7 @@ boardlab unlock <板子>                       # 锁没有时间限制，用完�
 板子外面的事你做不了：插拔线、把板子接到某个口、按按钮、按住 BOOT 再按 RESET。不要猜着让别人做，也不要假设已经插好了——用 `boardlab ask` 请人，等结果：
 
 ```sh
-boardlab ask "把 K3 板的 USB 线插到 2-1.1" --kind 插拔 \
+boardlab ask "把这块板的 USB 线插到 2-1.1" --kind 插拔 \
   --body "插好后板上串口会打印 ROM: usb download handler；下载口应该出现在 usb:2-1.1" --timeout 10m
 ```
 
