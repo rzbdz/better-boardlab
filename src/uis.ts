@@ -5,10 +5,6 @@ import { ui as homeAssistant } from './modules/home-assistant/ui.ts'
 import { ui as scriptSlots } from './modules/script-slots/ui.ts'
 import { ui as boardctrl } from './modules/boardctrl/ui.ts'
 import { ui as clients } from './modules/clients/ui.ts'
-import { ui as terminal } from './modules/terminal/ui.ts'
 import { ui as system } from './modules/system/ui.ts'
-import { ui as feedback } from './modules/feedback/ui.ts'
-import { ui as human } from './modules/human/ui.ts'
-import { ui as market } from './modules/market/ui.ts'
 
-export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, clients, terminal, system, feedback, human, market]
+export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, clients, system]

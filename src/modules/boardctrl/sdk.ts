@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { cliName } from './driver.ts'
+import { hostUrl, statePath } from './address.ts'
 
 export type SdkStream = 'stdout' | 'stderr'
 /** sdk and catalog run `boardctrl sdk|catalog …`; raw runs any `boardctrl …` command. */
@@ -60,7 +61,7 @@ function readFile(path: string): string | null {
 function reachRemotes(reach: SdkReach): string {
   const remotes: Record<string, unknown> = {}
   for (const host of reach.hosts) {
-    const url = host.url.startsWith('boardctrld+') ? host.url.slice('boardctrld+'.length) : host.url
+    const url = hostUrl(host.url)
     // `ssh://user@host:port` is boardctrld on that machine's loopback port, through ssh: what the board host setup is.
     if (url.startsWith('ssh://')) {
       const target = new URL(url)
@@ -82,10 +83,10 @@ export function sdkRunner(options: { bin?: string, stateDir: string }): SdkRunne
   // The same CLI boardd's other boardctrl calls use: `boardctrl` when this machine has it, else `bsp`. A bare `boardctrl`
   // would fail to spawn on a machine that has only the older name, and the command would never run.
   const bin = options.bin ?? process.env.BOARDS_BOARDCTRL ?? cliName()
-  const site = join(options.stateDir, 'boardctrl', 'site')
+  const site = statePath(options.stateDir, 'boardctrl/site')
   return {
     run: (args, { holder, json, group = 'sdk', onOutput, signal, reach = null }) => new Promise(resolve => {
-      const dir = join(options.stateDir, 'boardctrl-holders', createHash('sha256').update(holder).digest('hex').slice(0, 16))
+      const dir = join(statePath(options.stateDir, 'boardctrl-holders'), createHash('sha256').update(holder).digest('hex').slice(0, 16))
       mkdirSync(dir, { recursive: true, mode: 0o700 })
       const config = join(dir, 'remotes.json')
       // A command that talks to board hosts reaches them the way boardd does: the labs' addresses and tokens are what

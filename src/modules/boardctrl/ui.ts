@@ -19,7 +19,7 @@ const ACCESS = [
 
 function install(lab: LabSettings | null): Element[] {
   // `boardctrld+ssh://user@host:port`, or this machine's own boardctrld on its loopback port.
-  const host = lab?.url?.startsWith('boardctrld+http://127.0.0.1') ? 'root@localhost' : lab?.url?.replace(/^boardctrld\+ssh:\/\//, '') ?? ''
+  const host = lab?.url?.match(/^(?:boardctrld|bspd)\+http:\/\/127\.0\.0\.1/) ? 'root@localhost' : lab?.url?.replace(/^(?:boardctrld|bspd)\+ssh:\/\//, '') ?? ''
   const [user, address] = host.includes('@') ? host.split('@') as [string, string] : ['root', host]
   return [
     text(lab ? `重新装一遍（升级、修好），或者换一台机器。` : '新的板卡主机：boardd 用 ssh 过去，装好 boardctrld（Python 服务，管这台机器的复位线、串口和下载口），接入成一个实验室。'),

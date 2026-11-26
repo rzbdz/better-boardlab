@@ -7,9 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Hosts } from '../src/modules/hosts/ssh.ts'
+import { Hosts } from 'boardlab-core/shared/ssh.ts'
 import { installHost } from '../src/modules/boardctrl/provision.ts'
 import { hostArch, readHostTools } from '../src/modules/boardctrl/host-tools.ts'
+import { statePath } from '../src/modules/boardctrl/address.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
@@ -59,6 +60,23 @@ echo "${ready}"
   writeFileSync(join(tree, 'REVISION'), 'f61b6f8\n')
   return tree
 }
+
+describe('a machine that had the module under its earlier name', () => {
+  it('keeps the site it already has, under the directory the module reads now', () => {
+    // boardd's state held the site clone at `bsp/site`: an upgrade must keep serving the site the hosts were synced
+    // from, not start a second one beside it.
+    mkdirSync(join(dir, 'state', 'bsp', 'site'), { recursive: true })
+    mkdirSync(join(dir, 'state', 'bsp', 'site', 'sdk'), { recursive: true })
+    expect(statePath(join(dir, 'state'), 'boardctrl')).toBe(join(dir, 'state', 'boardctrl'))
+    expect(statePath(join(dir, 'state'), 'boardctrl/site')).toBe(join(dir, 'state', 'boardctrl', 'site'))
+    expect(existsSync(join(dir, 'state', 'bsp'))).toBe(false)
+    expect(existsSync(join(dir, 'state', 'boardctrl', 'site', 'sdk'))).toBe(true)
+    // Once moved, it stays where it is; and a machine that never had the old directory is not given one.
+    mkdirSync(join(dir, 'fresh', 'bsp'), { recursive: true })
+    expect(statePath(join(dir, 'fresh'), 'boardctrl-holders')).toBe(join(dir, 'fresh', 'boardctrl-holders'))
+    expect(statePath(join(dir, 'state'), 'boardctrl/site')).toBe(join(dir, 'state', 'boardctrl', 'site'))
+  })
+})
 
 describe('setting up a boardctrl board host', () => {
   it('gets in with a password once, puts boardd\'s key there, ships boardctrl and installs boardctrld', async () => {

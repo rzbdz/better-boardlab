@@ -1,6 +1,6 @@
 /** Offers the local module to boardd: boards on this machine, through serial-mux and this machine's USB and fastboot. */
 import type { CatalogEntry } from 'boardlab-core/server/catalog.ts'
-import { SerialMux, startAlias, stopAlias, stopAll } from '../serial-mux/client.ts'
+import { SerialMux, startAlias, stopAlias, stopAll } from '../../shared/serial-mux/client.ts'
 import { fastbootTool, listSerialAdapters, listUsb } from './hardware.ts'
 import { local, type Mux } from './index.ts'
 import { DEFAULT_TIMING, type ScanTiming } from './scan.ts'

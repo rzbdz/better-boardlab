@@ -37,8 +37,11 @@ const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 
 beforeAll(async () => {
   document.body.innerHTML = '<div id="root"></div>'
   const { MODULE_UIS } = await import('../src/uis.ts')
+  // The tabs the market brings are the market's own page parts, as a machine loads them (see public-market.ts).
+  const { marketModuleUis } = await import('./public-market.ts')
+  const fromMarket = await marketModuleUis()
   const { mountPage } = await import('../frontends/modern/main.tsx')
-  mountPage(MODULE_UIS)
+  mountPage([...MODULE_UIS, ...fromMarket])
 })
 
 describe('Modern frontend', () => {
@@ -674,6 +677,47 @@ describe('Modern frontend', () => {
     go('#/')
   })
 
+  it('gives the market, the notification bus and the console watchers a tab of their own, not a settings section', async () => {
+    // Each is more than a setting: a shop, a log, a run. Their tabs are modules' `page` views, so the nav is built from
+    // what boardd loaded — this page names no module.
+    const tabs = (title: string) => [...document.querySelectorAll('.top .nav a')].find(link => link.textContent === title)
+    await waitFor(() => expect(tabs('模块市场')).toBeTruthy(), wait)
+    expect(tabs('通知')).toBeTruthy()
+    expect(tabs('串口监控')).toBeTruthy()
+    expect(tabs('设置')).toBeTruthy()
+    go('#/settings')
+    await waitFor(() => expect(document.querySelector('.settings-flow')).toBeTruthy(), wait)
+    // The settings page keeps a person's own settings; none of the three is a section of it.
+    const flow = document.querySelector('.settings-flow')!.textContent ?? ''
+    expect(flow).not.toContain('模块市场')
+    expect(flow).not.toContain('串口监控')
+    // What is there is the browser's own notification preferences — which events this page pops in the system.
+    expect(flow).toContain('浏览器通知')
+    expect(flow).toContain('老化/长跑监控报警了')
+    go('#/')
+  })
+
+  it('gives the market a page that installs, uninstalls, adds a market and reloads', async () => {
+    go('#/p/market')
+    await waitFor(() => expect(document.querySelector('.page .hero h1')?.textContent).toBe('模块市场'), wait)
+    // The empty state is still a shop: a form to add one, with the warning about what market code runs as.
+    const text = document.querySelector('.page')!.textContent ?? ''
+    expect(text).toContain('加市场')
+    expect(text).toContain('权限和 boardd 一样')
+    go('#/')
+  })
+
+  it('shows boardd\'s own notification bus in the bell, not only the page\'s changes', async () => {
+    // The bus's alerts are read from boardd, so a page opened after something failed still shows it.
+    await waitFor(() => expect(calls.some(c => c.method === 'GET' && c.path.startsWith('api/alerts'))).toBe(true), wait)
+    fireEvent.click(await button('通知'))
+    const drawer = await screen.findByRole('dialog', {}, wait)
+    expect(drawer.textContent).toContain('boardctrl-k3-cm1：复位失败')
+    expect(drawer.textContent).toContain('aging-1：panic')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('[role=dialog]')).toBeNull(), wait)
+  })
+
   it('asks the person holding a board whether to let an agent have it', async () => {
     const withYield = () => [...document.querySelectorAll('.banner')].find(el => el.textContent?.includes('想用'))
     await waitFor(() => expect(withYield()).toBeTruthy(), wait)
@@ -906,5 +950,18 @@ describe('Modern frontend', () => {
     const before = reads()
     source.emit('lease-granted', { board: 'b', holder: 'user:x' })       // core's: the page re-reads
     await waitFor(() => expect(reads()).toBeGreaterThan(before), wait)
+  })
+
+  it('says a bus alert as it is raised, and keeps it in the bell', async () => {
+    const source = await stateStream()
+    source.opened()
+    source.emit('alert', { id: 3, topic: 'failed', title: 'boardctrl-k1-pico：刷机失败', board: 'boardctrl-k1-pico' })
+    // The bus is read again, and what the bell shows is what boardd recorded, not the event's own words.
+    await waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path.startsWith('api/alerts')).length).toBeGreaterThan(1), wait)
+    fireEvent.click(await button('通知'))
+    const drawer = await screen.findByRole('dialog', {}, wait)
+    expect(drawer.textContent).toContain('aging-1：panic')
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('[role=dialog]')).toBeNull(), wait)
   })
 })

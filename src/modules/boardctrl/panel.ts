@@ -28,9 +28,10 @@ const freePort = () => new Promise<number>((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => { const { port } = server.address() as { port: number }; server.close(() => resolve(port)) })
 })
 
-/** `boardctrld+ssh://user@host:port` or `boardctrld+http://127.0.0.1:port`, as provision writes them. */
+/** `boardctrld+ssh://user@host:port` or `boardctrld+http://127.0.0.1:port`, as provision writes them (and an older
+ * `bspd+…` for a lab added before the rename). */
 export function panelTarget(url: string | null): { kind: 'http', host: string, port: number } | { kind: 'ssh', target: string, sshPort: number | null, port: number } {
-  const match = /^boardctrld\+(http|ssh):\/\/(?:([^@/]+)@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
+  const match = /^(?:boardctrld|bspd)\+(http|ssh):\/\/(?:([^@/]+)@)?([^:/]+)(?::(\d+))?\/?$/.exec(url ?? '')
   if (!match) throw new BoardError('invalid', `这个实验室没有 boardctrld 地址（${url ?? '空'}）：先装好主机`)
   const [, scheme, user, host, port] = match
   if (!/^[A-Za-z0-9._-]+$/.test(host!) || (user && !/^[A-Za-z0-9._-]+$/.test(user))) throw new BoardError('invalid', `boardctrld 地址不合法：${url}`)

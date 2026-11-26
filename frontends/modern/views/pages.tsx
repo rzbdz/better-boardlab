@@ -297,12 +297,19 @@ export function UsageBar({ used, max, free, parts = [] }: { used: number, max: n
 export function SettingsPage({ state, theme, onTheme, onIdentity, focus = '' }: { state: PageState, theme: Theme, onTheme: (t: Theme) => void, onIdentity: () => void, focus?: string }) {
   // One column of sections, and a list of them on the left that follows the scroll. Each module says where its
   // sections belong (a setup starts with its hosts, say), so this page names no module and no module's parts.
+  //
+  // What is here is what a *person's* settings are — who they are, how the page looks, how they are told, how this
+  // boardlab is set up. A module with more than a setting to offer gives itself a page of its own instead (the market,
+  // the notification bus, the console watchers): a shop and a log are not settings, and putting them here would make
+  // this page the place everything accumulates in.
   const views = viewsFor(state, 'settings').map((view, index) => ({ view, index }))
     .sort((a, b) => (a.view.order ?? 100) - (b.view.order ?? 100) || a.index - b.index).map(item => item.view)
   const sections: Array<{ id: string, title: string, group: string, body: JSX.Element }> = [
     { id: 'me', title: '我是谁', group: '你', body: <Identity you={state.you} onSaved={onIdentity} /> },
     { id: 'look', title: '外观', group: '你', body: <Appearance theme={theme} onTheme={onTheme} /> },
-    { id: 'notify', title: '通知', group: '你', body: <section className="panel"><h2><Icon name="bell" />通知</h2><p className="lead">锁拿到了、轮到你了、板子等人操作、锁被抢、关注的板子空了。</p><NotifyPrefs /></section> },
+    { id: 'notify', title: '浏览器通知', group: '你', body: <section className="panel"><h2><Icon name="bell" />浏览器通知</h2>
+      <p className="lead">这个页面在系统里弹哪些提醒，以及关注哪些板子。收哪些事的推送、推到哪个渠道，在「通知」页里设（装了那个模块才有）：那是 boardd 的事，关掉页面也照推。</p>
+      <NotifyPrefs /></section> },
     ...views.map(view => ({ id: `m-${view.id}`, title: view.title ?? view.id, group: view.id === 'version' ? '系统' : '实验室和模块', body: <ViewPanel view={view} /> })),
     ...state.labs.filter(lab => !lab.addedAs).map(lab => ({ id: `lab-${lab.id}`, title: `实验室 ${lab.id}`, group: '实验室和模块', body: <LabSettingsPanel lab={lab} /> })),
     { id: 'files', title: '文件仓库', group: '系统', body: <FileStore /> },

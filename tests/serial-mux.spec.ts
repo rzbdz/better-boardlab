@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
-import { encodeMessage, FrameDecoder, SerialMux } from '../src/modules/serial-mux/client.ts'
+import { encodeMessage, FrameDecoder, SerialMux } from '../src/shared/serial-mux/client.ts'
 import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()

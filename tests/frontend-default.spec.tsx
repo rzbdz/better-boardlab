@@ -9,8 +9,11 @@ const wait = { timeout: 4000 }
 beforeAll(async () => {
   document.body.innerHTML = '<div id="root"></div>'
   const { MODULE_UIS } = await import('../src/uis.ts')
+  // The tabs the market brings are the market's own page parts, as a machine loads them (see public-market.ts).
+  const { marketModuleUis } = await import('./public-market.ts')
+  const fromMarket = await marketModuleUis()
   const { mountPage } = await import('../frontends/troy-mitchell-default/main.tsx')
-  mountPage(MODULE_UIS)
+  mountPage([...MODULE_UIS, ...fromMarket])
 })
 
 const tab = async (label: string) => fireEvent.click(await screen.findByRole('tab', { name: new RegExp(label) }, wait))

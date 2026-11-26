@@ -9,13 +9,19 @@
  */
 import type { Board, DatabaseRestore } from 'boardlab-core/shared/types.ts'
 
-export type Topic = 'free' | 'granted' | 'stolen' | 'attention' | 'failed'
+/**
+ * What the page can tell someone about in the operating system. The bus's own topics are here too: an `aging` match
+ * or a `failed` run is raised by boardd and reaches the page as an event, and the browser's notification is one of the
+ * places it may go (`NotificationPrefs` in the settings page turns each of them on and off).
+ */
+export type Topic = 'free' | 'granted' | 'stolen' | 'attention' | 'failed' | 'aging'
 export const TOPICS: Record<Topic, string> = {
   free: '关注的板子空闲了',
   granted: '排队轮到我、拿到锁',
   stolen: '我的锁被抢',
   attention: '板子等人操作（按 RESET 等）',
   failed: '操作失败（拿锁、复位、刷机…）',
+  aging: '老化/长跑监控报警了',
 }
 
 export interface Note { topic: Topic, board: string, title: string, body: string }
@@ -30,7 +36,7 @@ const hash = (text: string) => { let h = 0; for (let i = 0; i < text.length; i++
 
 interface Prefs { enabled: Record<Topic, boolean>, watched: string[] }
 const KEY = 'boardlab.notify'
-const DEFAULTS: Prefs = { enabled: { free: true, granted: true, stolen: true, attention: true, failed: true }, watched: [] }
+const DEFAULTS: Prefs = { enabled: { free: true, granted: true, stolen: true, attention: true, failed: true, aging: true }, watched: [] }
 
 export const prefs = {
   get(): Prefs {

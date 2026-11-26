@@ -7,7 +7,7 @@ import { CancelledError } from 'boardlab-core/core/errors.ts'
 import { adapterPortName, diffUsb, listSerialAdapters, runGroup, type SerialAdapter } from '../src/modules/local/hardware.ts'
 import { local } from '../src/modules/local/index.ts'
 import { scriptSlots } from '../src/modules/script-slots/index.ts'
-import { SerialMux, startAlias } from '../src/modules/serial-mux/client.ts'
+import { SerialMux, startAlias } from '../src/shared/serial-mux/client.ts'
 import { Bench, dir, makeLab, service, shipFirmware, useTempDir } from './fakes.ts'
 
 useTempDir()

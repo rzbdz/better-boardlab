@@ -14,7 +14,7 @@ import { homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { DEFAULT_PORT } from 'boardlab-core/shared/client.ts'
-import type { Access, Executor, Hosts } from '../hosts/ssh.ts'
+import type { Access, Executor, Hosts } from 'boardlab-core/shared/ssh.ts'
 
 /** The release this boardd runs: its directory (VERSION, REVISION, dist/, install.sh). */
 export interface Release { root: string, version: string, revision: string }

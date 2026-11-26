@@ -40,7 +40,10 @@ export interface View {
   /** A badge beside the title: how this part stands. */
   status?: Badge
   body: Element[]
-  /** A help page about this part, by name (`docs/help/<name>.md`, served at `api/docs/<name>`): frontends offer it beside the title. */
+  /**
+   * A help page about this part, by name: `docs/help/<name>.md` shipped with the distribution (`api/docs/<name>`), or a
+   * page a market module brings, which answers to `<module>/<name>`. Frontends offer it beside the title.
+   */
   help?: string
   /** What an AI assistant needs to help someone set this part up (see Hint). */
   hint?: Hint

@@ -146,16 +146,32 @@ printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOA
 
 # boardd's config, made on the first install. Modules a release brings (updates and CLI machines on the page) are added
 # to an existing one once, by the first update that has them: one taken out afterwards stays out. OFFERED (kept in
-# install.env): those offered already.
-OFFER="system clients feedback"
+# install.env): those offered already. The named ones come from the public market (offer_market) or are this
+# distribution's own catalogs; `market` is the module market's own page, which a machine that has a market needs to see it.
+OFFER="system clients feedback alerts console-watch market human sftp-images terminal boardlab"
 # Modules this distribution adds on top: listed in modules.offered of the release, absent from the public one.
 if [ -f "$PREFIX/releases/$VERSION-$REV/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/releases/$VERSION-$REV/dist/modules.offered")"; fi
+# The public module market, and the modules this distribution is assembled from that live in it. A machine that already
+# has its own boardd.json keeps it: the modules are added there once (`offer_modules`), and the market is added only if
+# this machine has none yet (a machine with markets of its own is left as its owner set it up).
+PUB_MARKET_URL="git@github.com:rzbdz/boardlab-modules-pub.git"
+offer_market() {
+  "$NODE" $FLAGS -e '
+    const fs = require("fs"), [state, url] = process.argv.slice(1)
+    const file = state + "/markets.json"
+    const current = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : { markets: [] }
+    if (!Array.isArray(current.markets)) process.exit(1)
+    if (current.markets.length) process.exit(0)
+    fs.writeFileSync(file, JSON.stringify({ markets: [{ id: "pub", url, branch: null, commit: null }] }, null, 2) + "\n")
+    console.log("added the pub module market: boardd fetches it at its next start")' "$STATE" "$PUB_MARKET_URL" 2>/dev/null \
+    || say "could not record the pub module market in $STATE/markets.json (add it with: boardlab market add pub $PUB_MARKET_URL)"
+}
 # A module a market brings is the machine's own choice (boardlab market add, then its name in boardd.json): it is left
 # as a person set it, including when a market no longer offers it (boardd says so at start, and does not remove it).
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
-    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {} } }' > "$STATE/boardd.json"
-    OFFERED=$OFFER; return 0
+    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {}, "alerts": {}, "console-watch": {}, "market": {}, "human": {}, "sftp-images": {} } }' > "$STATE/boardd.json"
+    OFFERED=$OFFER; offer_market; return 0
   fi
   for m in $OFFER; do
     case " $OFFERED " in *" $m "*) continue ;; esac
@@ -172,6 +188,9 @@ offer_modules() {
       }' "$STATE/boardd.json" "$m" 2>/dev/null; then OFFERED="${OFFERED:+$OFFERED }$m"
     else say "could not add the $m module to $STATE/boardd.json (not a JSON object with \"modules\"?): add it there by hand"; fi
   done
+  # A machine with no market of its own gets the pub one, so its modules have somewhere to come from; one that has any
+  # (its site's, a vendor's) keeps exactly what its owner set up.
+  offer_market
 }
 
 if [ -n "$SERVICE" ]; then

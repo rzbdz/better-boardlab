@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { PassThrough, Duplex } from 'node:stream'
 import { boardctrlLab, type BoardctrlRunner } from '../src/modules/boardctrl/driver.ts'
 import { followJob } from '../src/modules/boardctrl/follow.ts'
-import { encodeMessage, FrameDecoder } from '../src/modules/serial-mux/client.ts'
+import { encodeMessage, FrameDecoder } from '../src/shared/serial-mux/client.ts'
 import type { BoardTarget, LabConfig } from 'boardlab-core/core/backend.ts'
 
 const on = (device: string, lease: string | null = null): BoardTarget => ({ board: `bsp-${device}`, device, lease, die: 'die0', usbPath: null, port: null, gate: null })
@@ -55,6 +55,11 @@ describe('boardctrl lab driver', () => {
     await boardctrlLab({ run: local.run }).inventory!.devices({ ...config, url: 'boardctrld+http://127.0.0.1:8765' })
     expect(local.calls[0]!.args).toEqual(['--json', '--stateless', '--url', 'http://127.0.0.1:8765', 'dut', 'list'])
     expect(local.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
+    // A lab added before the rename keeps the address it has: `bspd+…` is still one host, never a registry.
+    const older = fakeBsp(() => ok([]))
+    await boardctrlLab({ run: older.run }).inventory!.devices({ ...config, url: 'bspd+http://127.0.0.1:8765' })
+    expect(older.calls[0]!.args).toEqual(['--json', '--stateless', '--url', 'http://127.0.0.1:8765', 'dut', 'list'])
+    expect(older.calls[0]!.env.BSP_REGISTRY).toBe(process.env.BSP_REGISTRY)
     const none = fakeBsp(() => ok([{ host: 'h3', error: 'no route' }]))
     await expect(boardctrlLab({ run: none.run }).inventory!.verify(config)).rejects.toThrow('没有连上任何 boardctrl 主机：h3（no route）')
   })

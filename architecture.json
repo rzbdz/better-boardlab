@@ -68,9 +68,10 @@
         "modules",
         "core",
         "shared",
-        "server"
+        "server",
+        "distribution-shared"
       ],
-      "$comment": "a module's catalog entry: how boardd makes it from its settings"
+      "$comment": "a module's catalog entry: how boardd makes it from its settings, and the state directory it reaches other machines from (the ssh keys, the serial-mux daemons)"
     },
     "module-ui": {
       "paths": [
@@ -185,39 +186,19 @@
     }
   },
   "modules": {
-    "libraries": {
-      "serial-mux": "the serial-mux protocol and daemons",
-      "hosts": "reaching other machines over ssh from boardd, for modules that set them up"
-    },
     "dependencies": {
-      "local": [
-        "serial-mux"
-      ],
+      "local": [],
       "home-assistant": [
         "local"
       ],
       "script-slots": [
         "local"
       ],
-      "boardctrl": [
-        "hosts",
-        "serial-mux"
-      ],
-      "clients": [
-        "hosts"
-      ],
-      "serial-mux": [],
-      "boardlab": [],
-      "terminal": [],
-      "hosts": [],
-      "system": [],
-      "feedback": [],
-      "sftp-images": [
-        "hosts"
-      ],
-      "human": [],
-      "market": []
-    }
+      "boardctrl": [],
+      "clients": [],
+      "system": []
+    },
+    "libraries": {}
   },
   "maxLines": 800
 }

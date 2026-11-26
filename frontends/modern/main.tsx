@@ -8,7 +8,8 @@ import { createRoot } from 'react-dom/client'
 import { api, onFetched, type PageState } from '../../src/ui/api.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
-import { changes, onPrefs, prefs, restoreWarning, show, type Note } from '../../src/ui/notify.ts'
+import { changes, onPrefs, prefs, restoreWarning, show, type Note, type Topic } from '../../src/ui/notify.ts'
+import { alerts as readAlerts, isTopic, type Alert } from '../../src/ui/alerts.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
 import { hhmm, holder, Icon, model, setBoards, setRefresher, UIProvider, upper, useUI, where } from './kit.tsx'
 import { marketUis } from '../../src/ui/market-ui.ts'
@@ -21,6 +22,8 @@ import { ImagesPage } from './views/images.tsx'
 import type { Board } from 'boardlab-core/shared/types.ts'
 
 const THEME_KEY = 'boardlab.modern.theme'
+/** The newest bus alert this browser has opened the bell on: a count, not the alerts themselves, so it stays small. */
+const BUS_SEEN = 'boardlab.modern.bus-seen'
 const route = () => { const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?'); const [page = 'boards', arg = ''] = path!.split('/'); return { page: page || 'boards', arg: decodeURIComponent(arg), query: new URLSearchParams(query) } }
 const go = (hash: string) => { location.hash = hash }
 
@@ -35,6 +38,9 @@ function useTheme(): [Theme, boolean, (t: Theme) => void] {
 }
 
 interface Logged extends Note { at: string, read: boolean }
+
+/** The icon beside a note in the bell's list, by what it is about. */
+const NOTE_ICON: Record<Topic, 'lock' | 'hand' | 'warn' | 'bell'> = { granted: 'lock', attention: 'hand', stolen: 'warn', free: 'bell', failed: 'warn', aging: 'warn' }
 
 function Banner({ board, you, fresh }: { board: Board, you: string, fresh: boolean }) {
   const act = useBoardActions(board), m = model(board, you)
@@ -56,11 +62,26 @@ function Shell() {
   const [full, setFull] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [notes, setNotes] = useState<Logged[]>([])
+  // What boardd's notification bus holds: everything anyone should know, whether this page was open or not. It is read
+  // with the state and kept current by the bus's own `alert` event; the bell shows it beside the page's own notices.
+  const [bus, setBus] = useState<Alert[]>([])
+  // The newest alert this page knows of (so one `alert` event is read once), and the newest this person has looked at.
+  const busAt = useRef(0)
+  const [busSeen, setBusSeen] = useState(() => { try { return Number(localStorage.getItem(BUS_SEEN)) || 0 } catch { return 0 } })
+  const newAlerts = bus.filter(alert => alert.id > busSeen).length
   const [watched, setWatched] = useState(prefs.get().watched)
   const [theme, dark, setTheme] = useTheme()
   const last = useRef<PageState | null>(null)
   const seen = useRef(new Set<string>())
   useEffect(() => onPrefs(p => setWatched(p.watched)), [])
+  const readBus = useCallback(async () => {
+    try {
+      const answer = await readAlerts(50)
+      setBus(answer.alerts)
+      busAt.current = answer.alerts[0]?.id ?? 0
+    } catch { /* the page says it cannot reach boardd elsewhere */ }
+  }, [])
+  useEffect(() => { void readBus() }, [readBus])
 
   const version = useRef<string | null>(null)
   const refresh = useCallback(async () => {
@@ -119,8 +140,24 @@ function Shell() {
       return () => { window.clearTimeout(timer); timer = window.setTimeout(refresh, 150) }
     })()
     const stop = events().listen({
-      names: CORE_EVENTS,
+      names: [...CORE_EVENTS, 'alert'],
       event: (name, data) => {
+        if (name === 'alert') {
+          // The bus raised something (a failed run, an aging match, a person's request): the bell's list grows now, and
+          // a fresh alert is said the same way a change is — the system's notification when allowed, else the page's.
+          const alert = data as { id?: number, topic?: string, title?: string, board?: string | null }
+          if (typeof alert.id === 'number' && alert.id > busAt.current) {
+            busAt.current = alert.id
+            void readBus()
+            const topic = alert.topic ?? 'attention'
+            if (isTopic(topic)) {
+              const note: Note = { topic, board: alert.board ?? `alert-${alert.id}`, title: alert.title ?? '通知', body: '' }
+              const open = () => go('#/p/alerts')
+              if (!show(note, open) && prefs.get().enabled[topic]) ui.toast(note.title, '', { label: '去看', run: open })
+            }
+          }
+          return
+        }
         if (name === 'lab-ports') {
           const news = data as { host?: string, added?: string[] }
           if (news.host && news.added?.length) ui.toast(`${news.host} 接上了新线`, news.added.join('、'))
@@ -137,7 +174,7 @@ function Shell() {
     })
     const tick = window.setInterval(refresh, 30_000)
     return () => { stop(); window.clearInterval(tick) }
-  }, [refresh])
+  }, [refresh, readBus])
   useEffect(() => { const on = () => { setWhere(route()); setFull(false); window.scrollTo(0, 0) }; window.addEventListener('hashchange', on); return () => window.removeEventListener('hashchange', on) }, [])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -156,19 +193,31 @@ function Shell() {
 
   const openNotes = () => {
     setNotes(list => list.map(n => ({ ...n, read: true })))
+    void readBus()
+    // Opened is looked at: the bell goes quiet until something new is raised.
+    const newest = bus[0]?.id ?? busSeen
+    setBusSeen(newest)
+    try { localStorage.setItem(BUS_SEEN, String(newest)) } catch {}
     ui.layer(close => <>
       <header><h2>通知</h2><span className="acts"><button className="pill sm icon" aria-label="关闭" onClick={close}><Icon name="x" /></button></span></header>
-      <div className="list">{notes.length ? notes.map((n, i) => (
-        <button key={i} className={`note${n.read ? '' : ' unread'}`} onClick={() => { close(); if (!n.board.startsWith('page') && !n.board.startsWith('human-')) go(`#/board/${encodeURIComponent(n.board)}`) }}>
-          <span className={`ic ${n.topic}`}><Icon name={{ granted: 'lock', attention: 'hand', stolen: 'warn', free: 'bell', failed: 'warn' }[n.topic]} /></span><div><b>{n.title}</b><p>{n.body}</p><time>{hhmm(n.at)}</time></div>
+      <div className="list">{bus.length ? bus.map(alert => (
+        <button key={`bus-${alert.id}`} className="note" onClick={() => { close(); go('#/p/alerts') }}>
+          <span className={`ic ${alert.topic}`}><Icon name={NOTE_ICON[alert.topic as Note['topic']] ?? 'bell'} /></span>
+          <div><b>{alert.title}</b><p>{[alert.body, alert.board].filter(Boolean).join(' · ')}</p><time>{hhmm(alert.at)}{alert.delivered.length ? ` · ${alert.delivered.map(item => item.channel).join('、')}` : ''}</time></div>
         </button>
-      )) : <p className="sub" style={{ padding: 16 }}>没有通知。</p>}</div>
+      )) : notes.map((n, i) => (
+        <button key={i} className={`note${n.read ? '' : ' unread'}`} onClick={() => { close(); if (!n.board.startsWith('page') && !n.board.startsWith('human-')) go(`#/board/${encodeURIComponent(n.board)}`) }}>
+          <span className={`ic ${n.topic}`}><Icon name={NOTE_ICON[n.topic] ?? 'bell'} /></span><div><b>{n.title}</b><p>{n.body}</p><time>{hhmm(n.at)}</time></div>
+        </button>
+      ))}
+      {!bus.length && !notes.length && <p className="sub" style={{ padding: 16 }}>没有通知。</p>}</div>
       <div className="prefs"><NotifyPrefs /></div>
     </>, 'drawer')
   }
 
   const page = where_.page
-  const unread = notes.filter(n => !n.read).length
+  // The bell counts what was raised since this person last looked, page notices included.
+  const unread = newAlerts + notes.filter(n => !n.read).length
   const attn = state?.boards.filter(b => b.lab?.attention) ?? []
   for (const b of attn) if (!seen.current.has(b.name)) setTimeout(() => seen.current.add(b.name), 400)
   // Modules' own pages (the terminal, say) get a tab each, before settings.

@@ -60,6 +60,8 @@ describe('a board host\'s page through boardd', () => {
   it('reads the boardctrld address of a lab, and refuses anything else', () => {
     expect(panelTarget('boardctrld+ssh://root@host-a:8765')).toEqual({ kind: 'ssh', target: 'root@host-a', sshPort: null, port: 8765 })
     expect(panelTarget('boardctrld+http://127.0.0.1:9000')).toEqual({ kind: 'http', host: '127.0.0.1', port: 9000 })
+    // A lab added before the rename: the same address under the daemon's earlier prefix.
+    expect(panelTarget('bspd+ssh://root@host-a:8765')).toEqual({ kind: 'ssh', target: 'root@host-a', sshPort: null, port: 8765 })
     expect(() => panelTarget('boardctrld+ssh://root@host-a;id:8765')).toThrow(/不合法|没有 boardctrld 地址/)
     expect(() => panelTarget(null)).toThrow(/没有 boardctrld 地址/)
   })

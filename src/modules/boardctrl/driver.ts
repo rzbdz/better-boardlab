@@ -11,10 +11,11 @@ import { CancelledError } from 'boardlab-core/core/errors.ts'
 import { CHANNEL_ACTIONS, type LabConfig, type LabDevice, type LabFinding, type Backend, type LabHolder, type LabNews, type LabSlots, type Notice } from 'boardlab-core/core/backend.ts'
 import type { BootMark, DiscoveryContext, DiscoveryMethod, DiscoveryValues, FlashPlan } from 'boardlab-core/shared/types.ts'
 import type { ConsoleSession } from 'boardlab-core/core/console.ts'
-import { muxSession } from '../serial-mux/client.ts'
+import { muxSession } from '../../shared/serial-mux/client.ts'
 import { askedIn } from 'boardlab-core/core/relay.ts'
 import { cliEnv } from './cli-env.ts'
 import { boardctrlDebug } from './debug.ts'
+import { hostUrl, isHostUrl, statePath } from './address.ts'
 import { bootMarksOf, logArgs, logRange, newerQuery, OLD_HOST_LINES, oldHostLog, olderHost, type HostLog } from './logs.ts'
 import { openRaw } from './console.ts'
 import { cancellable, EXIT_CANCELLED, runCli, spawnPipe } from './process.ts'
@@ -91,13 +92,13 @@ export function boardctrlLab(options: BoardctrlOptions = {}): BoardctrlBackend {
    */
   // `url` is either one boardctrld reached directly (`boardctrld+http://127.0.0.1:8765`, this machine's on a board host), or a boardctrl
   // registry that lists several hosts (a plain URL, or empty for boardctrl's own site).
-  const direct = (config: LabConfig) => config.url.startsWith('boardctrld+')
+  const direct = (config: LabConfig) => isHostUrl(config.url)
   // `boardctrld+ssh://root@host:8765` (a host boardlab set up): the boardctrl CLI's `ssh://`, through boardd's own key.
-  const boardctrldUrl = (config: LabConfig) => config.url.slice('boardctrld+'.length)
+  const boardctrldUrl = (config: LabConfig) => hostUrl(config.url)
   const registryUrl = (config: LabConfig) => config.url
   const global = (config: LabConfig, host?: string) => ['--json', '--stateless', ...(direct(config) ? ['--url', boardctrldUrl(config)]
     : host ? ['-r', host] : config.username.trim() ? ['-r', config.username.trim()] : [])]
-  const site = options.stateDir ? join(options.stateDir, 'boardctrl', 'site') : null
+  const site = options.stateDir ? statePath(options.stateDir, 'boardctrl/site') : null
   const env = (config: LabConfig) => cliEnv({ config, site, sshKey: options.sshKey, direct: direct(config), url: registryUrl(config) })
   /** Run a boardctrl command; `signal` stops it as `cancellable` says (`dut`/`job cancel` under the lease of `on`, the board). */
   const boardctrlCli = async <T>(config: LabConfig, args: string[], timeoutMs = TIMEOUT_MS, onStderr?: (line: string) => void, host?: string, signal?: AbortSignal, on?: { readonly device: string, readonly lease: string | null }): Promise<T> => {

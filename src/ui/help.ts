@@ -10,7 +10,8 @@ export interface HelpPage { name: string, title: string, text: string }
 
 export const help = {
   list: () => call<{ docs: Array<{ name: string, title: string }> }>('GET', 'api/docs').then(out => out.docs),
-  get: (name: string) => call<HelpPage>('GET', `api/docs/${encodeURIComponent(name)}`),
+  /** A page by name: boardd's own (`site`), or one a market module brings (`human/boards` — see `View.help`). */
+  get: (name: string) => call<HelpPage>('GET', `api/docs/${name.split('/').map(encodeURIComponent).join('/')}`),
 }
 
 /** Where this page's boardd is: the page's address without the file or the route after `#`. */

@@ -12,8 +12,9 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import type { Access, Executor, Hosts } from '../hosts/ssh.ts'
+import type { Access, Executor, Hosts } from 'boardlab-core/shared/ssh.ts'
 import { shipHostTools } from './host-tools.ts'
+import { hostUrl } from './address.ts'
 
 /** `ca`: a certificate the host must trust (the network's own CA), installed before anything is downloaded there. */
 /** `noToken`: the host takes every request (no token anywhere), for a lab whose port only trusted machines reach. */
@@ -251,7 +252,7 @@ async function takeSite(exec: Executor, sudo: string, port: number, reloads: boo
 
 /** A lab's way in and boardctrld port, from its url (`boardctrld+ssh://user@host:port`, or this machine's `boardctrld+http://127.0.0.1:port`). */
 export function hostOf(url: string | null | undefined): { access: Access, port: number } | null {
-  const plain = (url ?? '').replace(/^boardctrld\+/, '')
+  const plain = hostUrl(url ?? '')
   if (!/^(ssh|http):\/\//.test(plain)) return null
   const parsed = new URL(plain)
   const port = Number(parsed.port) || 8765

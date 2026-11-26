@@ -11,7 +11,7 @@ import { BoardError } from 'boardlab-core/core/errors.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import type { State } from 'boardlab-core/shared/types.ts'
 import { DEFAULT_PORT } from 'boardlab-core/shared/client.ts'
-import { hostsFor, type Access, type Hosts } from '../hosts/ssh.ts'
+import { hostsFor, type Access, type Hosts } from 'boardlab-core/shared/ssh.ts'
 import { checkCli, checkTunnel, deauthorize, installCli, keyBody, localHub, removeCli, tunnelUrl, type Hub, type Release, type Tunnel } from './install.ts'
 
 /** A machine with the CLI, as added on the page. `key`: its public key, as authorized for the tunnel. */

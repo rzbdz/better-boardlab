@@ -27,7 +27,9 @@ export function mockState(you = 'user:alice'): State {
     you, now,
     markets: [{ id: 'shelf', kind: 'shelf', kindTitle: '书架', about: '', title: 'Test images', source: 'site' }],
     yields: [{ id: 'y1', board: 'boardctrl-k1-musecard', holder: 'claude:kernel-bisect-mmc', purpose: 'bisect the mmc0 timeout', owner: you, at: now, until: now }],
-    modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'boardctrl', title: 'boardctrl 板卡主机' }, { id: 'clients', title: '客户端配置' }, { id: 'system', title: '系统' }],
+    modules: [{ id: 'local', title: '本机' }, { id: 'home-assistant', title: 'Home Assistant' }, { id: 'script-slots', title: '脚本槽位' }, { id: 'boardctrl', title: 'boardctrl 板卡主机' }, { id: 'clients', title: '客户端配置' }, { id: 'system', title: '系统' },
+      // The modules with a page of their own (not a settings section): the market, the notification bus, the watchers.
+      { id: 'market', title: '模块市场' }, { id: 'alerts', title: '通知' }, { id: 'console-watch', title: '串口监控' }],
     boards: [
       board('boardctrl-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'boardctrl/host-a/s1',
         lab: inLab('k1-musecard', { debug: { provider: 'my-swd', title: 'SWD over GPIO', kinds: ['halt', 'run', 'step', 'regs', 'trace'] } }) }),

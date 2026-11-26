@@ -12,7 +12,8 @@ import { sha256File } from 'boardlab-core/core/files.ts'
 import type { BoardLab as Lab } from 'boardlab-core/core/lab.ts'
 import type { Module } from 'boardlab-core/core/module.ts'
 import { boardctrlLab, FDL_STRATEGIES, type BoardctrlBackend, type BoardctrlBoardChange } from './driver.ts'
-import { hostsFor } from '../hosts/ssh.ts'
+import { hostUrl, statePath } from './address.ts'
+import { hostsFor } from 'boardlab-core/shared/ssh.ts'
 import { installHost, uninstallHost } from './provision.ts'
 import { forgetBootMarks } from './logs.ts'
 import { panelEndpoints } from './panel.ts'
@@ -48,7 +49,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
       }
       // The site every host gets (SoC facts, the SDK catalog, hooks, images), kept here: see site.ts.
       // Its images are fetched with the same boardctrl CLI as everything else.
-      const site = options.stateDir ? new Site(join(options.stateDir, 'boardctrl', 'site'), lab.kernel.settings('boardctrl.site'), {
+      const site = options.stateDir ? new Site(statePath(options.stateDir, 'boardctrl/site'), lab.kernel.settings('boardctrl.site', ['bsp.site']), {
         tree: options.tree, sshCommands: hosts ? () => hosts.sshCommands() : undefined, bin: options.bin ?? process.env.BOARDS_BOARDCTRL ?? 'boardctrl',
       }) : null
       // The image markets the site sets up (markets/<id>.yaml): read now and again after every change to the site's files.
@@ -173,7 +174,7 @@ export function boardctrl(options: { bin?: string, stateDir?: string, sdk?: SdkR
           if (!lab_.kind) throw new BoardError('invalid', `实验室 ${id} 是在 boardd 的配置里写的，不能在这里删`)
           const board = lab.boards.list().find(item => item.lab?.id === id && lab.locks.held(item.name))
           if (board) throw new BoardError('locked', `${board.name} 正被 ${lab.locks.held(board.name)!.holder} 使用，放锁以后才能卸掉实验室`)
-          const url = settings.url?.replace(/^boardctrld\+/, '') ?? ''
+          const url = settings.url ? hostUrl(settings.url) : ''
           await lab.kernel.doing([`lab:${id}`], 'remove', '删除中', caller.holder, async line => {
             if (url.startsWith('ssh://')) {
               const parsed = new URL(url)

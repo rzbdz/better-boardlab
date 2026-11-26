@@ -5,6 +5,7 @@
  */
 import { vi } from 'vitest'
 import { mockState } from './mock-boardd.ts'
+import { marketPagesAnswer } from './public-market.ts'
 
 /** A board whose debug session the fake host has started (and not stopped). */
 const debugRunning = new Map<string, boolean>()
@@ -189,6 +190,20 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   }
   // A person acknowledging boardd's database restore: the state stops reporting it.
   if (path === '/api/database/acknowledge' && method === 'POST') { const acknowledged = state.restored ?? null; state.restored = null; return reply({ acknowledged }) }
+  // The notification bus: what boardd recorded, and the channels it pushes to. One failure and one aging match, so a
+  // page that draws it shows the bus's own alerts beside the page's own notices.
+  if (path === '/api/alerts') return reply({
+    alerts: [
+      { id: 2, at: state.now, topic: 'aging', board: 'boardctrl-k1-musecard', title: 'aging-1：panic', body: 'Kernel panic - not syncing', tags: ['aging-1', 'boardctrl-k1-musecard'], actor: 'console:aging-1', delivered: [{ channel: 'lab', ok: true, detail: 'HTTP 200' }] },
+      { id: 1, at: state.now, topic: 'failed', board: 'boardctrl-k3-cm1', title: 'boardctrl-k3-cm1：复位失败', body: 'GPIO 超时', tags: ['boardctrl-k3-cm1'], actor: 'user:dana', delivered: [] },
+    ],
+    channels: [{ id: 'lab', kind: 'chat', title: '实验室告警群', enabled: true, url: 'https://chat.example.org/hook/…a1b2…', rules: [{ topics: ['failed'], tags: [] }], last: { at: state.now, ok: true, detail: 'HTTP 200' } }],
+  })
+  // The module markets, and the watchers: the page's tabs read these. The market plugin's own page lists the markets
+  // this machine has, and `api/module-markets` is what the page imports a market module's views from (see public-market).
+  if (path === '/api/market') return reply({ markets: [], problems: [], selected: [], canReload: true })
+  if (path === '/api/module-markets') return reply(marketPagesAnswer)
+  if (path === '/api/console-watch') return reply({ watchers: [], problems: [] })
   if (path === '/api/lock' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
     board.lease = { id: 'new', board: board.name, holder: state.you, purpose: body.purpose, startedAt: state.now, status: 'held', endedAt: null, endReason: null }

@@ -15,7 +15,7 @@ import { parse } from 'yaml'
 import { openDatabase } from 'boardlab-core/core/db.ts'
 import type { Settings } from 'boardlab-core/core/kernel.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
-import { Hosts } from '../src/modules/hosts/ssh.ts'
+import { Hosts } from 'boardlab-core/shared/ssh.ts'
 import { boardctrl } from '../src/modules/boardctrl/index.ts'
 import { installHost, syncHost } from '../src/modules/boardctrl/provision.ts'
 import { Site } from '../src/modules/boardctrl/site.ts'
@@ -784,7 +784,7 @@ echo "token-len \${#token}"; echo "BSPD-READY lab1 8765 f61b6f8"
 `)
     const lab = new BoardLab({ db: openDatabase(join(dir, 'b.sqlite')), modules: [boardctrl({ stateDir: join(dir, 'state'), bin: fakeBsp().bin, tree, sdk: { run: async () => 0 } as never })] })
     // boardd's ssh setup is one per process, made by the first test that asked for it: its key is made where it looks.
-    const { hostsFor } = await import('../src/modules/hosts/ssh.ts')
+    const { hostsFor } = await import('boardlab-core/shared/ssh.ts')
     const key = hostsFor(join(dir, 'state')).keyFile
     mkdirSync(dirname(key), { recursive: true }); writeFileSync(key, 'key\n'); writeFileSync(`${key}.pub`, 'ssh-ed25519 AAAA boardlab@test\n')
     await lab.backends.add('user:alice', 'lab1', 'boardctrl')
