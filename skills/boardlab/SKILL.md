@@ -228,6 +228,8 @@ boardd 能做什么由它装的模块决定。`boardlab module` 列出装了的�
 
 市场里的模块不是随 boardlab 发的：`boardlab market` 列出这台机器加了哪些市场，`boardlab market show <市场>` 看一个市场提供什么，`boardlab market add <市场> <git 地址>` 加一个。装哪个由 boardd 的配置说（`boardd.json` 的 `modules` 里写模块名和它的设置），**改完要重启 boardd 才生效**；市场更新同理（`boardlab market update --all` 会列出哪个模块的代码变了）。
 
+市场在 **boardd 那台机器**的状态目录里。连的是别的机器上的 boardd 时，`boardlab market` 和 `boardlab module change` 在那边跑，读写那边的市场；那边太旧、不能替你跑时会明说「要在 boardd 那台机器上跑」，那时到那台机器上运行即可。
+
 - 不要为了让某个模块工作去改 boardd 的状态目录或市场复制品里的文件：那是 git 的复制品，`market update` 会盖掉。要改就去改市场仓库。
 - 一个模块在 `boardlab module` 里是「等着」，说明它 `inject` 的服务没人提供：看是哪个模块没装或起不来，别硬重启。
 - 装了什么模块、某个模块为什么不在跑，先看 `boardlab module --json` 再说，不要猜。
