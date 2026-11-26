@@ -308,7 +308,7 @@ function ModelEditor({ board }: { board: Board }) {
   const unchanged = value.trim() === (board.product ?? '')
   return (
     <span className="model-edit">
-      <input className="input" list={list} value={value} placeholder="型号，例如 k3_com260" onChange={e => setValue(e.target.value)}
+      <input className="input" list={list} value={value} placeholder="型号，例如 k1-x_deb1" onChange={e => setValue(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void save() } }} />
       <datalist id={list}>{models.map(m => <option key={m} value={m} />)}</datalist>
       <button className="pill sm" disabled={busy || unchanged} title="保存型号（会记下来，下次可以选）" onClick={() => void save()}>{busy ? <span className="spin" /> : <Icon name="check" />}保存</button>

@@ -38,11 +38,11 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 ```sh
 boardlab list --json                         # 不知道用哪块板、谁在用时才看
-boardlab lock com260 --for "调试 U-Boot 网络"  # 拿锁；被占用时退出码 3
-boardlab reset com260
-boardlab send com260 'printenv ethaddr' --wait '=> ' --timeout 10s
-boardlab log com260 --lines 200
-boardlab unlock com260                       # 锁没有时间限制，用完一定要放锁，排队的人才能拿到
+boardlab lock <板子> --for "调试 U-Boot 网络"  # 拿锁；被占用时退出码 3
+boardlab reset <板子>
+boardlab send <板子> 'printenv ethaddr' --wait '=> ' --timeout 10s
+boardlab log <板子> --lines 200
+boardlab unlock <板子>                       # 锁没有时间限制，用完一定要放锁，排队的人才能拿到
 ```
 
 - 别人持有锁时只能看（`list`、`show`、`log`、`console`），不能输入或控制。要等就排队，先到先得：
