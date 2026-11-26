@@ -74,6 +74,17 @@ fields.map(field => render(field)) // text / choice，选项来自 field.options
 - **板子状态**：`LabDevice` 报告 `empty`、`slotGone`、`mediaBoot`、`attention`、`sdks`；页面按这些状态渲染，而不是按后端名字分支。
 - **认证与访问**：`LabFields` 让后端声明自己用哪些设置项；设置页不写死“URL / token”。
 
+## 模块市场：代码也可以不必在本仓库
+
+一个模块是什么形状，与它放在哪里无关。本仓库的模块、公共市场的模块、vendor 市场的模块，都是同一个 `Module`：在 `setup(lab, ctx)` 里往 core 的扩展点上注册，声明 `inject`/`provide`，随 boardd 启动装上、按需卸下。不同的是**装配**：
+
+- 随本仓库发的模块，是这一版发行版的装配，构建进 `dist/cli.js`。
+- 市场里的模块，是**部署者**的选择：`boardlab market add` 一个 git 仓库，再把模块名写进 `boardd.json`。boardd 按配置文件 URL `import()`，所以机器上不需要 `node_modules`、也不需要重发一版 boardlab。
+
+判断一个新模块放哪：**每一个 boardlab 用户都可能要用吗？** 是，进本仓库；不是（vendor 的 BMC、内网证书、某个部门的配方），进对应的市场。市场里的模块 `import 'boardlab'` 拿到的就是 boardd 自己那套类和类型，所以它和本仓库的模块写起来、检查起来一样。
+
+市场的清单（`market.json`）是断言，不是信任边界：它说这个模块要什么、给什么、页面在哪；真正的 `inject`/`provide` 以模块自己为准。装不装由人定，更新在下次启动生效。
+
 ## 谁跑，谁负责
 
 - **后端跑后端的事**：core 不拼 boardctrl 命令、不解析 GPIO、不判断 fastboot 语义。模块把 core 的调用翻译成后端命令，命令失败原因由后端给出，模块只负责搬运和统一错误形状。
@@ -89,6 +100,7 @@ fields.map(field => render(field)) // text / choice，选项来自 field.options
 | 前端的一种新排版、快捷方式、样式 | 该前端自己的文件，或 `ui` 的 `custom` / `extra`；不能要求 core 改 shape |
 | 某一版发行版的装配、默认值、站点 | 本仓库的模块目录、`frontends/`、`scripts/` |
 | 只对某个后端有意义的字符串 / 命令 / 引脚 / 主机名 | 该后端模块或它的站点仓库；**不进 core、不进通用前端、不进公开文档** |
+| 只有一家、一个部门或一个客户用得上的模块 | 一个**模块市场**（`boardlab-modules-*`），不是本仓库 |
 
 ## 发现功能：一个完整例子
 
@@ -114,7 +126,7 @@ fields.map(field => render(field)) // text / choice，选项来自 field.options
 
 在结束一次开发前，逐条回答，并把答案写进提交说明或评审记录：
 
-1. 这次改动的**概念**是什么？它归 core、发行版还是后端？
+1. 这次改动的**概念**是什么？它归 core、发行版、后端，还是某个模块市场？
 2. 我有没有把某个后端的名字、命令、文案、模式写进 core 或通用前端？
 3. 如果明天接入第二个后端（例如一个只有人工发现方式的 HA），这条链需要改哪些文件？列表里有没有 core 或前端？
 4. 新增的能力是否**自描述**：标题、说明、字段、选项、初值、必填、提示是否都由拥有它的那一层给出？
