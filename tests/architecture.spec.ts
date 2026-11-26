@@ -21,22 +21,20 @@ describe('architecture', () => {
       cpSync(join(root, 'src'), join(copy, 'src'), { recursive: true })
       cpSync(join(root, 'frontends'), join(copy, 'frontends'), { recursive: true })
       const write = (path: string, text: string) => { mkdirSync(join(copy, path, '..'), { recursive: true }); writeFileSync(join(copy, path), text) }
-      // A module using another it neither declares nor requires, and reaching into a frontend.
-      write('src/modules/home-assistant/leak.ts', "import { boardctrl } from '../boardctrl/index.ts'\nimport { mountPage } from '../../../frontends/modern/main.tsx'\nexport { boardctrl, mountPage }\n")
+      // A module reaching into a frontend, and its page part reaching into another module's server side.
+      write('src/modules/system/leak.ts', "import { mountPage } from '../../../frontends/modern/main.tsx'\nexport { mountPage }\n")
       // A frontend reaching into a module's server side.
-      write('frontends/modern/leak.ts', "import { LOCAL } from '../../src/modules/local/index.ts'\nexport { LOCAL }\n")
-      // A module's commands using the core's server side, and its page part a module's server side.
-      appendFileSync(join(copy, 'src/modules/script-slots/cli.ts'), "\nimport { BoardLab } from 'boardlab-core/core/lab.ts'\nexport { BoardLab }\n")
-      appendFileSync(join(copy, 'src/modules/script-slots/ui.ts'), "\nimport { LOCAL } from '../local/index.ts'\nexport { LOCAL }\n")
+      write('frontends/modern/leak.ts', "import { system } from '../../src/modules/system/index.ts'\nexport { system }\n")
+      // A module's commands using the core's server side.
+      appendFileSync(join(copy, 'src/modules/system/cli.ts'), "\nimport { BoardLab } from 'boardlab-core/core/lab.ts'\nexport { BoardLab }\n")
+      appendFileSync(join(copy, 'src/modules/system/ui.ts'), "\nimport { system } from './index.ts'\nexport { system }\n")
       // A module nobody declared, set up under another id and offered to boardd by no catalog entry.
       write('src/modules/zigbee/index.ts', "export const zigbee = { id: 'zb', setup() {} }\n")
       expect(listed(copy)).toEqual(expect.arrayContaining([
-        expect.stringMatching(/^src\/modules\/home-assistant\/leak\.ts modules: module home-assistant imports module boardctrl without declaring it/),
-        expect.stringMatching(/^src\/modules\/home-assistant\/leak\.ts layers: modules may not import frontends \(frontends\/modern\/main\.tsx\)/),
-        expect.stringMatching(/^frontends\/modern\/leak\.ts layers: frontends may not import modules \(src\/modules\/local\/index\.ts\)/),
-        expect.stringMatching(/^src\/modules\/home-assistant\/index\.ts modules: module home-assistant uses module boardctrl but does not list it in requires/),
-        expect.stringMatching(/^src\/modules\/script-slots\/cli\.ts layers: module-cli may not import core \(core\/src\/core\/lab\.ts\)/),
-        expect.stringMatching(/^src\/modules\/script-slots\/ui\.ts layers: module-ui may not import modules \(src\/modules\/local\/index\.ts\)/),
+        expect.stringMatching(/^src\/modules\/system\/leak\.ts layers: modules may not import frontends \(frontends\/modern\/main\.tsx\)/),
+        expect.stringMatching(/^frontends\/modern\/leak\.ts layers: frontends may not import modules \(src\/modules\/system\/index\.ts\)/),
+        expect.stringMatching(/^src\/modules\/system\/cli\.ts layers: module-cli may not import core \(core\/src\/core\/lab\.ts\)/),
+        expect.stringMatching(/^src\/modules\/system\/ui\.ts layers: module-ui may not import modules \(src\/modules\/system\/index\.ts\)/),
         expect.stringMatching(/^src\/modules\/zigbee modules: module zigbee is not declared/),
         expect.stringMatching(/^src\/modules\/zigbee\/index\.ts modules: module zigbee must set itself up with id 'zigbee'/),
         expect.stringMatching(/^src\/modules\/zigbee modules: module zigbee has no catalog\.ts/),

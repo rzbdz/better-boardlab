@@ -148,7 +148,7 @@ printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOA
 # to an existing one once, by the first update that has them: one taken out afterwards stays out. OFFERED (kept in
 # install.env): those offered already. The named ones come from the public market (offer_market) or are this
 # distribution's own catalogs; `market` is the module market's own page, which a machine that has a market needs to see it.
-OFFER="system clients feedback alerts console-watch market human sftp-images terminal boardlab"
+OFFER="system boardctrl local home-assistant script-slots clients feedback alerts console-watch market human sftp-images terminal boardlab"
 # Modules this distribution adds on top: listed in modules.offered of the release, absent from the public one.
 if [ -f "$PREFIX/releases/$VERSION-$REV/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/releases/$VERSION-$REV/dist/modules.offered")"; fi
 # The public module market, and the modules this distribution is assembled from that live in it. A machine that already
@@ -170,7 +170,7 @@ offer_market() {
 # as a person set it, including when a market no longer offers it (boardd says so at start, and does not remove it).
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
-    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {}, "alerts": {}, "console-watch": {}, "market": {}, "human": {}, "sftp-images": {} } }' > "$STATE/boardd.json"
+    printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "local": {}, "home-assistant": {}, "script-slots": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {}, "alerts": {}, "console-watch": {}, "market": {}, "human": {}, "sftp-images": {} } }' > "$STATE/boardd.json"
     OFFERED=$OFFER; offer_market; return 0
   fi
   for m in $OFFER; do
