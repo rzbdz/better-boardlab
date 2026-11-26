@@ -30,9 +30,9 @@ async function stateWithMarket(): Promise<string> {
 }
 
 /** Every module that left this distribution: the market offers it, and this build has no copy of its source. */
-const MOVED = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'sftp-images', 'terminal', 'boardlab']
-/** Those of them with a page of their own: the rest are configured on another module's page (an image market) or only
- * answer interfaces (a backend). */
+const MOVED = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'sftp-images', 'terminal', 'boardlab', 'clients']
+/** Those of them with a page of their own: the rest are configured on another module's page (an image market), only
+ * answer interfaces (a backend), or bring settings sections (the clients a boardd has). */
 const WITH_PAGE = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'terminal']
 
 describe.skipIf(!usable)('a module from the public market', () => {
@@ -107,8 +107,11 @@ describe.skipIf(!usable)('a module from the public market', () => {
     // Its commands as the manifest names them: one for each module that brings any, none for one whose commands are
     // the core's own (`boardlab market …`).
     expect(answer.commands.length).toBe(offered.cli ? 1 : 0)
-    // A module with a page part brings a page; one without has none to draw, and `offered.ui` says which it is.
-    expect(answer.pages.some(([, slot]: [string, string]) => slot === 'page')).toBe(Boolean(offered.ui))
+    // A module whose page part brings views draws them; a page-part-less module, or one whose views are settings
+    // sections, has no tab of its own — `offered.ui` says whether it brings a part at all.
+    const tabs = WITH_PAGE.includes(id)
+    expect(answer.pages.some(([, slot]: [string, string]) => slot === 'page')).toBe(tabs)
+    if (offered.ui) expect(answer.pages.length).toBeGreaterThan(0)
   }, 60_000)
 
   it.each(WITH_PAGE)('%s: brings the page part and help pages its manifest names', async (id) => {
