@@ -148,9 +148,10 @@ printf '%s\n' '#!/bin/sh' ${SERVICE:+": \${BOARDS_STATE_DIR:=$STATE}; export BOA
 # to an existing one once, by the first update that has them: one taken out afterwards stays out. OFFERED (kept in
 # install.env): those offered already.
 OFFER="system clients feedback"
-# Modules this distribution adds on top (the internal one carries its CA module): listed in modules.offered of the
-# release, absent from the public one.
+# Modules this distribution adds on top: listed in modules.offered of the release, absent from the public one.
 if [ -f "$PREFIX/releases/$VERSION-$REV/dist/modules.offered" ]; then OFFER="$OFFER $(cat "$PREFIX/releases/$VERSION-$REV/dist/modules.offered")"; fi
+# A module a market brings is the machine's own choice (boardlab market add, then its name in boardd.json): it is left
+# as a person set it, including when a market no longer offers it (boardd says so at start, and does not remove it).
 offer_modules() {
   if [ ! -f "$STATE/boardd.json" ]; then
     printf '%s\n' '{ "modules": { "boardctrl": {}, "system": {}, "clients": {}, "terminal": { "enabled": true }, "feedback": {} } }' > "$STATE/boardd.json"
