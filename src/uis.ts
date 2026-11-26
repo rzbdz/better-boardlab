@@ -4,7 +4,6 @@ import { ui as local } from './modules/local/ui.ts'
 import { ui as homeAssistant } from './modules/home-assistant/ui.ts'
 import { ui as scriptSlots } from './modules/script-slots/ui.ts'
 import { ui as boardctrl } from './modules/boardctrl/ui.ts'
-import { ui as clients } from './modules/clients/ui.ts'
 import { ui as system } from './modules/system/ui.ts'
 
-export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, clients, system]
+export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, system]
