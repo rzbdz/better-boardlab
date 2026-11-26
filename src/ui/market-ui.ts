@@ -16,7 +16,9 @@ export async function marketUis(): Promise<Array<MarketUi & { ui: ModuleUi }>> {
   const out: Array<MarketUi & { ui: ModuleUi }> = []
   for (const part of parts) {
     try {
-      const loadedPart = await import(/* @vite-ignore */ part.url) as { default?: ModuleUi, ui?: ModuleUi }
+      // boardd gives the path relative to the page, so a page works under a reverse proxy's sub-path; this module is
+      // bundled under `assets/`, so the page's own base is what it resolves against.
+      const loadedPart = await import(/* @vite-ignore */ new URL(part.url, document.baseURI).href) as { default?: ModuleUi, ui?: ModuleUi }
       const ui = loadedPart.default ?? loadedPart.ui
       if (ui && typeof ui.views === 'function') out.push({ ...part, ui })
     } catch (error) { console.error(`模块 ${part.id} 的页面部分没能加载：${(error as Error).message}`) }
@@ -26,10 +28,11 @@ export async function marketUis(): Promise<Array<MarketUi & { ui: ModuleUi }>> {
 
 async function load(): Promise<MarketUi[]> {
   try {
-    const answer = await fetch('/api/module-markets')
+    const answer = await fetch('api/module-markets', { headers: { Accept: 'application/json' } })
     if (!answer.ok) return []
-    const { markets } = await answer.json() as { markets: Array<{ modules: Array<{ id: string, ui: string }> }> }
-    // boardd gives each page part by its path at `/module-ui/<module>/<file>`: the module's own directory, one file deep.
-    return markets.flatMap(market => market.modules.filter(module => module.ui).map(module => ({ id: module.id, url: module.ui })))
+    const { pages } = await answer.json() as { pages?: Array<{ id: string, ui: string }> }
+    // The page parts of the modules boardd loaded (a market added only to browse it serves no code to the page), each
+    // at its own file: `<module>/<file>` inside the market's copy, and nothing else of it is served.
+    return (pages ?? []).filter(part => typeof part.id === 'string' && typeof part.ui === 'string').map(part => ({ id: part.id, url: part.ui }))
   } catch { return [] }
 }
