@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 
-/** The public module market on this machine: the frontend tests draw its page parts, as a page does. */
+/** The public module market, when it is beside this checkout or named: the frontend tests draw its page parts, as a page does. */
 const market = process.env.BOARDLAB_PUB_MARKET ?? resolve(import.meta.dirname, '../boardlab-modules-pub')
 
 export default defineConfig({
