@@ -23,7 +23,7 @@ describe('TroyMitchellDefault frontend', () => {
     expect(await screen.findByText('desk-k1', {}, wait)).toBeTruthy()
     await tab('实验室 boardctrl')
     expect(await screen.findByText('boardctrl-k1-musecard', {}, wait)).toBeTruthy()
-    expect(screen.getByText('boardctrl-k3-cm1')).toBeTruthy()
+    expect(screen.getByText('boardctrl-k1-cm1')).toBeTruthy()
   })
 
   it('draws the modules\' settings from their views, and offers the other frontend', async () => {
@@ -149,17 +149,17 @@ describe('TroyMitchellDefault console', () => {
     // Only boards with a console, the one shown marked, each with where it is and who has it.
     const options = within(list()!).getAllByRole('option')
     expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('b')!.textContent)).toEqual(['boardctrl-k1-musecard'])
-    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!
+    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'boardctrl-k1-cm1')!
     expect(cm1.textContent).toContain('实验室 boardctrl')
     fireEvent.keyDown(list()!, { key: 'Escape' })
     await waitFor(() => expect(list()).toBeNull(), wait)
     expect(document.activeElement).toBe(name)
     fireEvent.keyDown(name, { key: 'Enter' })
     await waitFor(() => expect(list()).toBeTruthy(), wait)
-    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!)
-    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k3-cm1'), wait)
+    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'boardctrl-k1-cm1')!)
+    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k1-cm1'), wait)
     expect(list()).toBeNull()
     const { FakeEventSource } = await import('./frontend-setup.ts')
-    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k3-cm1'))).toBe(true), wait)
+    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k1-cm1'))).toBe(true), wait)
   })
 })

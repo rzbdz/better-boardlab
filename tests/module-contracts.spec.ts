@@ -88,8 +88,8 @@ describe('module client contracts', () => {
   })
 
   it('keeps the scan product to SoC rules', () => {
-    expect(socFromProduct('k3_com260')).toBe('k3')
+    expect(socFromProduct('k1_deb1')).toBe('k1')
     expect(socFromProduct('K1-pegasus')).toBe('k1')
-    expect(socFromProduct('com260')).toBeNull()
+    expect(socFromProduct('any-board')).toBeNull()
   })
 })

@@ -139,8 +139,8 @@ describe('a board operation boardd cancelled', () => {
   it('in TroyMitchellDefault: is told in boardd\'s words, not as an error', async () => {
     const { outcome } = await import('../frontends/troy-mitchell-default/main.tsx')
     const { ApiError } = await import('../src/ui/api.ts')
-    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', 'cancelled') }))
-      .toEqual({ text: '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', error: false })
+    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：boardctrl-k1-deb1 的启动被 user:alice 取消了', 'cancelled') }))
+      .toEqual({ text: '已取消：boardctrl-k1-deb1 的启动被 user:alice 取消了', error: false })
     expect(await outcome('完成', async () => { throw new ApiError(502, '没有加载成功', 'hardware') })).toEqual({ text: '没有加载成功', error: true })
   })
 
