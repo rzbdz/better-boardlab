@@ -215,7 +215,8 @@
       "sftp-images": [
         "hosts"
       ],
-      "human": []
+      "human": [],
+      "market": []
     }
   },
   "maxLines": 800

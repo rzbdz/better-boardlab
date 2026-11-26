@@ -11,5 +11,6 @@ import { entry as system } from './modules/system/catalog.ts'
 import { entry as feedback } from './modules/feedback/catalog.ts'
 import { entry as sftpImages } from './modules/sftp-images/catalog.ts'
 import { entry as human } from './modules/human/catalog.ts'
+import { entry as market } from './modules/market/catalog.ts'
 
-export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, boardctrl, clients, boardlab, terminal, system, feedback, sftpImages, human]
+export const CATALOG: CatalogEntry[] = [local, homeAssistant, scriptSlots, boardctrl, clients, boardlab, terminal, system, feedback, sftpImages, human, market]

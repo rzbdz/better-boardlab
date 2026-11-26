@@ -9,5 +9,6 @@ import { ui as terminal } from './modules/terminal/ui.ts'
 import { ui as system } from './modules/system/ui.ts'
 import { ui as feedback } from './modules/feedback/ui.ts'
 import { ui as human } from './modules/human/ui.ts'
+import { ui as market } from './modules/market/ui.ts'
 
-export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, clients, terminal, system, feedback, human]
+export const MODULE_UIS: ModuleUi[] = [local, homeAssistant, scriptSlots, boardctrl, clients, terminal, system, feedback, human, market]
