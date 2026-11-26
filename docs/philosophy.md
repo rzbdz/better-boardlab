@@ -81,7 +81,7 @@ fields.map(field => render(field)) // text / choice，选项来自 field.options
 - 随本仓库发的模块，是这一版发行版的装配，构建进 `dist/cli.js`。
 - 市场里的模块，是**部署者**的选择：`boardlab market add` 一个 git 仓库，再把模块名写进 `boardd.json`。boardd 按配置文件 URL `import()`，所以机器上不需要 `node_modules`、也不需要重发一版 boardlab。
 
-判断一个新模块放哪：**每一个 boardlab 用户都可能要用吗？** 是，进本仓库；不是（vendor 的 BMC、内网证书、某个部门的配方），进对应的市场。市场里的模块 `import 'boardlab'` 拿到的就是 boardd 自己那套类和类型，所以它和本仓库的模块写起来、检查起来一样。
+判断一个新模块放哪：**每一个 boardlab 用户都可能要用吗？** 是，进本仓库；不是（某个厂商的机柜控制器、一张内网证书、某个部门的配方），进对应的市场。市场里的模块 `import 'boardlab'` 拿到的就是 boardd 自己那套类和类型，所以它和本仓库的模块写起来、检查起来一样。
 
 市场的清单（`market.json`）是断言，不是信任边界：它说这个模块要什么、给什么、页面在哪；真正的 `inject`/`provide` 以模块自己为准。装不装由人定，更新在下次启动生效。
 

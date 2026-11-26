@@ -127,7 +127,7 @@ boardlab market update --all             # 拉新版本，列出哪个模块的�
 市场克隆在 boardd 的状态目录里（`markets/<市场>`），boardd 启动时只 `import()` 配置选中的那几个，所以没有 `node_modules` 也能装。装什么由 `boardd.json` 说：
 
 ```json
-{ "modules": { "boardctrl": {}, "nexus": { "base": "https://nexus.example.org" } } }
+{ "modules": { "boardctrl": {}, "nexus-images": { "url": "https://nexus.example.org", "repository": "images" } } }
 ```
 
 一个市场模块 `import 'boardlab'` 拿到的是 boardd 自己的那套（`BoardError`、`TextReply` 这些），所以它抛的错误和返回的回复，和随 boardlab 发的模块是同一套类。市场更新在**下次启动**生效：boardd 不会在运行中换掉已经装上的代码。两个市场提供同一个 id，或者市场提供了随 boardlab 发的 id，启动会拒绝并说出是哪个。
