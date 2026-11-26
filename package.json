@@ -1,6 +1,6 @@
 {
   "name": "boardlab",
-  "version": "0.5.0rc13",
+  "version": "0.5.0rc2",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -22,9 +22,9 @@
   },
   "scripts": {
     "modules": "node scripts/modules.mjs",
-    "build": "node scripts/check.mjs && node core/scripts/build.mjs --cli src/boardlab.ts --sdk-browser src/sdk.browser.ts && node scripts/frontends.mjs",
-    "check": "node scripts/check.mjs",
-    "check:core": "node scripts/check.mjs",
+    "build": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs && node scripts/check-core-version.mjs && node core/scripts/build.mjs --cli src/boardlab.ts --sdk-browser src/sdk.browser.ts && node scripts/frontends.mjs",
+    "check": "node scripts/modules.mjs --check && node core/scripts/check-architecture.mjs && node scripts/check-core-version.mjs",
+    "check:core": "node scripts/check-core-version.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "frontends": "node scripts/frontends.mjs"

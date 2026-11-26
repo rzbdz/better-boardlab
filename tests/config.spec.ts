@@ -5,7 +5,7 @@ import { BoardLab } from 'boardlab-core/core/lab.ts'
 import { createModules, type ModuleContext } from 'boardlab-core/server/catalog.ts'
 import { parseConfig } from 'boardlab-core/server/config.ts'
 import { CATALOG } from '../src/catalog.ts'
-import { dir, useTempDir } from './helpers.ts'
+import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 
@@ -15,19 +15,22 @@ const ids = CATALOG.map(entry => entry.id)
 
 describe('boardd configuration', () => {
   it('offers every module of this distribution once, and loads them all by default or those listed', () => {
-    // This distribution ships `system`; the lab's other modules come from the public market.
-    expect(ids).toEqual(['system'])
     expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toEqual(expect.arrayContaining(['local', 'home-assistant', 'script-slots', 'boardctrl']))
     expect(Object.keys(parseConfig({}, null, ids).modules)).toEqual(ids)
-    expect(parseConfig({ modules: ['system'] }, null, ids).modules).toEqual({ system: {} })
+    expect(parseConfig({ modules: ['boardctrl'] }, null, ids).modules).toEqual({ boardctrl: {} })
     expect(parseConfig({ timing: { boot: { firstMs: 5000 }, scan: { windowMs: 100 }, syncMs: 30000 } }, null, ids).timing).toMatchObject({ boot: { firstMs: 5000 }, scan: { windowMs: 100 }, syncMs: 30000 })
   })
 
-  it('makes the modules selected from the catalog, with their settings, and refuses one it does not have', () => {
-    const lab = new BoardLab({ db: openDatabase(join(dir, 'config.sqlite')), modules: createModules(CATALOG, { system: {} }, context()) })
-    expect(lab.modules().map(item => item.id)).toEqual(['system'])
-    // A module this build does not have is a configuration error naming what it does have, never a silent nothing.
-    expect(() => createModules(CATALOG, { boardctrl: {} }, context())).toThrow(/没有这些模块：boardctrl（有：system）/)
+  it('makes the modules selected from the catalog, with their settings, under the names a site knows its hosts by', () => {
+    // A lab server with only remote hosts: two boardctrl board hosts.
+    const lab = new BoardLab({ db: openDatabase(join(dir, 'config.sqlite')), modules: createModules(CATALOG, { boardctrl: { instances: ['site-a', 'site-b'] } }, context()) })
+    expect(lab.modules().map(item => item.id)).toEqual(['boardctrl'])
+    expect(lab.backends.labSettings().map(item => item.id)).toEqual(['site-a', 'site-b'])
+    expect(() => createModules(CATALOG, { boardctrl: { instances: ['bad name'] } }, context())).toThrow(/模块 boardctrl 的设置不对/)
+    expect(() => createModules(CATALOG, { 'script-slots': { timeoutMs: 'soon' } }, context())).toThrow(/模块 script-slots 的设置不对/)
     expect(() => createModules(CATALOG, { zigbee: {} }, context())).toThrow(/没有这些模块：zigbee/)
+    // Modules come in catalog order whatever order they are listed in, so those others need come first.
+    expect(createModules(CATALOG, { 'script-slots': {}, 'home-assistant': {}, local: {} }, context()).map(item => item.id)).toEqual(['local', 'home-assistant', 'script-slots'])
   })
 })

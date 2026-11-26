@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { previousRelease, subjectsSince } from '../scripts/changelog.mjs'
-import { dir, useTempDir } from './helpers.ts'
+import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 

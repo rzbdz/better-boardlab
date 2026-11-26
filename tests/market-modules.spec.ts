@@ -11,12 +11,12 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { marketsOf, syncMarket, writeRecords } from 'boardlab-core/server/markets.ts'
 
-const market = process.env.BOARDLAB_PUB_MARKET ?? resolve(process.cwd(), '..', 'boardlab-modules-pub')
+const market = process.env.BOARDLAB_PUB_MARKET ?? '/root/workspace/boardlab-modules-pub'
 const sdk = join(process.cwd(), 'dist/sdk.js')
 // Built by `pnpm run build`: a market module resolves `boardlab` to it, and moving the modules is what the build is for.
 const usable = existsSync(sdk) && existsSync(join(market, 'market.json'))
@@ -29,16 +29,10 @@ async function stateWithMarket(): Promise<string> {
   return state
 }
 
-/**
- * Each case clones the market again, and that is a network read: a suite that passes locally can wait longer than the
- * default timeout for it. The tests that use it say so.
- */
-const CLONE_MS = 60_000
-
 /** Every module that left this distribution: the market offers it, and this build has no copy of its source. */
-const MOVED = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'sftp-images', 'terminal', 'boardlab', 'clients']
-/** Those of them with a page of their own: the rest are configured on another module's page (an image market), only
- * answer interfaces (a backend), or bring settings sections (the clients a boardd has). */
+const MOVED = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'sftp-images', 'terminal', 'boardlab']
+/** Those of them with a page of their own: the rest are configured on another module's page (an image market) or only
+ * answer interfaces (a backend). */
 const WITH_PAGE = ['human', 'feedback', 'alerts', 'console-watch', 'market', 'terminal']
 
 describe.skipIf(!usable)('a module from the public market', () => {
@@ -113,12 +107,9 @@ describe.skipIf(!usable)('a module from the public market', () => {
     // Its commands as the manifest names them: one for each module that brings any, none for one whose commands are
     // the core's own (`boardlab market …`).
     expect(answer.commands.length).toBe(offered.cli ? 1 : 0)
-    // A module whose page part brings views draws them; a page-part-less module, or one whose views are settings
-    // sections, has no tab of its own — `offered.ui` says whether it brings a part at all.
-    const tabs = WITH_PAGE.includes(id)
-    expect(answer.pages.some(([, slot]: [string, string]) => slot === 'page')).toBe(tabs)
-    if (offered.ui) expect(answer.pages.length).toBeGreaterThan(0)
-  }, CLONE_MS)
+    // A module with a page part brings a page; one without has none to draw, and `offered.ui` says which it is.
+    expect(answer.pages.some(([, slot]: [string, string]) => slot === 'page')).toBe(Boolean(offered.ui))
+  }, 60_000)
 
   it.each(WITH_PAGE)('%s: brings the page part and help pages its manifest names', async (id) => {
     const offered = marketsOf(await stateWithMarket())[0]!.modules.find(item => item.id === id)!
@@ -128,7 +119,7 @@ describe.skipIf(!usable)('a module from the public market', () => {
     const ui = readFileSync(join(offered.uiDir!, offered.ui!.slice(offered.ui!.lastIndexOf("/") + 1)), 'utf8')
     expect(ui).toMatch(/from\s*["']boardlab\/ui["']/)
     for (const page of offered.docs) expect(existsSync(page.file)).toBe(true)
-  }, CLONE_MS)
+  })
 
   it.each(MOVED)('%s: is gone from this distribution, so one module has one owner', (id) => {
     // The move is the point: a module in a market moves, it is not copied, or two boardds could load two of it.

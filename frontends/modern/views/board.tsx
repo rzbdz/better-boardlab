@@ -14,7 +14,6 @@ import { canRediscover, useBoardActions } from '../actions.tsx'
 import { FlashDialog } from '../flash.tsx'
 import { age, ArtIcon, clock, copyText, hhmm, holder, Icon, model, refreshNow, slotOf, Ticking, upper, useUI, where, Who, type Model } from '../kit.tsx'
 import { ViewPanel, viewsFor } from '../render.tsx'
-import { ModelPicker } from '../../../src/ui/model-picker.tsx'
 import { usePicker } from '../../../src/ui/picker.ts'
 import { LogPanel, type LogQuery } from './logs.tsx'
 
@@ -279,12 +278,42 @@ function Facts({ board }: { board: Board }) {
   const { host, slot } = slotOf(board), mb = board.lab?.mediaBoot
   const after = !mb ? null : mb.method === 'reset' ? '从介质启动' : mb.available ? `经 ${mb.method} 从介质启动` : `停在下载模式（${mb.why}）`
   const rows: Array<[string, ReactNode]> = [
-    ['主机', host], ['槽位', slot.toUpperCase()], ['SoC', board.soc?.toUpperCase()], ['型号', <ModelPicker key={board.name} name={board.name} product={board.product} saved={() => void refreshNow().catch(() => {})} />],
+    ['主机', host], ['槽位', slot.toUpperCase()], ['SoC', board.soc?.toUpperCase()], ['型号', <ModelEditor board={board} />],
     ['串口', board.chips.map(c => `${c.die}${c.serialPath ? ` ${c.serialPath}` : ''} · ${c.baud}${c.online ? '' : '（不在线）'}`).join('\n') || null],
     ['下载口', board.chips.map(c => c.downloadUsbPath).filter(Boolean).map(p => `usb:${p}`).join('、') || null],
     ['SDK', board.lab?.sdks?.join('、')], ['复位后', after], ['登记名', board.name],
   ]
   return <dl className="facts">{rows.filter(([, v]) => v).map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+}
+
+/** The model, editable where the facts show it: saved on Enter or 保存, remembered for the datalist, empty clears it. */
+function ModelEditor({ board }: { board: Board }) {
+  const ui = useUI()
+  const [models, setModels] = useState<string[]>([])
+  const [value, setValue] = useState(board.product ?? '')
+  const [busy, setBusy] = useState(false)
+  const list = `models-${board.name}`
+  useEffect(() => { setValue(board.product ?? '') }, [board.product])
+  useEffect(() => { let live = true; void api.models().then(got => { if (live) setModels(got) }).catch(() => {}); return () => { live = false } }, [])
+  const save = async () => {
+    const product = value.trim() || null
+    if (busy || product === (board.product ?? null)) return
+    setBusy(true)
+    try {
+      await api.setModel(board.name, product)
+      ui.toast(product ? `型号：${product}` : `清掉了 ${upper(board.name)} 的型号`, board.name)
+      setModels(await api.models().catch(() => models))
+    } catch (error) { ui.fail('型号没存上', error) } finally { setBusy(false) }
+  }
+  const unchanged = value.trim() === (board.product ?? '')
+  return (
+    <span className="model-edit">
+      <input className="input" list={list} value={value} placeholder="型号，例如 k3_com260" onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void save() } }} />
+      <datalist id={list}>{models.map(m => <option key={m} value={m} />)}</datalist>
+      <button className="pill sm" disabled={busy || unchanged} title="保存型号（会记下来，下次可以选）" onClick={() => void save()}>{busy ? <span className="spin" /> : <Icon name="check" />}保存</button>
+    </span>
+  )
 }
 
 function RenameDialog({ board, close }: { board: Board, close: () => void }) {

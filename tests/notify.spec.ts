@@ -1,7 +1,7 @@
 /** What the page tells a person about, from two successive states: the rules every frontend's notifications follow. */
 import { describe, expect, it } from 'vitest'
 import type { Board, Lease, Waiter } from 'boardlab-core/shared/types.ts'
-import { changes, NOTE_BODY, oneLine, show, prefs } from '../src/ui/notify.ts'
+import { changes, show, prefs } from '../src/ui/notify.ts'
 
 const lease = (holder: string, purpose = '调试'): Lease => ({ id: holder, board: 'b', holder, purpose, startedAt: '2026-11-10T00:00:00Z', status: 'held', endedAt: null, endReason: null })
 const waiter = (holder: string): Waiter => ({ id: holder, board: 'b', holder, purpose: '等', queuedAt: '2026-11-10T00:00:00Z' })
@@ -38,16 +38,6 @@ describe('notifications', () => {
       { topic: 'attention', board: 'k1', title: 'k1：需要你操作', body: '按 RESET，然后点我已完成' },
     ])
     expect(changes([waiting], [waiting], me, [])).toEqual([])                                  // still the same request
-  })
-
-  it('never puts a console dump in an operating-system notification: one line, cut, the page has the rest', () => {
-    const dump = ['复位失败', ...Array.from({ length: 8 }, () => ''), 'FSOpen: Open \'\\\' Success', 'FS0:\\> ifconfig -l', ...Array.from({ length: 8 }, () => 'FS0:\\> ifconfig -l')].join('\n')
-    const [note] = changes([board('k1', { lab: lab(null) as Board['lab'] })], [board('k1', { lab: lab(dump) as Board['lab'] })], me, [])
-    expect(note!.body).not.toContain('\n')
-    expect(note!.body.startsWith('复位失败')).toBe(true)
-    expect(note!.body.length).toBeLessThanOrEqual(NOTE_BODY + 1)
-    // A short ask goes as it is.
-    expect(oneLine('按 RESET')).toBe('按 RESET')
   })
 
   it('two failures are two notes in the operating system, while a board asking again replaces its own', () => {

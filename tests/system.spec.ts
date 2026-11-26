@@ -10,7 +10,7 @@ import { BoardLab } from 'boardlab-core/core/lab.ts'
 import { compareVersions, newerRelease, sourcePattern, system } from '../src/modules/system/index.ts'
 import { commands } from '../src/modules/system/cli.ts'
 import type { CommandContext } from 'boardlab-core/cli/command.ts'
-import { dir, useTempDir } from './helpers.ts'
+import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 afterEach(() => { vi.restoreAllMocks(); process.exitCode = undefined })

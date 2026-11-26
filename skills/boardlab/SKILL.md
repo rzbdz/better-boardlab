@@ -38,11 +38,11 @@ description: 通过 boardlab CLI 使用实验室开发板和 SDK：先拿锁，�
 
 ```sh
 boardlab list --json                         # 不知道用哪块板、谁在用时才看
-boardlab lock <板子> --for "调试 U-Boot 网络"  # 拿锁；被占用时退出码 3
-boardlab reset <板子>
-boardlab send <板子> 'printenv ethaddr' --wait '=> ' --timeout 10s
-boardlab log <板子> --lines 200
-boardlab unlock <板子>                       # 锁没有时间限制，用完一定要放锁，排队的人才能拿到
+boardlab lock com260 --for "调试 U-Boot 网络"  # 拿锁；被占用时退出码 3
+boardlab reset com260
+boardlab send com260 'printenv ethaddr' --wait '=> ' --timeout 10s
+boardlab log com260 --lines 200
+boardlab unlock com260                       # 锁没有时间限制，用完一定要放锁，排队的人才能拿到
 ```
 
 - 别人持有锁时只能看（`list`、`show`、`log`、`console`），不能输入或控制。要等就排队，先到先得：
@@ -104,7 +104,7 @@ boardlab unlock <板子>                       # 锁没有时间限制，用完�
 板子外面的事你做不了：插拔线、把板子接到某个口、按按钮、按住 BOOT 再按 RESET。不要猜着让别人做，也不要假设已经插好了——用 `boardlab ask` 请人，等结果：
 
 ```sh
-boardlab ask "把这块板的 USB 线插到 2-1.1" --kind 插拔 \
+boardlab ask "把 K3 板的 USB 线插到 2-1.1" --kind 插拔 \
   --body "插好后板上串口会打印 ROM: usb download handler；下载口应该出现在 usb:2-1.1" --timeout 10m
 ```
 
@@ -227,8 +227,6 @@ boardlab registry hosts                             # 每台主机拿到的目�
 boardd 能做什么由它装的模块决定。`boardlab module` 列出装了的模块：每个是什么、要什么（`inject`）、给什么（`provide`）、在不在跑；不在跑的会说为什么（等着哪个服务、或者起不来）。`boardlab module search <文字>` 按名字、说明和标签在**装了的**和**市场里的**模块里一起找。
 
 市场里的模块不是随 boardlab 发的：`boardlab market` 列出这台机器加了哪些市场，`boardlab market show <市场>` 看一个市场提供什么，`boardlab market add <市场> <git 地址>` 加一个。装哪个由 boardd 的配置说（`boardd.json` 的 `modules` 里写模块名和它的设置），**改完要重启 boardd 才生效**；市场更新同理（`boardlab market update --all` 会列出哪个模块的代码变了）。
-
-市场在 **boardd 那台机器**的状态目录里。连的是别的机器上的 boardd 时，`boardlab market` 和 `boardlab module change` 在那边跑，读写那边的市场；那边太旧、不能替你跑时会明说「要在 boardd 那台机器上跑」，那时到那台机器上运行即可。
 
 - 不要为了让某个模块工作去改 boardd 的状态目录或市场复制品里的文件：那是 git 的复制品，`market update` 会盖掉。要改就去改市场仓库。
 - 一个模块在 `boardlab module` 里是「等着」，说明它 `inject` 的服务没人提供：看是哪个模块没装或起不来，别硬重启。

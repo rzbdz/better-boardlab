@@ -6,9 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
-import { join } from 'node:path'
-import { job, type ModuleUi, type View } from '../src/ui/contract.ts'
-import { PUB_MARKET } from './public-market.ts'
+import { job, type View } from '../src/ui/contract.ts'
 import { calls, state } from './frontend-setup.ts'
 
 vi.mock('../src/ui/console.tsx', () => ({ SerialConsole: () => null, reconnectConsole: () => {}, clearConsole: vi.fn(), searchConsole: vi.fn(), STATUS_TEXT: { connecting: '连接中', live: '实时', closed: '已断开，重连中', retry: '重连中' } }))
@@ -87,7 +85,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
   })
 
   it('the scan says it can be stopped, and settles once it is', async () => {
-    const { ui } = await import(/* @vite-ignore */ join(PUB_MARKET, 'local/ui.js')) as { ui: ModuleUi }
+    const { ui } = await import('../src/modules/local/ui.ts')
     const page = { ...state, slots: [{ slot: 1, canFastboot: true }], scan: null, boards: state.boards.map(board => ({ ...board, lease: null })) } as never
     const scan = ui.views(page, {}).find(view => view.id === 'scan')!
     const start = (scan.body.find(element => element.kind === 'actions') as { actions: Array<{ id: string, kind: string, cancellable?: boolean, start?: Function }> }).actions.find(op => op.id === 'scan')!
@@ -101,7 +99,7 @@ describe('a job that cannot be stopped is not offered as one', () => {
   })
 
   it('a first boardctrl install the page left does not remove the lab boardd is still installing', async () => {
-    const { ui } = await import(/* @vite-ignore */ join(PUB_MARKET, 'boardctrl/ui.js')) as { ui: ModuleUi }
+    const { ui } = await import('../src/modules/boardctrl/ui.ts')
     const views = ui.views(state as never, {})
     const find = (elements: unknown[]): { submit: { id: string, start: Function, cancellable?: boolean } } | null => {
       for (const element of elements as Array<Record<string, unknown>>) {
@@ -139,8 +137,8 @@ describe('a board operation boardd cancelled', () => {
   it('in TroyMitchellDefault: is told in boardd\'s words, not as an error', async () => {
     const { outcome } = await import('../frontends/troy-mitchell-default/main.tsx')
     const { ApiError } = await import('../src/ui/api.ts')
-    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：boardctrl-k1-deb1 的启动被 user:alice 取消了', 'cancelled') }))
-      .toEqual({ text: '已取消：boardctrl-k1-deb1 的启动被 user:alice 取消了', error: false })
+    expect(await outcome('完成', async () => { throw new ApiError(409, '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', 'cancelled') }))
+      .toEqual({ text: '已取消：boardctrl-k3-deb1 的启动被 user:alice 取消了', error: false })
     expect(await outcome('完成', async () => { throw new ApiError(502, '没有加载成功', 'hardware') })).toEqual({ text: '没有加载成功', error: true })
   })
 

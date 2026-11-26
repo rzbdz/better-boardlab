@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { acknowledgeRestore, backupDatabase, checkDatabase, listBackups, openDatabase, recoverDatabase, restoreRecord, scheduleBackups } from 'boardlab-core/core/db.ts'
 import { BoardLab } from 'boardlab-core/core/lab.ts'
 import { startBoardd } from 'boardlab-core/server/main.ts'
-import { dir, useTempDir } from './helpers.ts'
+import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 afterEach(() => { vi.useRealTimers() })

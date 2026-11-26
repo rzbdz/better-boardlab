@@ -187,6 +187,15 @@
   },
   "modules": {
     "dependencies": {
+      "local": [],
+      "home-assistant": [
+        "local"
+      ],
+      "script-slots": [
+        "local"
+      ],
+      "boardctrl": [],
+      "clients": [],
       "system": []
     },
     "libraries": {}

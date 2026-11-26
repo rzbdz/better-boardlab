@@ -16,7 +16,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { syncMarket, writeRecords } from 'boardlab-core/server/markets.ts'
 
 const ROOT = resolve(__dirname, '..')
 const BSP = join(ROOT, 'externals/boardctrl')
@@ -291,11 +290,6 @@ describe.skipIf(why)('end to end: a site plugin\'s debug path, through boardd to
     const boarddPort = await freePort()
     const stateDir = join(dir, 'boardd')
     mkdirSync(stateDir, { recursive: true })
-    // The lab's module comes from the public market, as on a machine: cloned into the state directory first, so boardd
-    // resolves `boardctrl` from there rather than from this build (which has no copy of it).
-    const market = process.env.BOARDLAB_PUB_MARKET ?? resolve(ROOT, '..', 'boardlab-modules-pub')
-    const synced = await syncMarket(stateDir, 'pub', { url: market })
-    writeRecords(stateDir, [{ id: 'pub', url: market, branch: null, commit: synced.commit }])
     writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { boardctrl: {} } }, null, 2))
     // The boardctrl boardd drives is this checkout's, not whatever `bsp` happens to be on the machine's PATH: a stale
     // install elsewhere has neither the rename nor the providers this test is about.

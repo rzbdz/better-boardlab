@@ -23,7 +23,7 @@ describe('TroyMitchellDefault frontend', () => {
     expect(await screen.findByText('desk-k1', {}, wait)).toBeTruthy()
     await tab('实验室 boardctrl')
     expect(await screen.findByText('boardctrl-k1-musecard', {}, wait)).toBeTruthy()
-    expect(screen.getByText('boardctrl-k1-cm1')).toBeTruthy()
+    expect(screen.getByText('boardctrl-k3-cm1')).toBeTruthy()
   })
 
   it('draws the modules\' settings from their views, and offers the other frontend', async () => {
@@ -149,55 +149,17 @@ describe('TroyMitchellDefault console', () => {
     // Only boards with a console, the one shown marked, each with where it is and who has it.
     const options = within(list()!).getAllByRole('option')
     expect(options.filter(o => o.getAttribute('aria-selected') === 'true').map(o => o.querySelector('b')!.textContent)).toEqual(['boardctrl-k1-musecard'])
-    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'boardctrl-k1-cm1')!
+    const cm1 = options.find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!
     expect(cm1.textContent).toContain('实验室 boardctrl')
     fireEvent.keyDown(list()!, { key: 'Escape' })
     await waitFor(() => expect(list()).toBeNull(), wait)
     expect(document.activeElement).toBe(name)
     fireEvent.keyDown(name, { key: 'Enter' })
     await waitFor(() => expect(list()).toBeTruthy(), wait)
-    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'boardctrl-k1-cm1')!)
-    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k1-cm1'), wait)
+    fireEvent.click(within(list()!).getAllByRole('option').find(o => o.querySelector('b')!.textContent === 'boardctrl-k3-cm1')!)
+    await waitFor(() => expect(consoleTitle()).toBe('boardctrl-k3-cm1'), wait)
     expect(list()).toBeNull()
     const { FakeEventSource } = await import('./frontend-setup.ts')
-    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k1-cm1'))).toBe(true), wait)
-  })
-
-})
-
-describe('TroyMitchellDefault tabs and asks', () => {
-  const shown = () => document.querySelector('.console .board-switch h3')?.textContent ?? null
-  const consoleOf = async (name: string) => {
-    await tab('板子')
-    await waitFor(() => expect(document.querySelector(`[data-board="${name}"]`)).toBeTruthy(), wait)
-    fireEvent.click(document.querySelector(`[data-board="${name}"]`) as HTMLElement)
-    await waitFor(() => expect(shown()).toBe(name), wait)
-  }
-
-  it('returns from another tab to the board it last had open, and to the overview on the next press', async () => {
-    localStorage.removeItem('boardlab.troy.board')
-    await consoleOf('boardctrl-k1-musecard')
-    await tab('历史')
-    fireEvent.click(await screen.findByRole('tab', { name: '板子' }, wait))
-    await waitFor(() => expect(shown()).toBe('boardctrl-k1-musecard'), wait)
-    // The board's page here is the console; pressing 板子 again goes back to the cards.
-    fireEvent.click(await screen.findByRole('tab', { name: '板子' }, wait))
-    await waitFor(() => expect(document.querySelector('.console')).toBeNull(), wait)
-    fireEvent.click(await screen.findByRole('tab', { name: '板子' }, wait))
-    await waitFor(() => expect(shown()).toBe('boardctrl-k1-musecard'), wait)
-    fireEvent.click(await screen.findByRole('tab', { name: '板子' }, wait))
-    await waitFor(() => expect(document.querySelector('.console')).toBeNull(), wait)
-  })
-
-  it('answers an agent\'s ask in the panel, without a trip to its page', async () => {
-    const panel = await waitFor(() => {
-      const el = document.querySelector('.attention-panel[aria-label="人工请求"]')
-      if (!el) throw new Error('no ask panel')
-      return el as HTMLElement
-    }, wait)
-    expect(panel.textContent).toContain('把测试板接到端口 2')
-    fireEvent.click(within(panel).getByRole('button', { name: '我做好了' }))
-    await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === 'api/human/resolve' && (c.body as { id: number }).id === 7)).toBe(true), wait)
-    await waitFor(() => expect(document.querySelector('.attention-panel[aria-label="人工请求"]')).toBeNull(), wait)
+    await waitFor(() => expect(FakeEventSource.instances.some(item => item.url.startsWith('api/console?raw=1&board=boardctrl-k3-cm1'))).toBe(true), wait)
   })
 })

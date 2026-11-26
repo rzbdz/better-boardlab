@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { startBoardd } from 'boardlab-core/server/main.ts'
 import { BoardsClient } from 'boardlab-core/shared/client.ts'
 import { entry } from '../src/modules/system/catalog.ts'
-import { dir, useTempDir } from './helpers.ts'
+import { dir, useTempDir } from './fakes.ts'
 
 useTempDir()
 const execute = promisify(execFile)

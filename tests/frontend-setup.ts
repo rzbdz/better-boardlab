@@ -15,8 +15,8 @@ export let state = mockState()
 export function resetMock() { state = mockState(); calls.length = 0; debugRunning.clear(); document.cookie = 'boardlab-frontend=; max-age=0' }
 
 const history = {
-  actions: [{ id: 1, at: state.now, actor: 'user:bob', board: 'boardctrl-k1-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode' }],
-  leases: [{ id: 'l1', board: 'boardctrl-k1-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: state.now, status: 'held', endedAt: null, endReason: null }],
+  actions: [{ id: 1, at: state.now, actor: 'user:bob', board: 'boardctrl-k3-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode' }],
+  leases: [{ id: 'l1', board: 'boardctrl-k3-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: state.now, status: 'held', endedAt: null, endReason: null }],
   scans: [],
 }
 
@@ -136,14 +136,14 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     const tree: Array<[string, string, string]> = [['soc-a', 'folder', 'soc-a'], ['soc-a/new.zip', 'image', 'new.zip'], ['soc-a/old', 'folder', 'soc-a/old'], ['soc-a/old/deep.zip', 'image', 'deep.zip'], ['soc-b', 'folder', 'soc-b'], ['soc-b/disk.iso', 'image', 'disk.iso']]
     const entries = words === 'nothing' ? [] : tree.filter(([at, kind, name]) => kind === 'image' ? name.includes(words) : tree.some(([below, k2]) => k2 === 'image' && below.startsWith(`${at}/`) && below.split('/').at(-1)!.includes(words)))
       .map(([at, kind, name]) => ({ path: at, name, kind, soc: 'k3', ...(kind === 'image' ? { size: 2 << 20, modified: '2026-11-20T08:00:00Z' } : {}) }))
-    if (url.searchParams.get('board')) for (const entry of entries) if (entry.kind === 'image') (entry as Record<string, unknown>).refused = entry.name.endsWith('zip') ? null : 'boardctrl-k1-deb1 的后端刷不了这种包'
+    if (url.searchParams.get('board')) for (const entry of entries) if (entry.kind === 'image') (entry as Record<string, unknown>).refused = entry.name.endsWith('zip') ? null : 'boardctrl-k3-deb1 的后端刷不了这种包'
     // A market searched by an index that stopped short says so; the shelf answers whole.
     return reply({ market: 'shelf', text: words, entries, folders: 3, by: 'index', partial: false, readAt: state.now })
   }
   if (path === '/api/markets/shelf/targets') return reply([
-    { board: 'boardctrl-k1-deb1', soc: 'k3', mine: true, free: false, why: null },
+    { board: 'boardctrl-k3-deb1', soc: 'k3', mine: true, free: false, why: null },
     { board: 'boardctrl-k1-pico', soc: 'k1', mine: false, free: true, why: null },
-    { board: 'boardctrl-k1-cm1', soc: 'k3', mine: false, free: false, why: 'user:bob 在用' },
+    { board: 'boardctrl-k3-cm1', soc: 'k3', mine: false, free: false, why: 'user:bob 在用' },
   ])
   // What a package would write: streamed like the backend fetching it, then its plan.
   if (path === '/api/flash/plan' && method === 'POST') {
@@ -188,8 +188,6 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     }
     return reply({ lines: [text(0), text(1)], matched: 2, truncated: false, source: 'backend' })
   }
-  // A person saying an agent's ask is done: the state stops carrying it as open (the real module answers the asker).
-  if (path === '/api/human/resolve' && method === 'POST') { (state as unknown as { human?: unknown }).human = { open: 0, items: [] }; return reply({ message: `#${(body as { id: number }).id} 做好了` }) }
   // A person acknowledging boardd's database restore: the state stops reporting it.
   if (path === '/api/database/acknowledge' && method === 'POST') { const acknowledged = state.restored ?? null; state.restored = null; return reply({ acknowledged }) }
   // The notification bus: what boardd recorded, and the channels it pushes to. One failure and one aging match, so a
@@ -197,7 +195,7 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   if (path === '/api/alerts') return reply({
     alerts: [
       { id: 2, at: state.now, topic: 'aging', board: 'boardctrl-k1-musecard', title: 'aging-1：panic', body: 'Kernel panic - not syncing', tags: ['aging-1', 'boardctrl-k1-musecard'], actor: 'console:aging-1', delivered: [{ channel: 'lab', ok: true, detail: 'HTTP 200' }] },
-      { id: 1, at: state.now, topic: 'failed', board: 'boardctrl-k1-cm1', title: 'boardctrl-k1-cm1：复位失败', body: 'GPIO 超时', tags: ['boardctrl-k1-cm1'], actor: 'user:dana', delivered: [] },
+      { id: 1, at: state.now, topic: 'failed', board: 'boardctrl-k3-cm1', title: 'boardctrl-k3-cm1：复位失败', body: 'GPIO 超时', tags: ['boardctrl-k3-cm1'], actor: 'user:dana', delivered: [] },
     ],
     channels: [{ id: 'lab', kind: 'chat', title: '实验室告警群', enabled: true, url: 'https://chat.example.org/hook/…a1b2…', rules: [{ topics: ['failed'], tags: [] }], last: { at: state.now, ok: true, detail: 'HTTP 200' } }],
   })

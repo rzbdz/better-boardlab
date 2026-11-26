@@ -12,36 +12,33 @@
 ## 启动文件从哪来
 
 - 内核、DTB、initrd 和改过的 FSBL、U-Boot/OpenSBI 来自这次任务的构建产物目录。先找产物目录里的 `boot-manifest.toml`，有就按它选文件、核对 sha256、照它的加载顺序和 FIT 配置；没有就在报告里写明查过哪里。manifest 里的 `boot-tested` 是历史记录，不代表这次能起来。
-- 只改了内核：FSBL 和 U-Boot/OpenSBI 用 boardd 已有的 `fsbl` 和 `u-boot-opensbi`（`boardlab firmware` 列出它们从哪来：发行版的 `firmware/` 或一个模块带来的），只有内核用这次编的。
+- 只改了内核：FSBL 和 U-Boot/OpenSBI 用 boardd 自带的 `fsbl` 和 `u-boot-opensbi`（`boardlab firmware` 列出，来源见仓库的 `firmware/README.md`），只有内核用这次编的。
 - 改了 OpenSBI 或 U-Boot：必须用这次编出来的，不能拿旧的顶替。
 - 按任务和板子选文件，不要只挑最新的。没指定构建的冒烟测试，选一套互相兼容的并说明选了什么、有什么局限；能起来不等于验证了某个没指定的改动。
 - fastboot 的内核要打成 FIT（`Image.itb`：内核加各板的 DTB），见下一节。
 
 ## 打内核 FIT（Image.itb）
 
-脚本和板型表**不在 boardlab 里**：它们知道的是这个站点的板子，所以归站点。先问站点要：
+K3 用 [fit/spacemit/k3/make-its.sh](fit/spacemit/k3/make-its.sh)。默认在本机跑；构建在别的机器上时设 `FIT_HOST=<ssh 主机>`，脚本通过 ssh 在那边干活：
 
 ```sh
-boardlab guidance --soc <soc>     # 这颗芯片的笔记里写着它的 FIT 脚本和板型表在哪
+FIT_HOST=<构建主机> skills/boardlab/fit/spacemit/k3/make-its.sh <内核的 O= 目录> <本任务的新产物目录>
 ```
 
-以下以 K3 的站点为例，别的 SoC 以它自己的笔记为准：默认在本机跑；构建在别的机器上时设 `FIT_HOST=<ssh 主机>`，脚本通过 ssh 在那边干活：
-
-```sh
-FIT_HOST=<构建主机> <站点说的地方>/make-its.sh <内核的 O= 目录> <本任务的新产物目录>
-```
-
-- 板子和 DTB 的对应关系在站点给的表里（`product_name,dtb,note` 一行一块板）：`product_name` 是板子 EEPROM 里的名字，U-Boot 选 description 等于它的 configuration，找不到就用默认的；第一行是默认。加板子只加一行，不改脚本。
-- 脚本照 SDK 的 `kernel_fdt.its` 生成 `Image.its`，把 `Image` 和这次构建里有的 DTB 拷进产物目录，用 SDK 自己的 mkimage 打包，最后打印 `dumpimage -l` 和各文件的 sha256，抄进 `boot-manifest.toml`。
+- 板子和 DTB 的对应关系在 [fit/spacemit/k3/boards.csv](fit/spacemit/k3/boards.csv)：`product_name,dtb,note` 一行一块板。`product_name` 是板子 EEPROM 里的名字，U-Boot 选 description 等于它的 configuration，找不到就用默认的；第一行是默认。加板子只加一行，不改脚本。
+- 脚本照 SDK 的 `kernel_fdt.its` 生成 `Image.its`（内核加载在 0x1_02000000，DTB 在 0x1_28000000，带 sha256），把 `Image` 和这次构建里有的 DTB 拷进产物目录，用 SDK 自己的 mkimage（`$K3_SDK/uboot-2022.10/tools`，`K3_SDK` 默认 `~/k3-sdk`）打包，最后打印 `dumpimage -l` 和各文件的 sha256，抄进 `boot-manifest.toml`。
 - 表里有但这次没编出来的 DTB 跳过并告警；编出来了但表里没有的也告警，需要就加一行。产物目录里已有 FIT、或目录在 SDK 下，脚本拒绝执行，不会覆盖 SDK 的 output。
 
 ## 冒烟 initramfs
 
 只看内核起不起来、设备树对不对时，把冒烟 initramfs 内嵌进测试内核，不用根文件系统：
 
-- 用一个冒烟 initramfs：站点的 FIT 笔记里说它从 SDK 的 BusyBox rootfs 怎么做一个（构建在别的机器上时设一个主机变量让脚本去那边跑），输出到新的日期目录，同目录的 `SOURCE` 记着来源和 sha256。它换掉 `/init`，在开始和就绪两个标记之间打印内核看到的 model、compatible、cmdline、CPU 数、内存、分区、网口和 MMC 控制器，然后在串口上开一个 shell；不挂载持久存储，不起服务。
+- 用 [fit/spacemit/k3/make-smoke-initramfs.sh](fit/spacemit/k3/make-smoke-initramfs.sh) 从 SDK 的 BusyBox rootfs 做一个（构建在别的机器上时设 `SMOKE_HOST`），输出到新的日期目录，同目录的 `SOURCE` 记着来源和 sha256。它换掉 `/init`：在 `=== K3_SMOKE_BEGIN ===` 和 `=== K3_SMOKE_READY ===` 之间打印内核看到的 model、compatible、cmdline、CPU 数、内存、分区、网口和 MMC 控制器，然后在串口上开一个 shell；不挂载持久存储，不起服务。
+  ```sh
+  SMOKE_HOST=<构建主机> skills/boardlab/fit/spacemit/k3/make-smoke-initramfs.sh <SDK 的 rootfs .cpio.gz> <新的输出目录>
+  ```
 - 测试内核单开一个 profile，`CONFIG_INITRAMFS_SOURCE` 指向它；需要时再加 `CMDLINE_FORCE` 和 earlycon。这套配置只用于测试，不进补丁。
-- 串口里看到它自己的就绪标记才算起来了（标记名由站点给）。
+- 串口里看到 `K3_SMOKE_READY` 才算起来了。
 - 已有的冒烟 initramfs 有任务在用就留着；不要借别的任务的，那些是为它们的板子改过的，标记也是它们的。
 
 ## fastboot 内存启动
@@ -71,7 +68,7 @@ boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚�
 `boardlab list` 里标着 `[实验室 …]` 的板子按上面同样的步骤内存启动，命令不变。不同的地方：
 
 - 下载口在实验室那边（例如 boardctrl 主机）。正常 SDK 启动/刷机由板端主机从构建服务器 scp 拉产物，不经过 workstation 或 boardd；URL / `host:/绝对路径` 也由板端自己取。只有本机文件兜底才由 boardd 传输到实验室主机。
-- 板子 EEPROM 里的型号决定 U-Boot 选 FIT 里哪个 configuration；站点的板型表里没有它，或内核里没有对应的 DTB 时，打出的 FIT 里就没有它，U-Boot 会用默认的第一项，设备树就不对：先问用户用哪个 DTB。
+- 板子 EEPROM 里的型号决定 U-Boot 选 FIT 里哪个 configuration；[boards.csv](fit/spacemit/k3/boards.csv) 里没有它，或内核里没有对应的 DTB 时，打出的 FIT 里就没有它，U-Boot 会用默认的第一项，设备树就不对：先问用户用哪个 DTB。
 - 卡片上有「继电器」的实验室板子，还能单独控制它的继电器和按钮（断电重启、按住 BOOT），见 `boardlab relay <板子>`。
 - 这些板子平时跑着自己的系统，别人也会用。用完先 `boardlab reset`，看到它自己系统的登录提示再放锁。
 

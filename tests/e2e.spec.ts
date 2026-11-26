@@ -16,7 +16,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { syncMarket, writeRecords } from 'boardlab-core/server/markets.ts'
 
 const ROOT = resolve(__dirname, '..')
 const BSP = join(ROOT, 'externals/boardctrl')
@@ -112,11 +111,6 @@ async function startBoardd(dir: string, hosts: Array<{ id: string, url: string, 
   const port = await freePort()
   const stateDir = join(dir, 'boardd')
   mkdirSync(stateDir, { recursive: true })
-  // The lab's modules come from the public market, as on a machine: clone it into the state directory first, so boardd
-  // resolves `boardctrl` from there rather than from this build (which has no copy of it).
-  const market = process.env.BOARDLAB_PUB_MARKET ?? resolve(ROOT, '..', 'boardlab-modules-pub')
-  const synced = await syncMarket(stateDir, 'pub', { url: market })
-  writeRecords(stateDir, [{ id: 'pub', url: market, branch: null, commit: synced.commit }])
   writeFileSync(join(stateDir, 'boardd.json'), JSON.stringify({ modules: { boardctrl: {} } }, null, 2))
   const child = spawn(process.execPath, ['--no-warnings', CLI, 'serve', '--port', String(port), '--state-dir', stateDir, '--no-ui'], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],

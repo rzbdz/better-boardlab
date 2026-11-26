@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import { ui as bspUi } from '../src/modules/boardctrl/ui.ts'
 import { ui as systemUi } from '../src/modules/system/ui.ts'
 import type { Operation, View } from '../src/ui/contract.ts'
 
 describe('module help and update feedback', () => {
-  it('links the existing operational help from the corresponding view', () => {
+  it('links the existing operational help from the corresponding views', () => {
     const state = { boards: [], labs: [], modules: [] } as never
+    expect(bspUi.views(state, {}).map((view: View) => [view.id, view.help])).toContainEqual(['boardctrl-hosts', 'board-hosts'])
     expect(systemUi.views(state, {}).map((view: View) => [view.id, view.help])).toContainEqual(['version', 'release-source'])
   })
 
@@ -25,3 +27,11 @@ describe('module help and update feedback', () => {
   })
 })
 
+
+describe('guidance', () => {
+  it('the site view carries the guidance help page', () => {
+    const state = { boards: [], labs: [], modules: [] } as never
+    const site = bspUi.views(state, {}).find((view: View) => view.id === 'boardctrl-site')
+    expect(site?.extra).toEqual({ 'boardctrl.guidanceHelp': 'guidance' })
+  })
+})
