@@ -33,8 +33,8 @@ export function mockState(you = 'user:alice'): State {
     boards: [
       board('boardctrl-k1-musecard', { product: 'k1-x_MUSE-Card', soc: 'k1', slotRef: 'boardctrl/host-a/s1',
         lab: inLab('k1-musecard', { debug: { provider: 'my-swd', title: 'SWD over GPIO', kinds: ['halt', 'run', 'step', 'regs', 'trace'] } }) }),
-      board('boardctrl-k3-deb1', { product: 'k3_deb1', soc: 'k3', slotRef: 'boardctrl/host-b/s3', lease: lease('boardctrl-k3-deb1', you, '临时调试'), lab: inLab('k3-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null }, packages: { schemes: ['https'], suffixes: ['.zip'] }, canPlan: true }) }),
-      board('boardctrl-k3-cm1', { product: 'k3_com260', soc: 'k3', slotRef: 'boardctrl/host-b/s4', lease: lease('boardctrl-k3-cm1', 'user:bob', '跑启动回归'), waiters: [{ id: 'w1', board: 'boardctrl-k3-cm1', holder: 'user:carol', purpose: '临时开发任务', queuedAt: now }], lab: inLab('k3-cm1') }),
+      board('boardctrl-k1-deb1', { product: 'k1_deb1', soc: 'k1', slotRef: 'boardctrl/host-b/s3', lease: lease('boardctrl-k1-deb1', you, '临时调试'), lab: inLab('k1-deb1', { mediaBoot: { method: 'rom-handoff', available: true, why: null }, packages: { schemes: ['https'], suffixes: ['.zip'] }, canPlan: true }) }),
+      board('boardctrl-k1-cm1', { product: 'k1_deb1', soc: 'k1', slotRef: 'boardctrl/host-b/s4', lease: lease('boardctrl-k1-cm1', 'user:bob', '跑启动回归'), waiters: [{ id: 'w1', board: 'boardctrl-k1-cm1', holder: 'user:carol', purpose: '临时开发任务', queuedAt: now }], lab: inLab('k1-cm1') }),
       board('boardctrl-k1-pico', { product: 'k1-x_pico', soc: 'k1', slotRef: 'boardctrl/host-a/s2', lab: inLab('k1-pico', { attention: '请按一下 k1-pico 的 RESET 键，然后点「我已完成」' }) }),
       board('boardctrl-k3-gone', { product: 'k3_deb1', soc: 'k3', slotRef: 'boardctrl/host-b/s1', chips: [chip('boardctrl-k3-gone', false)], lab: inLab('k3-gone', { slotGone: true }) }),
       board('boardctrl-host-b-s6', { slotRef: 'boardctrl/host-b/s6', lab: inLab('host-b-s6', { empty: true, canRefresh: false, mediaBoot: null, sdks: [], canFlashPackage: false }) }),
@@ -65,11 +65,11 @@ export function mockState(you = 'user:alice'): State {
 
 const history = {
   actions: [
-    { id: 3, at: now, actor: 'user:alice', board: 'boardctrl-k3-deb1', kind: 'lock', detail: '临时调试', ok: true, message: null },
-    { id: 2, at: now, actor: 'user:bob', board: 'boardctrl-k3-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode within 30s' },
+    { id: 3, at: now, actor: 'user:alice', board: 'boardctrl-k1-deb1', kind: 'lock', detail: '临时调试', ok: true, message: null },
+    { id: 2, at: now, actor: 'user:bob', board: 'boardctrl-k1-cm1', kind: 'reset', detail: null, ok: false, message: 'no sign of download mode within 30s' },
     { id: 1, at: now, actor: 'boardd', board: null, kind: 'lab-sync', detail: '列出 5 块', ok: true, message: null },
   ],
-  leases: [{ id: 'l1', board: 'boardctrl-k3-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: now, status: 'held', endedAt: null, endReason: null }],
+  leases: [{ id: 'l1', board: 'boardctrl-k1-deb1', holder: 'user:alice', purpose: '临时调试', startedAt: now, status: 'held', endedAt: null, endReason: null }],
   scans: [],
 }
 
