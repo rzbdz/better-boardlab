@@ -15,7 +15,7 @@ export function SettingsTab(props: ViewProps) {
 
       <FrontendPicker />
 
-      <Section title="自带固件">
+      <Section title="固件">
         <p className="muted">boardd 只加载清单（发行版的 <code>firmware/</code>，或模块带来的）里列出、且 sha256 仍然一致的固件。扫描固定用 minor-board-info，只改内核时 <code>boardlab boot</code> 用 fsbl 和 u-boot-opensbi。</p>
         <ul className="images">
           {state.firmware.map(item => (
@@ -25,7 +25,7 @@ export function SettingsTab(props: ViewProps) {
             </li>
           ))}
         </ul>
-        {!state.firmware.length && <p className="warn">没有找到 firmware.json。</p>}
+        {!state.firmware.length && <p className="warn">这个 boardlab 没有可加载的固件。</p>}
       </Section>
     </div>
   )
