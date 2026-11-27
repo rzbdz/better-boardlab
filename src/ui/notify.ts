@@ -76,7 +76,20 @@ export function changes(before: Board[], after: Board[], you: string, watched: s
       notes.push({ topic: 'attention', board: board.name, title: `${board.name}：需要你操作`, body: ask })
     }
   }
+  for (const note of notes) note.body = oneLine(note.body)
   return notes
+}
+
+/**
+ * A note's words as an OS notification can carry them: one line, and at most a few hundred characters.
+ *
+ * What a backend asks a person to do is short, but a failure's message is the run's whole text, a console tail
+ * included. A notification is a nudge to look at the board's page; the page has all of it.
+ */
+export const NOTE_BODY = 240
+export function oneLine(text: string): string {
+  const flat = text.replace(/\s*\n\s*/g, ' ').replace(/ {2,}/g, ' ').trim()
+  return flat.length <= NOTE_BODY ? flat : `${flat.slice(0, NOTE_BODY).replace(/\s+\S*$/, '')}…`
 }
 
 /**
