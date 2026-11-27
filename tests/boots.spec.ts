@@ -75,4 +75,33 @@ describe('the boot marks addon', () => {
     expect(addon.lines).toHaveLength(0)
     term.dispose()
   })
+
+  it('counts a boot once when its screen is erased and redrawn, as a boot menu does', async () => {
+    const term = new Terminal({ cols: 80, rows: 5, scrollback: 500, allowProposedApi: true })
+    term.open(document.createElement('div'))
+    const addon = new BootMarksAddon()
+    term.loadAddon(addon)
+    addon.setMarks(MARKS)
+    // A boot whose banner scrolls up out of the screen, then a menu that clears the screen and redraws itself on the
+    // same rows (GRUB's countdown, EDK II's boot menu): the banner is still in the scrollback, the menu is on screen.
+    for (let i = 0; i < 8; i++) await write(term, `noise ${i}\r\n`)
+    await write(term, 'ROM v2.1\r\nU-Boot SPL 2022.10 (Nov 10 2026)\r\n')
+    for (let i = 0; i < 12; i++) await write(term, `kernel ${i}\r\n`)
+    for (let second = 5; second > 0; second--) await write(term, `\x1b[2J\x1b[01;01H\rGNU GRUB  version 2.14\r\n\r\n\r\n  Boot in ${second}s\r\n`)
+    await write(term, '\r\nLinux version 6.6.36 (b@h)\r\n')
+    // Each redraw erased the screen under the scan's own place, and the banner — still in the buffer — is one line
+    // each, not one more for every redraw.
+    expect(addon.lines.map(line => line.id)).toEqual(['rom', 'spl', 'linux'])
+    // What it says is what the buffer holds, each line once, however often the menu redrew and however often the scan
+    // had to start over: no line of the buffer is reported twice.
+    const reported = addon.lines.map(line => line.marker.line).filter(line => line >= 0)
+    expect(new Set(reported).size).toBe(reported.length)
+    // And it keeps finding lines after the menu: a boot line written at the very end is found there, once.
+    await write(term, '\r\nROM v2.1\r\n')
+    const last = term.buffer.active.baseY + term.buffer.active.cursorY - 1
+    expect(addon.lines.at(-1)).toMatchObject({ id: 'rom' })
+    expect(addon.lines.at(-1)!.marker.line).toBe(last)
+    expect(addon.lines.filter(line => line.id === 'rom')).toHaveLength(2)
+    term.dispose()
+  })
 })

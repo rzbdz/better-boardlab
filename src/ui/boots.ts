@@ -131,7 +131,14 @@ export class BootMarksAddon implements ITerminalAddon {
   onChange(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn) }
 
   /** Forget what was found (the console was cleared). */
-  reset(): void { for (const found of this.found.splice(0)) found.marker.dispose(); this.next?.dispose(); this.next = null; this.scan(); this.tell() }
+  reset(): void { this.forget(); this.scan(); this.tell() }
+
+  /** Drop the boot lines found so far, as a scan about to read the whole buffer again does. */
+  private forget(): void {
+    for (const found of this.found.splice(0)) found.marker.dispose()
+    this.next?.dispose()
+    this.next = null
+  }
 
   private tell() { for (const fn of this.listeners) fn() }
 
@@ -142,10 +149,14 @@ export class BootMarksAddon implements ITerminalAddon {
     const buffer = term.buffer.active
     if (buffer.type !== 'normal') return
     const end = buffer.baseY + buffer.cursorY
-    // From where the last scan stopped, wherever that line is now; from the top when it was trimmed away (or never).
-    const from = this.next && !this.next.isDisposed && this.next.line >= 0 ? Math.min(this.next.line, end) : 0
-    let changed = false
-    for (let y = from; y < end; y++) {
+    // Where the last scan stopped, wherever that line is now. A marker whose line is gone says nothing about where
+    // to go on: the screen was erased under it (a boot menu redrawing itself, a shell clearing its screen), or the
+    // scrollback trimmed past it. Then the whole buffer is read again — and what was found before is dropped first,
+    // because reading from the top while keeping the old lines would count each of them once more for every redraw.
+    const anchor = this.next && !this.next.isDisposed && this.next.line >= 0 ? Math.min(this.next.line, end) : null
+    if (anchor === null) this.forget()
+    let changed = anchor === null
+    for (let y = anchor ?? 0; y < end; y++) {
       const row = buffer.getLine(y)
       // A wrapped row continues the line above it: matched with it.
       if (!row || row.isWrapped) continue
