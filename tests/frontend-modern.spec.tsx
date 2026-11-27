@@ -834,11 +834,12 @@ describe('Modern frontend', () => {
         return input!
       }, wait)
       expect(field.value).toBe('k1_deb1')
-      const list = document.getElementById(field.getAttribute('list')!)!
-      expect([...list.querySelectorAll('option')].map(option => option.value)).toEqual(['k1_deb1', 'k1-x_pico'])
+      const list = within(field.closest('.model-edit') as HTMLElement).getByRole('combobox', { name: '选择历史板型' })
+      expect([...list.querySelectorAll('option')].map(option => option.value)).toEqual(['', 'k1_deb1', 'k1-x_pico'])
 
       const editor = field.closest('.model-edit') as HTMLElement
-      fireEvent.change(field, { target: { value: 'k1-x_pico' } })
+      fireEvent.change(list, { target: { value: 'k1-x_pico' } })
+      expect(field.value).toBe('k1-x_pico')
       fireEvent.click(await button('保存', editor))
       await waitFor(() => expect(calls.find(c => c.method === 'POST' && c.path === 'api/board')?.body).toEqual({ name: 'boardctrl-k1-deb1', product: 'k1-x_pico' }), wait)
 

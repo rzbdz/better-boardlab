@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import type { Board, Chip } from 'boardlab-core/shared/types.ts'
 import { api, type PageState } from '../../../src/ui/api.ts'
+import { ModelPicker } from '../../../src/ui/model-picker.tsx'
 import { lastRun } from '../../../src/ui/format.ts'
 import { MODE, Pill, Tabs, shortLink, time, who, type Prompt, type Run, type Tab } from '../kit.tsx'
 import { DiscoverBoardDialog, LabPorts } from './labs.tsx'
@@ -61,6 +62,7 @@ function BoardCard(props: { board: Board, state: PageState, busy: boolean, onPro
         {!board.lease && board.lab?.heldBy ? <Pill tone="warn">实验室占用</Pill> : !board.lease ? <Pill tone="ok">空闲</Pill> : mine ? <Pill tone="mine">你在使用</Pill> : <Pill tone="warn">使用中</Pill>}
       </header>
 
+      {!vacant && <ModelPicker name={board.name} product={board.product} />}
       <ul className="chips">
         {board.chips.map(chip => <ChipRow key={chip.die} chip={chip} many={board.chips.length > 1} lab={!!board.lab} />)}
         {!board.chips.length && <li className="muted">没有登记串口</li>}
