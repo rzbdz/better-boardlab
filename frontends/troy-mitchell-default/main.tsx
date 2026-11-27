@@ -6,7 +6,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, identity, isCancelled, type PageState } from '../../src/ui/api.ts'
-import { restoreWarning } from '../../src/ui/notify.ts'
+import { oneLine, restoreWarning } from '../../src/ui/notify.ts'
+import { openAsks, resolveAsk, type Ask } from '../../src/ui/asks.ts'
+import { forgetBoard, lastBoard, visitBoard } from '../../src/ui/nav.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
 import { marketUis } from '../../src/ui/market-ui.ts'
@@ -20,6 +22,9 @@ import { HistoryTab } from './views/history.tsx'
 import { RelayDialog } from './views/relay.tsx'
 import { canScan, ScanTab } from './views/scan.tsx'
 import { SettingsTab } from './views/settings.tsx'
+
+/** The board this browser last had open: what the 板子 tab returns to from another tab (src/ui/nav.ts). */
+const NAV_KEY = 'boardlab.troy.board'
 
 // ---------- shell ----------
 
@@ -129,13 +134,34 @@ function App() {
 
   const showError = useCallback((text: string) => show(text, true), [show])
   const closeConsole = useCallback(() => setConsoleBoard(null), [])
+  // This frontend's board detail is its console: what the 板子 tab returns to from another tab (src/ui/nav.ts).
+  useEffect(() => { if (consoleBoard) visitBoard(NAV_KEY, consoleBoard) }, [consoleBoard])
+  // 板子 from another tab goes back to the board last looked at; on the boards tab (or its console) it goes to the overview.
+  const onBoardsTab = () => {
+    // A board's page here is the boards tab with its console open: the tab trades the overview and that board.
+    if (tab !== 'boards') { setTab('boards'); openLastBoard(); return }
+    if (consoleBoard) { setConsoleBoard(null); return }
+    openLastBoard()
+  }
+  const openLastBoard = () => {
+    const name = lastBoard(NAV_KEY)
+    if (!name || !state?.boards.some(board => board.name === name)) { if (name) forgetBoard(NAV_KEY, name); return }
+    setConsoleBoard(name)
+  }
+  const [answering, setAnswering] = useState<Set<number>>(() => new Set())
+  const answerAsk = async (ask: Ask) => {
+    setAnswering(was => new Set([...was, ask.id]))
+    try { show((await resolveAsk(ask.id, 'done')).message) } catch (error) { show((error as Error).message, true) }
+    finally { setAnswering(was => { const next = new Set(was); next.delete(ask.id); return next }); void refresh() }
+  }
+  const asks = openAsks(state)
   const current = state?.boards.find(board => board.name === consoleBoard)
   const consoleOpen = !!current
   return (
     <div className="app">
       <header className="top">
         <div className="brand"><span className="logo" aria-hidden="true" /><h1>开发板管理平台</h1></div>
-        <Tabs label="页面" className="nav" value={tab} onChange={setTab} items={[...TABS, ...(state ? viewsFor(state, 'page').map(view => [`p/${view.id}`, view.title ?? view.id] as [Tab, string]) : [])]
+        <Tabs label="页面" className="nav" value={tab} onChange={key => key === 'boards' ? onBoardsTab() : setTab(key)} items={[...TABS, ...(state ? viewsFor(state, 'page').map(view => [`p/${view.id}`, view.title ?? view.id] as [Tab, string]) : [])]
           .filter(([key]) => key !== 'scan' || !state || canScan({ state })).map(([key, label]) => ({
           key, label: <>{label}{key === 'scan' && state?.proposals.length ? <span className="count">{state.proposals.length}</span> : null}</>,
         }))} />
@@ -161,6 +187,16 @@ function App() {
         </div>
       </main>
       {state && current && <Console key={current.name} board={current} state={state} onClose={closeConsole} onError={showError} onSwitch={setConsoleBoard} />}
+      {state && asks && asks.open > 0 && tab !== 'p/human' && <div className="attention-panel" role="alertdialog" aria-label="人工请求">
+        {asks.items.slice(0, 2).map(ask => <div key={ask.id} className="attention-item">
+          <div className="grow"><b>#{ask.id} {ask.title}</b>{ask.body && <p>{oneLine(ask.body)}</p>}</div>
+          <div className="actions">
+            <button className="primary" disabled={answering.has(ask.id)} onClick={() => void answerAsk(ask)}>我做好了</button>
+            <button onClick={() => setTab('p/human')}>详情</button>
+          </div>
+        </div>)}
+        {asks.open > 2 && <p className="muted">共 {asks.open} 件待处理，其余的到「人工请求」里看。</p>}
+      </div>}
       {state && <AttentionPanel state={state} onRun={run} />}
       {prompt?.kind === 'relay' && <RelayDialog board={prompt.board} onClose={() => setPrompt(null)} onRun={run} />}
       {prompt && prompt.kind !== 'relay' && <PromptDialog prompt={prompt} onClose={() => setPrompt(null)} onRun={run} onIdentity={() => void refresh()} />}

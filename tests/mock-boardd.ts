@@ -60,6 +60,8 @@ export function mockState(you = 'user:alice'): State {
       result: [{ slot: 1, board: 'desk-k1', chips: [{ die: 'die0', serialPath: '/dev/serial/by-path/pci-0000-usb-0:1.2:1.0-port0', downloadUsbPath: '1-1.1', usbId: '361c:1001', product: 'k1-x_deb1', pending: false }], flags: [] },
         { slot: 2, board: null, chips: [{ die: 'die0', serialPath: '/dev/serial/by-path/pci-0000-usb-0:1.3:1.0-port0', downloadUsbPath: '1-1.2', usbId: '361c:1001', product: 'k1-x_deb1', pending: true }], flags: [] }] },
     ha: { enabled: true, url: 'http://homeassistant.local:8123', hasToken: true, verifiedAt: now, verifyOk: true, verifyMessage: '控制器 1 个槽位' },
+    // An agent's ask to a person at the bench, as the human module carries it (the title is made up for the test).
+    human: { open: 1, items: [{ id: 7, at: now, actor: 'claude:bench-test', kind: 'task', title: '把测试板接到端口 2', body: '接好后板上的灯会常亮。', status: 'open', subject: null, source: 'ask', resolution: null }] },
   } as unknown as State
 }
 
