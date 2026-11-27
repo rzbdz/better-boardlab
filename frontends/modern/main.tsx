@@ -3,13 +3,15 @@
  * a board, discover, history, settings) by the address's hash. boardd's events keep the state current; changes worth
  * telling go to the operating system when allowed, else to the page's toasts and the bell's list.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, onFetched, type PageState } from '../../src/ui/api.ts'
 import { CORE_EVENTS, events } from '../../src/ui/events.ts'
 import type { ModuleUi } from '../../src/ui/contract.ts'
-import { changes, onPrefs, prefs, restoreWarning, show, type Note, type Topic } from '../../src/ui/notify.ts'
+import { changes, oneLine, onPrefs, prefs, restoreWarning, show, type Note, type Topic } from '../../src/ui/notify.ts'
 import { alerts as readAlerts, isTopic, type Alert } from '../../src/ui/alerts.ts'
+import { openAsks, resolveAsk } from '../../src/ui/asks.ts'
+import { forgetBoard, lastBoard, visitBoard } from '../../src/ui/nav.ts'
 import { setActionState, useBoardActions } from './actions.tsx'
 import { hhmm, holder, Icon, model, setBoards, setRefresher, UIProvider, upper, useUI, where } from './kit.tsx'
 import { marketUis } from '../../src/ui/market-ui.ts'
@@ -24,6 +26,8 @@ import type { Board } from 'boardlab-core/shared/types.ts'
 const THEME_KEY = 'boardlab.modern.theme'
 /** The newest bus alert this browser has opened the bell on: a count, not the alerts themselves, so it stays small. */
 const BUS_SEEN = 'boardlab.modern.bus-seen'
+/** The board this browser last had open: what the 板子 tab returns to (src/ui/nav.ts). */
+const NAV_KEY = 'boardlab.modern.board'
 const route = () => { const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?'); const [page = 'boards', arg = ''] = path!.split('/'); return { page: page || 'boards', arg: decodeURIComponent(arg), query: new URLSearchParams(query) } }
 const go = (hash: string) => { location.hash = hash }
 
@@ -216,9 +220,29 @@ function Shell() {
   }
 
   const page = where_.page
+  // A board's page is what the next press of the 板子 tab returns to: recorded as it opens, whichever way it was reached.
+  useEffect(() => { if (page === 'board' && where_.arg) visitBoard(NAV_KEY, where_.arg) }, [page, where_.arg])
+  // Pressing 板子 leaves the address alone when it would not change (a hash set to itself fires nothing), so the
+  // decision is made here: from a board, the overview; anywhere else, the board last looked at, when it still exists.
+  const onBoards = (event: ReactMouseEvent) => {
+    if (page === 'board') { event.preventDefault(); go('#/'); return }
+    const name = lastBoard(NAV_KEY)
+    if (!name) return
+    event.preventDefault()
+    if (!state?.boards.some(b => b.name === name)) { forgetBoard(NAV_KEY, name); go('#/'); return }
+    go(`#/board/${encodeURIComponent(name)}`)
+  }
   // The bell counts what was raised since this person last looked, page notices included.
   const unread = newAlerts + notes.filter(n => !n.read).length
   const attn = state?.boards.filter(b => b.lab?.attention) ?? []
+  const asks = openAsks(state)
+  const [asking, setAsking] = useState<Set<number>>(() => new Set())
+  const answerAsk = async (id: number, status: 'done' | 'canceled') => {
+    setAsking(was => new Set([...was, id]))
+    try { ui.toast((await resolveAsk(id, status)).message) }
+    catch (error) { ui.fail('没能告诉对方', error) }
+    finally { setAsking(was => { const next = new Set(was); next.delete(id); return next }); void refresh() }
+  }
   for (const b of attn) if (!seen.current.has(b.name)) setTimeout(() => seen.current.add(b.name), 400)
   // Modules' own pages (the terminal, say) get a tab each, before settings.
   const pages = state ? viewsFor(state, 'page') : []
@@ -230,7 +254,7 @@ function Shell() {
   return <>
     <header className={`top${page === 'board' || page === 'p' ? ' wide' : ''}`}><div className="in">
       <a className="brand" href="#/">Boardlab</a>
-      <nav className="nav">{nav.map(([k, l, c]) => <a key={k} href={`#/${k}`} className={page === k || `${page}/${where_.arg}` === k || (k === 'boards' && page === 'board') ? 'on' : ''}>{l}{c ? <span className="cnt">{c}</span> : null}</a>)}</nav>
+      <nav className="nav">{nav.map(([k, l, c]) => <a key={k} href={`#/${k}`} onClick={k === 'boards' ? onBoards : undefined} className={page === k || `${page}/${where_.arg}` === k || (k === 'boards' && page === 'board') ? 'on' : ''}>{l}{c ? <span className="cnt">{c}</span> : null}</a>)}</nav>
       <div className="right">
         {!connected && <span className="conn"><Icon name="warn" />与 boardd 断开，重试中…</span>}
         <button className="bell" aria-label="通知" onClick={openNotes}><Icon name="bell" />{unread ? <b>{unread}</b> : null}</button>
@@ -240,9 +264,12 @@ function Shell() {
     {state && restoreWarning(state.restored) && <div className="banner"><div className="b restored"><Icon name="warn" /><div className="msg"><b>{restoreWarning(state.restored)!.title}</b> <span className="sub">{restoreWarning(state.restored)!.body}</span></div>
       <span className="acts"><button className="pill sm dark" onClick={() => void api.acknowledgeRestore().then(() => refresh()).catch(e => ui.fail('确认失败', e))}>知道了</button></span></div></div>}
     {state && attn.length > 0 && page !== 'board' && <div className="banner">{attn.map(b => <Banner key={b.name} board={b} you={state.you} fresh={!seen.current.has(b.name)} />)}</div>}
-    {state && ((state as unknown as { human?: { open: number, items: Array<{ title: string }> } }).human?.open ?? 0) > 0 && !(page === 'p' && where_.arg === 'human') && (
-      <div className="banner"><div className="b"><Icon name="hand" /><div className="msg"><b>人工操作请求</b> {(state as unknown as { human?: { items: Array<{ title: string }> } }).human?.items[0]?.title} <span className="sub">· 共 {(state as unknown as { human?: { open: number } }).human!.open} 件待处理</span></div>
-        <span className="acts"><button className="pill sm dark" onClick={() => go('#/p/human')}>去看看</button></span></div></div>)}
+    {asks && asks.open > 0 && !(page === 'p' && where_.arg === 'human') && <div className="banner">{asks.items.slice(0, 2).map(ask => (
+      <div key={ask.id} className="b">
+        <Icon name="hand" /><div className="msg"><b>{ask.title}</b>{ask.body ? ` ${oneLine(ask.body)}` : ''}{asks.open > 2 && ask === asks.items[0] ? <span className="sub"> · 共 {asks.open} 件待处理</span> : null}</div>
+        <span className="acts"><button className="pill sm" onClick={() => go('#/p/human')}>详情</button>
+          <button className="pill sm dark" disabled={asking.has(ask.id)} onClick={() => void answerAsk(ask.id, 'done')}>{asking.has(ask.id) ? <span className="spin" /> : null}我做好了</button></span>
+      </div>))}</div>}
     {state && (state.yields ?? []).length > 0 && <div className="banner">{state.yields.map(y => (
       <div key={y.id} className="b"><Icon name="hand" /><div className="msg"><b>{holder(y.holder).name}</b> 想用 <b>{upper(y.board)}</b>（{y.purpose}）· 拿锁的是你</div>
         <span className="acts"><button className="pill sm" onClick={() => void api.answerYield(y.board, 'deny').then(() => refresh()).catch(e => ui.fail('回答失败', e))}>继续用</button>

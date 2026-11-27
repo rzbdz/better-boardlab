@@ -953,6 +953,45 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(reads()).toBeGreaterThan(before), wait)
   })
 
+  it('answers an agent\'s ask in the banner, without going to the module\'s page', async () => {
+    go('#/')
+    const banner = await waitFor(() => {
+      const el = [...document.querySelectorAll('.banner')].find(item => item.textContent?.includes('把测试板接到端口 2'))
+      if (!el) throw new Error('no ask banner')
+      return el as HTMLElement
+    }, wait)
+    expect(banner.textContent).toContain('接好后板上的灯会常亮')
+    fireEvent.click(await button('我做好了', banner))
+    await waitFor(() => expect(calls.some(c => c.method === 'POST' && c.path === 'api/human/resolve' && (c.body as { id: number }).id === 7)).toBe(true), wait)
+    await waitFor(() => expect([...document.querySelectorAll('.banner')].some(item => item.textContent?.includes('把测试板接到端口 2'))).toBe(false), wait)
+  })
+
+  it('trades the overview and the last board from the 板子 tab, and returns to that board from another tab', async () => {
+    localStorage.removeItem('boardlab.modern.board')
+    const boardsTab = () => {
+      const link = [...document.querySelectorAll('nav.nav a')].find(el => (el.textContent ?? '').trim() === '板子') as HTMLAnchorElement
+      fireEvent.click(link)
+      // The browser fires this after the address changes; the test says so itself.
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    }
+    const open = () => document.querySelector('.detail .bname')?.textContent ?? null
+    go('#/board/boardctrl-k1-deb1')
+    await waitFor(() => expect(open()).toBe('BOARDCTRL-K1-DEB1'), wait)
+    // A board's page: the overview. One press, one assertion: pressing again inside waitFor would toggle back.
+    boardsTab()
+    await waitFor(() => expect(open()).toBeNull(), wait)
+    expect(location.hash).toBe('#/')
+    // The overview: the board last looked at.
+    boardsTab()
+    await waitFor(() => expect(open()).toBe('BOARDCTRL-K1-DEB1'), wait)
+    // Another tab: straight to it.
+    go('#/settings')
+    await waitFor(() => expect(open()).toBeNull(), wait)
+    boardsTab()
+    await waitFor(() => expect(open()).toBe('BOARDCTRL-K1-DEB1'), wait)
+    go('#/')
+  })
+
   it('says a bus alert as it is raised, and keeps it in the bell', async () => {
     const source = await stateStream()
     source.opened()

@@ -188,6 +188,8 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     }
     return reply({ lines: [text(0), text(1)], matched: 2, truncated: false, source: 'backend' })
   }
+  // A person saying an agent's ask is done: the state stops carrying it as open (the real module answers the asker).
+  if (path === '/api/human/resolve' && method === 'POST') { (state as unknown as { human?: unknown }).human = { open: 0, items: [] }; return reply({ message: `#${(body as { id: number }).id} 做好了` }) }
   // A person acknowledging boardd's database restore: the state stops reporting it.
   if (path === '/api/database/acknowledge' && method === 'POST') { const acknowledged = state.restored ?? null; state.restored = null; return reply({ acknowledged }) }
   // The notification bus: what boardd recorded, and the channels it pushes to. One failure and one aging match, so a
