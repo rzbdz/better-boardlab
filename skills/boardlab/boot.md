@@ -48,6 +48,11 @@ FIT_HOST=<构建主机> <站点说的地方>/make-its.sh <内核的 O= 目录> <
 
 boardd 管下载口，不要直接跑 `fastboot`，也不要跑别的加载脚本。
 
+`--sdk` 的内存启动是**纯内存**的：板卡主机按 SDK 的配方把每个阶段 `fastboot stage` 进 RAM 再 `continue`，板子里存的
+固件（NOR/UFS 上的 ESOS、OpenSBI、U-Boot 及其环境）一个都不读。改了这些组件的源码就重新构建再启动，**不用先烧**；
+但配方 stage 的是**打包好的产物**，一个产物可能嵌着别的组件（`make esos` 之后还得重新打包 U-Boot+OpenSBI 的 FIT
+才会生效）——哪个产物、哪个构建目标，在这个 SDK 自己的 skill 里（`boardlab guidance --sdk <sdk>`）。
+
 1. SDK 构建产物不要拷回 workstation 再传：用上面的 `--sdk`，由板端主机按配方 scp 拉取。只有确实在本机生成、SDK 配方拿不到的自定义文件，才让 CLI 用 scp 送过去。此时把文件放在本机一个新目录，算 sha256；boardd 自带的固件不用拷，直接写名字，boardd 自己核对 sha256。
 2. 拿锁，让板子进下载模式，确认这颗芯片的下载口在：
    ```sh

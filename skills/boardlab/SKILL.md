@@ -154,6 +154,8 @@ boardlab unlock boardctrl-board-1
 ```
 
 - `boardlab show <board> --json` 里 `lab.sdks` 是这块板能跑的 SDK；不在里面的不要硬启动。
+- **`boot --sdk` 是纯内存启动：板卡主机按 SDK 的配方，把每个阶段用 `fastboot stage` 送进 RAM，再用 `fastboot continue` 启动；NOR/UFS 上存的那些固件（有的板子上是 ESOS、OpenSBI、U-Boot 及其环境）一个都不读，也不受影响。** 所以改了其中任何一个组件的源码，重新构建后用同样的命令再 RAM 启动就能验证，**不需要先烧 NOR**；只有 `flash --sdk` 才写存储。
+- 但“改了源码”和“RAM 启动的是改后的东西”之间隔着**构建产物的打包**：配方 stage 的是某个产物文件（例如 `u-boot-opensbi.itb`），它可能在打包时把别的组件嵌进去（K3 的 ESOS 就是嵌在 `u-boot-opensbi.itb` 里的）。改了源码只重跑它自己的构建目标，打包那个产物没重跑，启动的仍是旧代码。**每个 SDK 的哪个阶段由哪个产物、哪个构建目标重新打包，写在它自己的 skill 里**：`boardlab guidance --sdk <sdk>`，改固件类组件（U-Boot、OpenSBI、ESOS、FSBL）之前先看一眼。
 - SDK 配方拿不到的本机自定义文件（例如自己打的 FIT）才让 CLI 用 scp 送过去：`boardlab boot <board> fsbl u-boot-opensbi ./Image.itb`。URL 或板端已有路径用 `boardlab boot <board> https://…/Image.itb`、`boardlab boot <board> host:/绝对路径`，由板端自己取并计算 sha256，不上传。网页上传是给人用的（分片传，boardd 自己算 sha256）；CLI 一律用 scp。
 - 只在调 U-Boot、edk2 或它们加载的内核时：`boardlab boot <board> --sdk <sdk> --break <名字>` 停在 recipe 的 `breaker:` 那一步（常见 `uboot`、`edk2`；页面启动对话框的「停在哪」列出的就是可用的名字，没有列出来的不要猜）。edk2 的流程停在 UEFI Shell / ACPI 阶段，U-Boot 的停在自己的命令行，之后在串口里自己操作。
 - 启动或刷机卡住了用 `boardlab cancel <board>`：正在跑的这一步会被停下（连同它起的进程），锁还在你手里。被取消的命令以**退出码 4** 结束（3 是被占用或连不上，0 才是成功）：不要把 4 当成功，也不要自动重跑。
