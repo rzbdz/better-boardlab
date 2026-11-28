@@ -36,10 +36,38 @@ function PurposeDialog({ board, queue, close, onDone }: { board: Board, queue: b
  * of a market by its place there. Only the
  * chosen partitions are written when some are given, and the board is reset after when asked.
  */
-export interface FlashPackage { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], reset?: boolean }
+export interface FlashPackage { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], layout?: string, reset?: boolean }
 
 /** boardd's operations (`Board.busy.kind`) as the buttons that start them. */
 const SERVER: Record<string, string> = { reset: 'reset', fastboot: 'fastboot', boot: 'boot', stage: 'boot', refresh: 'refresh', remove: 'remove', discover: 'discover', rebuild: 'rebuild', lock: 'lock' }
+
+/**
+ * A person stepping in on a board someone else holds: the panel's operations are theirs for one action, and then boardd
+ * gives the board back to nobody. Whoever holds it loses it — a run of theirs stops — so the dialog says what it costs
+ * in the holder's own terms and makes the person confirm it twice: the danger button, then the same warning again.
+ */
+function ForceTake({ board, close, onTake }: { board: Board, close: () => void, onTake: () => void }) {
+  const [sure, setSure] = useState(false)
+  const who = <Who id={board.lease?.holder ?? ''} you={current.you} full />
+  return (
+    <div className="force-take">
+      <h2 className="danger-t"><Icon name="warn" />强制解锁？</h2>
+      <div className={`force-warn${sure ? ' sure' : ''}`}>
+        <p><b>{upper(board.name)}</b> 现在由 {who} 使用，正在做：{board.lease?.purpose || '（没写）'}。</p>
+        <p>强制解锁会<b>马上夺走它的锁</b>：它正在做的操作会停下，它会在命令行里看到锁被拿走。<b>后果由你负责。</b></p>
+        <p>解开后你能操作这块板子的整个面板——可以复位、刷机、往串口打字——<b>只限一个动作</b>；这个动作一结束，锁自动放回空着，谁也不持有。</p>
+      </div>
+      {!sure
+        ? <div className="foot"><button type="button" className="pill" onClick={close}>取消</button>
+            <button type="button" className="pill danger" onClick={() => setSure(true)}><Icon name="warn" />强制解锁</button></div>
+        : <>
+            <p className="force-again"><Icon name="warn" /><b>真的确定？</b>按下去，{who} 现在做的事就被打断了，没有撤销。</p>
+            <div className="foot"><button type="button" className="pill" onClick={() => { setSure(false); close() }}>算了</button>
+              <button type="button" className="pill danger" onClick={() => { close(); onTake() }}><Icon name="warn" />确定，夺走它的锁</button></div>
+          </>}
+    </div>
+  )
+}
 
 export function useBoardActions(board: Board) {
   const ui = useUI()
@@ -76,6 +104,13 @@ export function useBoardActions(board: Board) {
     unlock: () => run('unlock', '释放', () => api.unlock(board.name), board.waiters[0] ? `释放了 ${name}，锁交给了 ${holder(board.waiters[0].holder).name}` : `释放了 ${name}`),
     steal: () => ask(`抢 ${name} 的锁`, <>现在由 <Who id={board.lease?.holder ?? ''} you={current.you} full /> 使用（{board.lease?.purpose}）。对方会收到通知，Claude 会在命令行里看到理由。只在对方确实不用了的时候抢。</>,
       '抢锁', reason => void run('steal', '抢锁', () => api.steal(board.name, reason), `抢到了 ${name}`), { danger: true, reason: '理由（对方会看到）' }),
+    forceTake: () => ui.layer(close => <ForceTake board={board} close={close} onTake={() => {
+      setAsked(board.name, 'force-take', true)
+      api.forceTake(board.name)
+        .then(() => ui.toast(`${name} 是你的了`, '现在可以操作面板。这一动作结束，锁自动放回空着。'))
+        .catch(error => ui.fail(`没能接管 ${name}`, error))
+        .finally(() => { void refreshNow().catch(() => {}); setAsked(board.name, 'force-take', false) })
+    }} />),
     reset: () => ask('复位', <>复位 <b>{name}</b>，板子会立即重启。{mb && !mb.available && <><br /><span className="warn-t">复位后它会停在下载模式：{mb.why}</span></>}</>, '复位', () => void run('reset', '复位', () => api.reset(board.name))),
     fastboot: () => ask('进下载模式', <>让 <b>{name}</b> 重启进 boot ROM，停在那里等下载文件。</>, '进下载模式', () => void run('fastboot', '进下载模式', () => api.fastboot(board.name))),
     // The lab's id for this ask goes with it: a click after it already saw the board arrive is answered, not an error.
@@ -84,7 +119,7 @@ export function useBoardActions(board: Board) {
     cancel: () => run('cancel', '取消', () => api.cancel(board.name), `${name} 正在停下`),
     flashPackage: (pkg: FlashPackage) => run('boot', '刷机', () => api.flashPackage(board.name, {
       ...(pkg.image ? { image: pkg.image } : pkg.sha256 ? { sha256: pkg.sha256 } : { url: pkg.url }), flasher: pkg.flasher || undefined,
-      ...(pkg.partitions?.length ? { partitions: pkg.partitions } : {}), ...(pkg.reset ? { reset: true } : {}),
+      ...(pkg.partitions?.length ? { partitions: pkg.partitions } : {}), ...(pkg.layout ? { layout: pkg.layout } : {}), ...(pkg.reset ? { reset: true } : {}),
     })),
     refresh: () => ask(`重新读取 ${name}`, '复位板子，从 EEPROM 读型号；换了板子时用。', '读取', () => void run('refresh', '重新读取', () => api.refresh(board.name, {}))),
     remove: () => ask(`移除 ${name}`, '只删登记，不碰板子。以后可以重新发现。', '移除', () => void run('remove', '移除', () => api.removeBoard(board.name), `移除了 ${name}`), { danger: true }),

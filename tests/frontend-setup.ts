@@ -215,6 +215,18 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     board.lease = { id: 'new', board: board.name, holder: state.you, purpose: body.purpose, startedAt: state.now, status: 'held', endedAt: null, endReason: null }
     return reply({ lease: board.lease, token: 't', gateToken: null, queued: null })
   }
+  // A person forces a board into their hands: boardd takes it from its holder for one operation and says so.
+  if (path === '/api/force-take' && method === 'POST') {
+    const board = state.boards.find(b => b.name === body.board)!
+    board.lease = { id: 'forced', board: board.name, holder: state.you, purpose: '强制接管', startedAt: state.now, status: 'held', endedAt: null, endReason: null }
+    return reply(board.lease)
+  }
+  // An operation that ends gives a forcibly taken board back to nobody, as boardd does.
+  if (path === '/api/reset' && method === 'POST') {
+    const board = state.boards.find(b => b.name === body.board)!
+    if (board.lease?.purpose === '强制接管') board.lease = null
+    return reply({ ok: true })
+  }
   return reply({ ok: true })
 }) as typeof fetch
 

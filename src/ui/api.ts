@@ -145,6 +145,8 @@ export const api = {
   unqueue: (board: string) => call('POST', 'api/unqueue', { board }),
   unlock: (board: string) => call('POST', 'api/unlock', { board }),
   steal: (board: string, reason: string) => call<LockResult>('POST', 'api/steal', { board, reason }),
+  /** A person takes a board someone else holds, for one operation: boardd gives it back to nobody once that ends. */
+  forceTake: (board: string) => call<Lease>('POST', 'api/force-take', { board }),
   reset: (board: string) => call('POST', 'api/reset', { board }),
   channels: (board: string) => call<BoardChannels>('GET', `api/relay?board=${encodeURIComponent(board)}`),
   setChannel: (board: string, channel: string, action: string, ms: number | null) => call<{ message: string }>('POST', 'api/relay', { board, channel, action, ms: ms ?? undefined }),

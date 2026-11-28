@@ -101,6 +101,53 @@ describe('Modern frontend', () => {
     await waitFor(() => expect(calls.find(c => c.path === 'api/lock' && (c.body as { board: string }).board === 'boardctrl-k1-musecard')?.body).toEqual({ board: 'boardctrl-k1-musecard', purpose: '临时开发任务' }), wait)
   })
 
+  it('lets a person force a board away from the agent holding it, for one action, behind a red double warning', async () => {
+    const dialog = () => document.querySelector('.force-take') as HTMLElement
+    const deb = state.boards.find(b => b.name === 'boardctrl-k1-deb1')!
+    const was = deb.lease
+    // The page read the state when it was mounted: a new holder is told to it as an event, and the state it re-reads
+    // on that says the same, so the board is another agent's before the test's first check.
+    deb.lease = { ...was!, holder: 'codex:fix-usb', purpose: '跑一遍启动回归' }
+    const source = await stateStream()
+    source.opened()
+    source.emit('lease-granted', { board: deb.name, holder: 'codex:fix-usb' })
+    go('#/board/boardctrl-k1-deb1')
+    await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K1-DEB1'), wait)
+    // The page re-read the state the event sent it to after, which has the agent holding it.
+    await waitFor(() => expect(document.querySelector('.tilebox .acts')?.textContent).toContain('抢锁'), wait)
+    // The red button sits right of 抢锁, and says what the warning dialog will say again.
+    const acts = document.querySelector('.tilebox .acts') as HTMLElement
+    expect([...acts.querySelectorAll('button')].map(b => b.textContent?.replace(/\s/g, ''))).toEqual(['排队', '抢锁…', '强制解锁'])
+    fireEvent.click(await button('强制解锁', acts))
+    await waitFor(() => expect(dialog()).toBeTruthy(), wait)
+    const text = dialog().textContent!
+    expect(text).toContain('强制解锁？')
+    expect(text).toContain('fix-usb')
+    expect(text).toContain('跑一遍启动回归')
+    expect(text).toContain('后果由你负责')
+    expect(text).toContain('只限一个动作')
+    // Nothing is taken by the first press: the same warning again, and only then.
+    fireEvent.click(await button('强制解锁', dialog()))
+    expect(dialog().textContent).toContain('真的确定？')
+    expect(calls.some(c => c.path === 'api/force-take')).toBe(false)
+    fireEvent.click(await button('确定，夺走它的锁', dialog()))
+    await waitFor(() => expect(calls.find(c => c.path === 'api/force-take')?.body).toEqual({ board: 'boardctrl-k1-deb1' }), wait)
+    // The board is the person's, said to be a takeover, which ends by itself.
+    await waitFor(() => expect(document.querySelector('.tilebox.dark')?.textContent).toContain('强制接管中'), wait)
+    expect(document.querySelector('.tilebox.dark')?.textContent).toContain('做完这一动作自动放回空着')
+    // One action: the reset ends the takeover, and the board is nobody's again.
+    fireEvent.click(await button(/^复位/, document.querySelector('.controls') as HTMLElement))
+    fireEvent.click(await button('复位', await screen.findByRole('dialog', {}, wait)))
+    await waitFor(() => expect(calls.some(c => c.path === 'api/reset' && (c.body as { board: string }).board === 'boardctrl-k1-deb1')).toBe(true), wait)
+    await waitFor(() => expect(state.boards.find(b => b.name === 'boardctrl-k1-deb1')!.lease).toBeNull(), wait)
+    source.emit('changed', { board: deb.name })
+    await waitFor(() => expect(document.querySelector('.tilebox.dark')).toBeNull(), wait)
+    // Leave the board as the other tests expect it: held by the person, as the mock has it.
+    deb.lease = was
+    source.emit('lease-granted', { board: deb.name, holder: was!.holder })
+    go('#/')
+  })
+
   it('shows what boardd is doing to a board, and holds back what would overlap it', async () => {
     const slot = await card('boardctrl-host-a-s7')
     expect(slot.textContent).toContain('发现中')

@@ -103,6 +103,8 @@ export function Ticking({ fn }: { fn: () => string }) { useTick(); return <>{fn(
 export type Lock = 'free' | 'mine' | 'busy' | 'lab' | 'empty'
 export interface Model {
   lock: Lock, key: Lock | 'attn' | 'gone', word: string, tone: '' | 'ok' | 'warn' | 'bad' | 'yours', mine: boolean
+  /** A person forced this board into their hands for one action: the board is theirs until that action ends. */
+  forced: boolean
   holder: string | null, since: string | null, purpose: string | null, queued: number, canConfirm: boolean
   flags: { attn: string | null, gone: boolean, busy: Busy | null, progress: string | null, booting: string | null, pct: number | null, offline: boolean, error: string | null }
 }
@@ -112,6 +114,8 @@ export interface Model {
  */
 export function model(b: Board, you: string): Model {
   const lab = b.lab, l = b.lease, mine = !!l && l.holder === you, q = b.waiters.findIndex(w => w.holder === you)
+  // A forced takeover reads as the person's own lock (the board is theirs), but says so and ends by itself.
+  const forced = mine && l?.purpose === FORCE_TAKEN
   const lock: Lock = lab?.empty ? 'empty' : mine ? 'mine' : l ? 'busy' : lab?.heldBy ? 'lab' : 'free'
   // What boardd is doing to the board (its own operation, or a lab's job) is one in-between state with its latest line.
   const busy = b.busy ?? null
@@ -124,10 +128,10 @@ export function model(b: Board, you: string): Model {
     offline: !lab?.empty && !lab?.slotGone && b.chips.length > 0 && !b.chips.some(c => c.online), error: lab?.leaseError ?? null,
   }
   const key = lock === 'empty' ? 'empty' : flags.attn ? 'attn' : flags.gone ? 'gone' : lock
-  const word = flags.attn ? '等人操作' : busy ? busy.label : lock === 'empty' ? '空槽位' : flags.gone ? '串口离线' : flags.progress ? (mine ? '运行中' : '忙碌中')
+  const word = flags.attn ? '等人操作' : forced ? '强制接管中' : busy ? busy.label : lock === 'empty' ? '空槽位' : flags.gone ? '串口离线' : flags.progress ? (mine ? '运行中' : '忙碌中')
     : b.mode === 'resetting' ? '复位中' : { mine: '你在用', busy: '使用中', lab: '实验室占用', free: '空闲' }[lock]
   const tone = flags.attn ? 'warn' : flags.gone ? 'bad' : ({ free: 'ok', mine: 'yours', busy: '', lab: '', empty: '' } as const)[lock]
-  return { lock, key, word, tone, mine, holder: l?.holder ?? lab?.heldBy ?? null, since: l?.startedAt ?? null, purpose: l?.purpose ?? null, queued: q >= 0 ? q + 1 : 0, canConfirm: !!lab?.canConfirm, flags }
+  return { lock, key, word, tone, mine, forced, holder: l?.holder ?? lab?.heldBy ?? null, since: l?.startedAt ?? null, purpose: l?.purpose ?? null, queued: q >= 0 ? q + 1 : 0, canConfirm: !!lab?.canConfirm, flags }
 }
 
 // ---------- toasts and layers ----------
@@ -155,6 +159,8 @@ function due(key: string): boolean {
 
 const Ctx = createContext<UI>(null!)
 export const useUI = () => useContext(Ctx)
+/** The purpose boardd gives the lock a person forces a board into their hands with (`locks.ts`'s TAKEOVER). */
+export const FORCE_TAKEN = '强制接管'
 let seq = 0
 let noteListener: ((note: { topic: 'failed', board: string, title: string, body: string, at: string }) => void) | null = null
 export function UIProvider({ children }: { children: ReactNode }) {
