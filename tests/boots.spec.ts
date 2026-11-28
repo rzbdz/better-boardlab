@@ -112,8 +112,9 @@ describe('the boot marks addon', () => {
     term.loadAddon(addon)
     addon.setMarks(MARKS)
     // A GRUB-style countdown after 5,000 lines: each redraw clears the screen, and none may make the scan read the
-    // scrollback again (that rescan was what made the detail page cost so much on a console with a long log).
-    for (let i = 0; i < 5000; i++) await write(term, `kernel ${i}\r\n`)
+    // scrollback again (that rescan was what made the detail page cost so much on a console with a long log). Written
+    // in batches: what is timed is the scan, not a promise resolved per line.
+    for (let at = 0; at < 5000; at += 500) await write(term, Array.from({ length: 500 }, (_, i) => `kernel ${at + i}\r\n`).join(''))
     expect(term.buffer.active.length).toBeGreaterThan(4000)
     let reads = 0
     const line = term.buffer.active.getLine.bind(term.buffer.active)
