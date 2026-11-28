@@ -184,8 +184,11 @@ boardlab guidance --list            # 这一层有哪些可问：通用提示、
 boardlab guidance                   # 第一层：站点和 platform 的通用提示（适合每块板子）
 boardlab guidance --soc <soc>       # 第二层：这颗 SoC 的笔记 + 它的资料在哪
 boardlab guidance --sdk <sdk>       # 第三层：这个 SDK 自己的 SKILL.md（构建、启动、刷机怎么做）
-boardlab guidance --dut <board>     # 一次问全：问板子所在主机它的 SoC 和 SDK，自动带上上面三层
+boardlab guidance --dut <board>     # 一次问全：问板子所在主机它的 SoC 和它列出的每个 SDK，自动带上上面三层
 ```
+
+`--dut` 的答案里，板子列出的**每个** SDK 的 skill 都在（一块 K3 板通常列六个）；几个 SDK 的 skill 内容完全
+相同时只出现一次，标题里写着是哪几个 SDK 共用的。
 
 - **碰上问题才问，不是每个任务开头都问**：任务照常跑通，就不用去查这些。卡住时，`boardlab guidance --dut <board>` 一次就能拿到适用这块板的知识，`boardlab show <board> --json` 的 `lab.soc` 和 `lab.sdks` 说明这块板认得的平台和 SDK。
 - **每一层只回答自己那一层**：通用提示是给一屋子板子的；SoC 笔记是这颗芯片的复位方式、串口电平、boot ROM 行为；SDK skill 是这份源码树怎么编译、怎么启动、有哪些变形。上层不重复下层，引用下层。
