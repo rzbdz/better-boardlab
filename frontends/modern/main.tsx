@@ -138,11 +138,15 @@ function Shell() {
   useEffect(() => {
     void refresh()
     // The stream keeps itself open (a proxy dropping it, boardd restarting): this page hears each event, and re-reads
-    // the state as soon as it is back, so nothing has to be reloaded by hand.
-    const soon = (() => {
-      let timer: number | undefined
-      return () => { window.clearTimeout(timer); timer = window.setTimeout(refresh, 150) }
-    })()
+    // the state as soon as it is back, so nothing has to be reloaded by hand. Events come in bursts (a flash's progress
+    // reports each line, a scan its slots): the first one reads at once, and what arrives while that read is in flight
+    // is read once more when it returns, so a burst costs a read or two rather than two per line.
+    let running = false, again = false
+    const soon = async () => {
+      if (running) { again = true; return }
+      running = true
+      try { do { again = false; await refresh() } while (again) } finally { running = false }
+    }
     const stop = events().listen({
       names: [...CORE_EVENTS, 'alert'],
       event: (name, data) => {
@@ -168,13 +172,13 @@ function Shell() {
           return
         }
         if (name === 'hello') return
-        soon()
+        void soon()
       },
       // The stream is gone (this page cannot tell why, and boardd may be answering): read the state, and only a read
       // that fails marks the page disconnected.
       lost: soon,
       // boardd answers again: the page is connected, and what changed while the stream was out is read now.
-      back: () => { setConnected(true); soon() },
+      back: () => { setConnected(true); void soon() },
     })
     const tick = window.setInterval(refresh, 30_000)
     return () => { stop(); window.clearInterval(tick) }

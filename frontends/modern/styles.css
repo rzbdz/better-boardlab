@@ -90,7 +90,10 @@ kbd{font:500 10px var(--mono);border:1px solid var(--line);border-bottom-width:2
 :root.dark .who .kind.k-codex{color:#d4d4d8}:root.dark .who .kind.k-opencode{color:#5eead4}:root.dark .who .kind.k-dsh{color:#c4b5fd}
 
 /* shell */
-.top{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 84%,transparent);backdrop-filter:saturate(1.6) blur(14px)}
+/* The header stays put over what scrolls under it: its own background, not a blurred copy of it. A backdrop-filter
+   makes the browser re-read and re-blur everything beneath the bar on every frame, and the header sits over the
+   console, which writes all the time; near-opaque looks the same without that cost. */
+.top{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 96%,transparent)}
 .top .in{max-width:1680px;margin:0 auto;height:48px;padding:0 24px;display:flex;align-items:center;gap:28px}
 .top.wide .in{max-width:none;padding:0 20px}
 .brand{font-weight:700;letter-spacing:.3em;font-size:12px;text-transform:uppercase;text-decoration:none}
@@ -336,9 +339,9 @@ body.console-full .detail{height:100vh}
 .terminal .xterm{height:100%}
 .terminal .xterm-viewport{background:transparent!important}
 /* the floating "to the newest output" button: the console toolbar's dark pill, draggable, shown only when scrolled up */
-.terminal .jump{height:36px;min-width:36px;padding:0 11px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:rgba(255,255,255,.07);color:#d7dde8;font:600 12px var(--font);white-space:nowrap;box-shadow:0 0 0 1px rgba(255,255,255,.15),0 8px 24px rgba(0,0,0,.45);backdrop-filter:blur(8px);cursor:grab;user-select:none;animation:jump-in .18s cubic-bezier(.2,.8,.2,1)}
+.terminal .jump{height:36px;min-width:36px;padding:0 11px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:rgba(32,33,37,.94);color:#d7dde8;font:600 12px var(--font);white-space:nowrap;box-shadow:0 0 0 1px rgba(255,255,255,.15),0 8px 24px rgba(0,0,0,.45);cursor:grab;user-select:none;animation:jump-in .18s cubic-bezier(.2,.8,.2,1)}
 .terminal .jump svg{width:15px;height:15px;flex:none}
-.terminal .jump:hover{background:rgba(255,255,255,.13);color:#fff}
+.terminal .jump:hover{background:rgba(48,49,54,.96);color:#fff}
 .terminal .jump:active{cursor:grabbing}
 .terminal .jump:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .terminal .jump.has-new{background:var(--blue);color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.15),0 8px 24px rgba(0,0,0,.45)}
@@ -395,14 +398,14 @@ body.console-full .detail{height:100vh}
 .lboots .tick:hover,.terminal .tboots .tick:hover{left:-2px;right:-2px;height:5px;margin-top:-2.5px;background:rgba(var(--t),.95)}
 .lboots .tick.now,.terminal .tboots .tick.now{background:rgba(var(--t),.75)}
 .t-rom{--t:var(--b-rom)}.t-spl{--t:var(--b-spl)}.t-firmware{--t:var(--b-firmware)}.t-loader{--t:var(--b-loader)}.t-kernel{--t:var(--b-kernel)}
-.lboots .knob,.terminal .tboots .knob{position:absolute;right:-4px;bottom:0;display:flex;align-items:center;height:24px;padding:0 2px;border-radius:999px;background:rgba(29,30,34,.55);backdrop-filter:blur(6px);box-shadow:0 0 0 1px rgba(255,255,255,.07);pointer-events:auto;opacity:.55;transition:opacity .15s,background .15s;white-space:nowrap}
+.lboots .knob,.terminal .tboots .knob{position:absolute;right:-4px;bottom:0;display:flex;align-items:center;height:24px;padding:0 2px;border-radius:999px;background:rgba(29,30,34,.8);box-shadow:0 0 0 1px rgba(255,255,255,.07);pointer-events:auto;opacity:.55;transition:opacity .15s,background .15s;white-space:nowrap}
 .lboots:hover .knob,.terminal .tboots:hover .knob,.lboots[data-open] .knob,.terminal .tboots[data-open] .knob,.lboots .knob:focus-within,.terminal .tboots .knob:focus-within{opacity:1;background:rgba(29,30,34,.92)}
 .lboots .knob button,.terminal .tboots .knob button{height:20px;padding:0 5px;border-radius:999px;color:#c9cacd;font:600 11px var(--font)}
 .lboots .knob .kb,.terminal .tboots .knob .kb{width:18px;padding:0;font-size:13px;color:#8e9096}
 .lboots .knob button:hover,.terminal .tboots .knob button:hover{background:rgba(255,255,255,.08);color:#f2f2f3}
 .lboots .knob .kn i,.terminal .tboots .knob .kn i{font-style:normal;color:#8e9096;margin-left:3px;font-weight:500}
 .lboots .knob .kn .dot,.terminal .tboots .knob .kn .dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#facc15;margin-left:4px;vertical-align:middle}
-.lboots .panel,.terminal .tboots .panel{position:absolute;right:0;bottom:30px;width:300px;max-height:min(420px,70vh);display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:14px;background:rgba(24,25,29,.96);backdrop-filter:blur(10px);box-shadow:0 0 0 1px rgba(255,255,255,.09),0 18px 40px rgba(0,0,0,.5);color:#c9cacd;font:12px var(--font);animation:jump-in .14s cubic-bezier(.2,.8,.2,1)}
+.lboots .panel,.terminal .tboots .panel{position:absolute;right:0;bottom:30px;width:300px;max-height:min(420px,70vh);display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:14px;background:rgba(24,25,29,.98);box-shadow:0 0 0 1px rgba(255,255,255,.09),0 18px 40px rgba(0,0,0,.5);color:#c9cacd;font:12px var(--font);animation:jump-in .14s cubic-bezier(.2,.8,.2,1)}
 .lboots .kinds,.terminal .tboots .kinds{display:flex;flex-wrap:wrap;gap:4px}
 .lboots .kind,.terminal .tboots .kind{height:22px;padding:0 9px;border-radius:999px;font:600 11px var(--font);color:#8e9096;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 .lboots .kind.on,.terminal .tboots .kind.on{color:#f2f2f3;background:rgba(var(--t),.18);box-shadow:inset 0 0 0 1px rgba(var(--t),.45)}
