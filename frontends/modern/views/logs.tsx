@@ -136,10 +136,14 @@ export function LogPanel({ board, die, query }: { board: string, die?: string, q
       const result = await logs.boots({ board, die, maxMarks: MAX_BOOTS, ...(known.next ? { fromLine: known.next } : {}) })
       if (keyRef.current !== key) return
       const base = result.base ?? 0, end = base + (result.total ?? 0)
+      const found = result.marks ?? []
       // The oldest lines went (or this is the first read): all of them, else the new ones after those known.
       setBoots(now => {
-        const all = known.next && known.next >= base ? [...now.filter(line => line.line >= base), ...(result.marks ?? [])] : result.marks ?? []
-        return all.length > MAX_BOOTS ? all.slice(all.length - MAX_BOOTS) : all
+        const all = known.next && known.next >= base ? [...now.filter(line => line.line >= base), ...found] : found
+        const kept = all.length > MAX_BOOTS ? all.slice(all.length - MAX_BOOTS) : all
+        // Nothing new (the usual answer while the log is quiet): the same list, so the rail is not rebuilt every few
+        // seconds for an answer that says what it already had.
+        return !found.length && kept.length === now.length && kept.every((line, i) => line === now[i]) ? now : kept
       })
       bootsRead.current = { key, next: end }
     } catch { if (keyRef.current === key) bootsFailed.current = true }

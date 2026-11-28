@@ -104,4 +104,43 @@ describe('the boot marks addon', () => {
     expect(addon.lines.filter(line => line.id === 'rom')).toHaveLength(2)
     term.dispose()
   })
+
+  it('reads only what is new: a clear after a long log costs a screen, not the log', async () => {
+    const term = new Terminal({ cols: 80, rows: 10, scrollback: 20_000, allowProposedApi: true })
+    term.open(document.createElement('div'))
+    const addon = new BootMarksAddon()
+    term.loadAddon(addon)
+    addon.setMarks(MARKS)
+    // A GRUB-style countdown after 5,000 lines: each redraw clears the screen, and none may make the scan read the
+    // scrollback again (that rescan was what made the detail page cost so much on a console with a long log).
+    for (let i = 0; i < 5000; i++) await write(term, `kernel ${i}\r\n`)
+    expect(term.buffer.active.length).toBeGreaterThan(4000)
+    let reads = 0
+    const line = term.buffer.active.getLine.bind(term.buffer.active)
+    ;(term.buffer.active as unknown as { getLine: (y: number) => unknown }).getLine = (y: number) => { reads++; return line(y) }
+    for (let second = 10; second > 0; second--) await write(term, `\x1b[2J\x1b[01;01H\rGNU GRUB  version 2.14\r\n\r\n  Boot in ${second}s\r\n`)
+    // Each redraw reads the screen it rewrote (a few rows a scan), not the thousands of lines behind it.
+    expect(reads).toBeLessThan(1000)
+    term.dispose()
+  })
+
+  it('counts each boot line once when the scrollback drops its oldest, and matches what the buffer holds', async () => {
+    const term = new Terminal({ cols: 80, rows: 5, scrollback: 30, allowProposedApi: true })
+    term.open(document.createElement('div'))
+    const addon = new BootMarksAddon()
+    term.loadAddon(addon)
+    addon.setMarks(MARKS)
+    for (let i = 0; i < 60; i++) {
+      await write(term, `ROM v2\r\nnoise ${i}\r\nmore\r\n`)
+      if (i % 7 === 0) await write(term, 'U-Boot SPL 2022.10 (x)\r\n')
+    }
+    // Every line still in the buffer is listed, each once: no line twice for having been read again, none left out for
+    // having moved up as the oldest went.
+    const buffer = term.buffer.active, now: number[] = []
+    for (let y = 0; y < buffer.length; y++) if (/ROM v\d|U-Boot SPL \d{4}\.\d{2}|Linux version \d|OpenSBI v\d/.test(buffer.getLine(y)?.translateToString(true) ?? '')) now.push(y)
+    const listed = addon.lines.map(line => line.marker.line)
+    expect(new Set(listed).size).toBe(listed.length)
+    expect([...listed].sort((a, b) => a - b)).toEqual(now)
+    term.dispose()
+  })
 })

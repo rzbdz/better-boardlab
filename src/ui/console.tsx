@@ -10,7 +10,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon, type ISearchOptions } from '@xterm/addon-search'
 import { Terminal } from '@xterm/xterm'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BootRail } from './bootrail.tsx'
 import { BootMarksAddon, bootMarks, forgetBootMarks, type BootLine, type BootMark } from './boots.ts'
 import { CONSOLE_WORDS, consoleErrorText, createConsoleSession, type ConsoleSession } from './console-session.ts'
@@ -171,6 +171,14 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   }
   // A correction made from inside a scroll event fires another one: the flag keeps that one from correcting again.
   let fixing = false
+  /** Report where the view is: scrolled away from the newest line and, while away, how many lines arrived below. */
+  const place = (up: boolean) => {
+    const buffer = term.buffer.active
+    const grew = Math.max(0, buffer.baseY - base); base = buffer.baseY
+    tell({ up, unseen: up ? live.away.unseen + (live.away.up ? grew : 0) : 0 })
+  }
+  // A scroll: the person moved the view, or xterm did. Where it is can only be believed from a viewport that can
+  // show the buffer's height (`usable()`).
   const look = () => {
     live.onView.forEach(fn => fn())
     const buffer = term.buffer.active
@@ -181,15 +189,18 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
       fixing = true
       try { term.scrollToBottom() } finally { fixing = false }
     }
-    const up = following ? false : buffer.viewportY < buffer.baseY
-    const grew = Math.max(0, buffer.baseY - base); base = buffer.baseY
-    tell({ up, unseen: up ? live.away.unseen + (live.away.up ? grew : 0) : 0 })
+    place(following ? false : buffer.viewportY < buffer.baseY)
+  }
+  // Output arrived. A following view stays on the newest line, which is where it already is; a person reading
+  // scrollback is told how much came below. Neither reads the page's layout: on a console writing every few
+  // milliseconds that measurement, forced after each write, is the page's busiest work.
+  const arrival = () => {
+    if (following) term.scrollToBottom()
+    live.onView.forEach(fn => fn())
+    place(following ? false : true)
   }
   term.onScroll(look)
-  term.onWriteParsed(() => {
-    if (following) term.scrollToBottom()
-    look()
-  })
+  term.onWriteParsed(arrival)
   // -1 as the index: more matches than are highlighted.
   finder.onDidChangeResults(({ resultIndex, resultCount }) => live.onResults({ index: resultIndex, count: resultCount }))
   session = createConsoleSession({
@@ -318,17 +329,28 @@ function SearchBar({ live, className, onHistory }: { live: Live, className: stri
 
 /** The boot rail over the live console: the boot lines its buffer holds, followed as output arrives and scrolls. */
 function ConsoleBoots({ live, board, die, className }: { live: Live, board: string, die?: string, className: string }) {
-  const [, tick] = useState(0)
+  const [revision, redraw] = useState(0)
   useEffect(() => {
-    // Output and scrolling move where the view is; a frame at most per change keeps it light under a flood of output.
-    let frame = 0
-    const later = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; tick(n => n + 1) }) }
+    // Output and scrolling move where the view is. A scroll (every line feed while following) and a new boot line are one
+    // redraw per frame, and the rail is a strip of the log: four a second is as often as it can be seen to move.
+    let frame = 0, last = 0
+    const later = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const now = Date.now()
+        if (now - last < 250) return
+        last = now
+        redraw(n => n + 1)
+      })
+    }
     const off = live.boots.onChange(later)
     live.onView.add(later)
     return () => { off(); live.onView.delete(later); cancelAnimationFrame(frame) }
   }, [live])
-  // Where each boot line is now: its marker moves as the buffer scrolls and drops its oldest lines.
-  const lines: BootLine[] = live.boots.lines.map(item => ({ line: item.marker.line, id: item.id, text: item.text }))
+  // Where each boot line is now: its marker moves as the buffer scrolls and drops its oldest lines. The rail groups the
+  // list into boots, so it is a new one only when this component redraws, not on every frame of a console writing output.
+  const lines = useMemo<BootLine[]>(() => live.boots.lines.map(item => ({ line: item.marker.line, id: item.id, text: item.text })), [live, revision])
   const view = live.view()
   return <BootRail board={board} die={die} marks={live.marks} lines={lines} first={view.first} count={view.count} current={view.current} go={line => live.scrollTo(line)} className={className} />
 }

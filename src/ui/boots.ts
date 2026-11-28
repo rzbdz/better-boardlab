@@ -77,6 +77,25 @@ export function setHiddenMarks(board: string, die: string | undefined, hidden: s
   } catch {}
 }
 
+/** How many cells of a row the cheap test reads: every mark the core and a SoC ship starts well within its first words. */
+const PREFIX_CELLS = 24
+
+/**
+ * The literal characters a pattern must see, in order, before anything it does not pin down: `U-Boot (?:SPL|TPL)
+ * \\d{4}` gives `U-Boot S`, which a row that could match holds in its first cells. A pattern that starts with something
+ * other than a literal (a group, `.`, a class, an anchor) gives '' and is tested every time.
+ */
+export function literalPrefix(pattern: string): string {
+  let out = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]!
+    if (ch === '\\') { const next = pattern[i + 1]; if (!next || !/[A-Za-z0-9 ]/.test(next)) return out; out += next; i++; continue }
+    if (/[A-Za-z0-9 _:./-]/.test(ch)) { out += ch; continue }
+    break
+  }
+  return out
+}
+
 /** A boot line in the live console: which mark, its text, and the xterm marker that follows its line as output scrolls. */
 export interface LiveBootLine { id: string, text: string, marker: IMarker }
 
@@ -88,8 +107,16 @@ export interface LiveBootLine { id: string, text: string, marker: IMarker }
 export class BootMarksAddon implements ITerminalAddon {
   private term: Terminal | null = null
   private any: ((text: string) => boolean) | null = null
-  private each: Array<{ id: string, rx: RegExp }> = []
-  /** Where the next scan starts: a marker, so it moves with the lines when the scrollback drops its oldest. */
+  /** Each mark, with the first run of characters its pattern must see where it is not anchored ('' : from anywhere). */
+  private each: Array<{ id: string, rx: RegExp, prefix: string }> = []
+  /** Whether any mark can match in the middle of a row: the cheap test for a row's first cells cannot rule those out. */
+  private unanchored = false
+  /**
+   * Where the scan stopped: a marker on the row the cursor was on. It moves with the lines the scrollback drops its
+   * oldest of, so where the scan reached is still known after any number of them, and reading only what is new costs
+   * nothing per trimmed line. A boot menu erasing the screen clears the markers on the rows it shows, this one among
+   * them: then the scan starts at the top of the screen, the first row an application may have rewritten.
+   */
   private next: IMarker | null = null
   private readonly found: LiveBootLine[] = []
   private readonly listeners = new Set<() => void>()
@@ -114,7 +141,8 @@ export class BootMarksAddon implements ITerminalAddon {
     const join = (group: readonly BootMark[], flags: string) => group.length ? new RegExp(group.map(mark => `(?:${mark.pattern})`).join('|'), flags) : null
     const both = [join(plain, ''), join(blind, 'i')].filter((rx): rx is RegExp => !!rx)
     this.any = both.length ? text => both.some(rx => rx.test(text)) : null
-    this.each = marks.map(mark => ({ id: mark.id, rx: new RegExp(mark.pattern, mark.flags ?? '') }))
+    this.each = marks.map(mark => ({ id: mark.id, rx: new RegExp(mark.pattern, mark.flags ?? ''), prefix: literalPrefix(mark.pattern) }))
+    this.unanchored = marks.some(mark => !mark.pattern.startsWith('^'))
     this.reset()
   }
 
@@ -142,36 +170,61 @@ export class BootMarksAddon implements ITerminalAddon {
 
   private tell() { for (const fn of this.listeners) fn() }
 
-  /** Match the lines written since the last scan, up to the cursor's line (which may not be finished yet). */
+  /**
+   * Match the lines written since the last scan, up to the cursor's row (which may not be finished yet).
+   *
+   * Where to go on from is a marker on the row it stopped at: a marker moves with the lines the scrollback drops its
+   * oldest of, so reading only what is new costs nothing per trimmed line, however long the console writes. When a boot
+   * menu clears the screen (GRUB's countdown, EDK II's menu) the rows it shows are erased and their markers with them,
+   * and the scan starts at the top of the screen — where the menu rewrote from — rather than at the top of a buffer
+   * that may hold a few hundred thousand lines, which is where this used to spend the page's time.
+   */
   private scan(): void {
     const term = this.term
     if (!term || !this.any) return
     const buffer = term.buffer.active
     if (buffer.type !== 'normal') return
     const end = buffer.baseY + buffer.cursorY
-    // Where the last scan stopped, wherever that line is now. A marker whose line is gone says nothing about where
-    // to go on: the screen was erased under it (a boot menu redrawing itself, a shell clearing its screen), or the
-    // scrollback trimmed past it. Then the whole buffer is read again — and what was found before is dropped first,
-    // because reading from the top while keeping the old lines would count each of them once more for every redraw.
-    const anchor = this.next && !this.next.isDisposed && this.next.line >= 0 ? Math.min(this.next.line, end) : null
-    if (anchor === null) this.forget()
-    let changed = anchor === null
-    for (let y = anchor ?? 0; y < end; y++) {
+    const top = buffer.baseY
+    const marker = this.next
+    // From the row the last scan stopped on (it was the cursor's, and may have been unfinished then) to the cursor's
+    // row, which is left for the next scan. From the top of the buffer when nothing was scanned yet; from the top of
+    // the screen when the marker went with a cleared row (where the application rewrote from) or when its line was
+    // trimmed out of the scrollback (then nothing above the screen is left to read either).
+    const from = marker ? (!marker.isDisposed ? Math.max(top, Math.min(marker.line, end)) : top) : 0
+    let changed = false
+    for (let y = from; y < end; y++) {
       const row = buffer.getLine(y)
       // A wrapped row continues the line above it: matched with it.
       if (!row || row.isWrapped) continue
+      // A rescan of a long buffer reads only what could match: a mark's pattern starts with these characters (or, for
+      // one that can match anywhere, the row is read whole). A wrapped line is read whole for the test.
+      const lead = row.isWrapped ? '' : row.translateToString(true, 0, PREFIX_CELLS)
+      if (!this.maybe(lead, row)) continue
       let text = row.translateToString(true)
       for (let next = y + 1; next < end; next++) { const more = buffer.getLine(next); if (!more?.isWrapped) break; text += more.translateToString(true) }
       if (!this.any(text)) continue
       const which = this.each.find(mark => mark.rx.test(text))
       if (!which) continue
-      const marker = term.registerMarker(y - (buffer.baseY + buffer.cursorY))
-      if (!marker) continue
-      this.found.push({ id: which.id, text: text.slice(0, 200), marker })
+      // A row already read is never counted again: a resize reflows the buffer under the marker, and where the scan
+      // goes on from may then be a row or so behind where it really was.
+      if (this.found.some(found => !found.marker.isDisposed && found.marker.line === y)) continue
+      const line = term.registerMarker(y - end)
+      if (!line) continue
+      this.found.push({ id: which.id, text: text.slice(0, 200), marker: line })
       changed = true
     }
+    // Where the next scan goes on: the row under the cursor, which moves with the lines the scrollback drops.
     this.next?.dispose()
     this.next = term.registerMarker(0) ?? null
     if (changed) this.tell()
+  }
+
+  /** Whether a row's first cells could hold any mark: a mark whose pattern starts with literal characters is looked for
+   *  by them in the first cells, and one that can match anywhere is always a candidate. */
+  private maybe(lead: string, row: { isWrapped: boolean }): boolean {
+    if (!lead || row.isWrapped) return true
+    if (this.unanchored) return true
+    return this.each.some(mark => !mark.prefix || lead.includes(mark.prefix))
   }
 }
