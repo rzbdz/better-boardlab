@@ -88,7 +88,7 @@ export function BoardPage({ state, name, dark, full, setFull, watched }: { state
 
 function Rail({ board, m }: { board: Board, m: Model }) {
   const act = useBoardActions(board)
-  const off = !m.mine || m.flags.gone || !!act.busy
+  const off = !m.own || m.flags.gone || !!act.busy
   return <>
     <a className="pill icon" href="#/" title="回到板子" aria-label="回到板子"><Icon name="back" /></a>
     <span className={`dot ${m.tone}`} title={m.word} />
@@ -148,10 +148,10 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest('input, textarea, select, .xterm, [role=dialog]') || e.metaKey || e.ctrlKey || e.altKey || act.busy) return
       const k = e.key.toLowerCase()
-      if (m.mine && !m.flags.gone && k === 'r') act.reset()
-      else if (m.mine && !m.flags.gone && k === 'd') act.fastboot()
-      else if (m.mine && !m.flags.gone && k === 'b') bootDialog()
-      else if (m.mine && !m.flags.gone && k === 'w' && canFlash) flashDialog()
+      if (m.own && !m.flags.gone && k === 'r') act.reset()
+      else if (m.own && !m.flags.gone && k === 'd') act.fastboot()
+      else if (m.own && !m.flags.gone && k === 'b') bootDialog()
+      else if (m.own && !m.flags.gone && k === 'w' && canFlash) flashDialog()
       else if (k === 'l' && m.lock === 'free') act.lock()
     }
     window.addEventListener('keydown', onKey)
@@ -173,7 +173,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
   const extra = viewsFor(state, 'board', { board: board.name })
   const lab = state.labs.find(l => l.id === board.lab?.id)
   // A busy board, or one someone else holds, cannot be renamed: say why on the disabled item.
-  const canRename = (m.lock === 'free' || m.mine) && !m.flags.busy
+  const canRename = (m.lock === 'free' || m.mine) && !m.flags.busy && !m.forced
   const renameWhy = canRename ? undefined
     : m.flags.busy ? `${board.name} 正在${m.flags.busy.label.replace(/中$/, '')}，等它完成`
     : m.holder ? `${holder(m.holder).name} 拿着锁，名字要由 TA 改；或者等它空闲`
@@ -192,7 +192,7 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
       <div className="menu" onClick={e => e.stopPropagation()}>
         <button className="pill sm icon" aria-label="更多" onClick={() => setMenu(!menu)}><Icon name="more" /></button>
         {menu && <div className="pop" onClick={() => setMenu(false)}>
-          {board.lab?.canRefresh && <button disabled={!m.mine} title={m.mine ? undefined : '先拿锁'} onClick={act.refresh}><Icon name="rebuild" />重新读取型号</button>}
+          {board.lab?.canRefresh && <button disabled={!m.own} title={m.own ? undefined : '先拿锁'} onClick={act.refresh}><Icon name="rebuild" />重新读取型号</button>}
           <button disabled={!canRename} title={renameWhy} onClick={renameDialog}><Icon name="doc" />给板子改名…</button>
           <button onClick={() => prefs.watch(board.name, !watchedOn)}><Icon name="bell" />{watchedOn ? '不再关注' : '空闲时通知我'}</button>
           <button onClick={() => void copyText(ui, `boardlab lock ${board.name} && boardlab console ${board.name}`, '复制了命令')}><Icon name="copy" />复制 boardlab 命令</button>
@@ -209,17 +209,17 @@ function Side({ state, board, m, watched, openLogs }: { state: PageState, board:
       <div className="controls">{tiles.map(([key, icon, label, kbd, go, needsLock]) => {
         // Booting and flashing are both a `boot` run on the board: the run's own label says which tile started it, and both wait for it.
         const starts = key === 'boot' || key === 'flash'
-        const run = act.busy === 'boot' || (!!m.flags.booting && m.mine) ? (board.busy?.label === '刷机中' ? 'flash' : 'boot') : null
-        const locked = needsLock && !m.mine, spinning = starts ? run === key : act.busy === key
+        const run = act.busy === 'boot' || (!!m.flags.booting && m.own) ? (board.busy?.label === '刷机中' ? 'flash' : 'boot') : null
+        const locked = needsLock && !m.own, spinning = starts ? run === key : act.busy === key
         const off = locked || (needsLock && m.flags.gone) || (needsLock && !!act.busy && !(starts && act.busy === 'boot') && act.busy !== key) || (starts && (!!m.flags.booting || act.busy === 'boot'))
         return (
           <button key={key} className={`ctl${spinning ? ' busy' : ''}`} disabled={off || spinning} onClick={go}>
-            <Icon name={icon} /><div><b>{label}{kbd && m.mine && <kbd>{kbd}</kbd>}</b><span>{spinning ? '进行中…' : locked ? '先拿锁' : sub[key]}</span></div>
+            <Icon name={icon} /><div><b>{label}{kbd && m.own && <kbd>{kbd}</kbd>}</b><span>{spinning ? '进行中…' : locked ? '先拿锁' : sub[key]}</span></div>
             {spinning ? <i className="corner"><span className="spin" /></i> : locked ? <i className="corner"><Icon name="lock" /></i> : null}
           </button>
         )
       })}</div>
-      {m.mine && last?.method === 'load' && sdks.includes(last.sdk) && !m.flags.booting && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} disabled={!!act.busy} onClick={() => void act.boot(last.sdk, 'load')}><Icon name="rebuild" />再来一次：{last.sdk} · 内存启动</button>}
+      {m.own && last?.method === 'load' && sdks.includes(last.sdk) && !m.flags.booting && <button className="pill sm" style={{ marginTop: 8, width: '100%' }} disabled={!!act.busy} onClick={() => void act.boot(last.sdk, 'load')}><Icon name="rebuild" />再来一次：{last.sdk} · 内存启动</button>}
     </>}
     {extra.map(view => <div key={view.id} style={{ marginTop: 10 }}><ViewPanel view={view} /></div>)}
     <div className="sect">这块板子</div><Facts board={board} />
@@ -252,10 +252,15 @@ function Flags({ board, m, act }: { board: Board, m: Model, act: ReturnType<type
 function LockBox({ state, board, m, act }: { state: PageState, board: Board, m: Model, act: ReturnType<typeof useBoardActions> }) {
   const [purpose, setPurpose] = useState('')
   const waiters = board.waiters.length ? <div className="waiters"><div className="sub">{board.waiters.length} 人在排队</div>{board.waiters.map((w, i) => <div key={w.holder}><span className="n">{i + 1}</span><Who id={w.holder} you={state.you} max={20} /><span className="sub ell">{w.purpose}</span></div>)}</div> : null
+  if (m.forced) return (
+    <div className="tilebox dark"><div className="lbl"><span className="dot yours" />强制接管中</div>
+      <div className="sub">你现在操作 {holder(m.holder ?? '').name} 用的这块板子，<b>只限一个动作</b>；做完自动交回，它的锁一直是它的。</div>
+      <div className="acts"><button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' ? <span className="spin" /> : <Icon name="unlock" />}现在交回（不必等动作做完）</button></div></div>
+  )
   if (m.lock === 'mine') return (
-    <div className="tilebox dark"><div className="lbl"><span className="dot yours" />{m.forced ? '强制接管中' : '你持有锁'}</div><div className="big"><Ticking fn={() => clock(m.since!)} /></div>
-      <div className="sub">{m.forced ? '做完这一动作自动放回空着，不还给原来的人' : (m.purpose || '没写目的')} · {hhmm(m.since!)} 拿的</div>{waiters}
-      <div className="acts"><button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' ? <span className="spin" /> : <Icon name="unlock" />}{m.forced ? '现在放回（不必等动作做完）' : board.waiters[0] ? `释放，交给 ${holder(board.waiters[0].holder).name}` : '释放锁'}</button></div></div>
+    <div className="tilebox dark"><div className="lbl"><span className="dot yours" />你持有锁</div><div className="big"><Ticking fn={() => clock(m.since!)} /></div>
+      <div className="sub">{m.purpose || '没写目的'} · {hhmm(m.since!)} 拿的</div>{waiters}
+      <div className="acts"><button className="pill dark" disabled={!!act.busy} onClick={act.unlock}>{act.busy === 'unlock' ? <span className="spin" /> : <Icon name="unlock" />}{board.waiters[0] ? `释放，交给 ${holder(board.waiters[0].holder).name}` : '释放锁'}</button></div></div>
   )
   if (m.lock === 'busy' || m.lock === 'lab') return (
     <div className="tilebox"><div className="lbl"><span className="dot" />{m.lock === 'lab' ? '实验室占用' : '使用中'}</div>
@@ -263,7 +268,7 @@ function LockBox({ state, board, m, act }: { state: PageState, board: Board, m: 
       {m.since && <div className="sub small">已用 <Ticking fn={() => age(m.since)} /> · {hhmm(m.since)} 起</div>}{waiters}
       {m.lock === 'busy' && <div className="acts">{m.queued ? <button className="pill" onClick={act.unqueue}><Icon name="x" />不排了（第 {m.queued} 位）</button> : <button className="pill dark" onClick={act.queue}><Icon name="queue" />排队</button>}
         <button className="pill ghost" onClick={act.steal}>抢锁…</button>
-        <button className="pill danger" disabled={!!act.busy || m.forced} title="只用于临时人工操作一次，做完自动放回" onClick={act.forceTake}><Icon name="warn" />强制解锁</button></div>}</div>
+        <button className="pill danger" disabled={!!act.busy} title="临时人工操作一次：打断它正在做的动作，锁仍是它的" onClick={act.forceTake}><Icon name="warn" />强制解锁</button></div>}</div>
   )
   if (m.lock === 'empty') return <div className="tilebox"><div className="lbl">{m.flags.busy ? <><span className="spin" />{m.flags.busy.label}</> : '空槽位'}</div>
     <p>{m.flags.busy ? <>{holder(m.flags.busy.by).name} {hhmm(m.flags.busy.since)} 开始{m.flags.busy.line ? <>：<span className="mono">{m.flags.busy.line}</span></> : '，等第一条进展'}</> : '这个槽位现在没有板子。插上板子后，让 boardd 在这个槽位上找一下。'}</p>

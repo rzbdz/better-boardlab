@@ -215,16 +215,16 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
     board.lease = { id: 'new', board: board.name, holder: state.you, purpose: body.purpose, startedAt: state.now, status: 'held', endedAt: null, endReason: null }
     return reply({ lease: board.lease, token: 't', gateToken: null, queued: null })
   }
-  // A person forces a board into their hands: boardd takes it from its holder for one operation and says so.
-  if (path === '/api/force-take' && method === 'POST') {
+  // A person steps in on a board for one operation: the lock stays its holder's, and the page is told who is operating.
+  if (path === '/api/take-over' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
-    board.lease = { id: 'forced', board: board.name, holder: state.you, purpose: '强制接管', startedAt: state.now, status: 'held', endedAt: null, endReason: null }
-    return reply(board.lease)
+    board.stepping = state.you
+    return reply({ lease: board.lease, token: 'stepped-in' })
   }
-  // An operation that ends gives a forcibly taken board back to nobody, as boardd does.
+  // The operation the step-in was for ends: the board is its holder's again, as boardd does.
   if (path === '/api/reset' && method === 'POST') {
     const board = state.boards.find(b => b.name === body.board)!
-    if (board.lease?.purpose === '强制接管') board.lease = null
+    board.stepping = null
     return reply({ ok: true })
   }
   return reply({ ok: true })

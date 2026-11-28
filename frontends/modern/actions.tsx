@@ -42,9 +42,10 @@ export interface FlashPackage { url?: string, sha256?: string, image?: { market:
 const SERVER: Record<string, string> = { reset: 'reset', fastboot: 'fastboot', boot: 'boot', stage: 'boot', refresh: 'refresh', remove: 'remove', discover: 'discover', rebuild: 'rebuild', lock: 'lock' }
 
 /**
- * A person stepping in on a board someone else holds: the panel's operations are theirs for one action, and then boardd
- * gives the board back to nobody. Whoever holds it loses it — a run of theirs stops — so the dialog says what it costs
- * in the holder's own terms and makes the person confirm it twice: the danger button, then the same warning again.
+ * A person stepping in on a board someone else uses: the panel's operations are theirs for one action, and then boardd
+ * hands the board back to the same holder, whose lock was never taken. What it costs is the holder's own run on the
+ * board: it stops so the person can drive it, and the holder sees why in its history. The dialog says that in the
+ * holder's own terms and makes the person confirm it twice: the danger button, then the same warning again.
  */
 function ForceTake({ board, close, onTake }: { board: Board, close: () => void, onTake: () => void }) {
   const [sure, setSure] = useState(false)
@@ -54,8 +55,8 @@ function ForceTake({ board, close, onTake }: { board: Board, close: () => void, 
       <h2 className="danger-t"><Icon name="warn" />强制解锁？</h2>
       <div className={`force-warn${sure ? ' sure' : ''}`}>
         <p><b>{upper(board.name)}</b> 现在由 {who} 使用，正在做：{board.lease?.purpose || '（没写）'}。</p>
-        <p>强制解锁会<b>马上夺走它的锁</b>：它正在做的操作会停下，它会在命令行里看到锁被拿走。<b>后果由你负责。</b></p>
-        <p>解开后你能操作这块板子的整个面板——可以复位、刷机、往串口打字——<b>只限一个动作</b>；这个动作一结束，锁自动放回空着，谁也不持有。</p>
+        <p>强制解锁会<b>打断它正在做的操作</b>，它会在命令行里看到为什么停。<b>它的锁不拿走</b>，还是它的；<b>后果由你负责。</b></p>
+        <p>接下来你能操作这块板子的整个面板——可以复位、刷机、往串口打字——<b>只限一个动作</b>；这个动作一结束，板子自动交回给它。</p>
       </div>
       {!sure
         ? <div className="foot"><button type="button" className="pill" onClick={close}>取消</button>
@@ -63,7 +64,7 @@ function ForceTake({ board, close, onTake }: { board: Board, close: () => void, 
         : <>
             <p className="force-again"><Icon name="warn" /><b>真的确定？</b>按下去，{who} 现在做的事就被打断了，没有撤销。</p>
             <div className="foot"><button type="button" className="pill" onClick={() => { setSure(false); close() }}>算了</button>
-              <button type="button" className="pill danger" onClick={() => { close(); onTake() }}><Icon name="warn" />确定，夺走它的锁</button></div>
+              <button type="button" className="pill danger" onClick={() => { close(); onTake() }}><Icon name="warn" />确定，打断它这一次</button></div>
           </>}
     </div>
   )
@@ -106,8 +107,8 @@ export function useBoardActions(board: Board) {
       '抢锁', reason => void run('steal', '抢锁', () => api.steal(board.name, reason), `抢到了 ${name}`), { danger: true, reason: '理由（对方会看到）' }),
     forceTake: () => ui.layer(close => <ForceTake board={board} close={close} onTake={() => {
       setAsked(board.name, 'force-take', true)
-      api.forceTake(board.name)
-        .then(() => ui.toast(`${name} 是你的了`, '现在可以操作面板。这一动作结束，锁自动放回空着。'))
+      api.takeOver(board.name)
+        .then(() => ui.toast(`可以操作 ${name} 了`, '面板现在归你，只限一个动作；做完自动交还给原来的使用者。'))
         .catch(error => ui.fail(`没能接管 ${name}`, error))
         .finally(() => { void refreshNow().catch(() => {}); setAsked(board.name, 'force-take', false) })
     }} />),

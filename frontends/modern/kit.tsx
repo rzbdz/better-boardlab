@@ -103,7 +103,9 @@ export function Ticking({ fn }: { fn: () => string }) { useTick(); return <>{fn(
 export type Lock = 'free' | 'mine' | 'busy' | 'lab' | 'empty'
 export interface Model {
   lock: Lock, key: Lock | 'attn' | 'gone', word: string, tone: '' | 'ok' | 'warn' | 'bad' | 'yours', mine: boolean
-  /** A person forced this board into their hands for one action: the board is theirs until that action ends. */
+  /** The panel is this person's to operate: they hold the lock, or they are stepping in on it for one action. */
+  own: boolean
+  /** A person stepped in on this board for one action: the panel is theirs until that action ends (its lock is not). */
   forced: boolean
   holder: string | null, since: string | null, purpose: string | null, queued: number, canConfirm: boolean
   flags: { attn: string | null, gone: boolean, busy: Busy | null, progress: string | null, booting: string | null, pct: number | null, offline: boolean, error: string | null }
@@ -114,8 +116,12 @@ export interface Model {
  */
 export function model(b: Board, you: string): Model {
   const lab = b.lab, l = b.lease, mine = !!l && l.holder === you, q = b.waiters.findIndex(w => w.holder === you)
-  // A forced takeover reads as the person's own lock (the board is theirs), but says so and ends by itself.
-  const forced = mine && l?.purpose === FORCE_TAKEN
+  // A person stepping in reads as theirs to operate for one action (the lock stays the holder's), says so, and ends by
+  // itself. Its operations are let through below like a holder's.
+  const stepIn = !!b.stepping && b.stepping === you
+  const forced = stepIn
+  const own = mine || stepIn
+  // A person stepping in is not the lock's holder, so the lock reads as someone else's while the panel is theirs (`own`).
   const lock: Lock = lab?.empty ? 'empty' : mine ? 'mine' : l ? 'busy' : lab?.heldBy ? 'lab' : 'free'
   // What boardd is doing to the board (its own operation, or a lab's job) is one in-between state with its latest line.
   const busy = b.busy ?? null
@@ -131,7 +137,7 @@ export function model(b: Board, you: string): Model {
   const word = flags.attn ? '等人操作' : forced ? '强制接管中' : busy ? busy.label : lock === 'empty' ? '空槽位' : flags.gone ? '串口离线' : flags.progress ? (mine ? '运行中' : '忙碌中')
     : b.mode === 'resetting' ? '复位中' : { mine: '你在用', busy: '使用中', lab: '实验室占用', free: '空闲' }[lock]
   const tone = flags.attn ? 'warn' : flags.gone ? 'bad' : ({ free: 'ok', mine: 'yours', busy: '', lab: '', empty: '' } as const)[lock]
-  return { lock, key, word, tone, mine, forced, holder: l?.holder ?? lab?.heldBy ?? null, since: l?.startedAt ?? null, purpose: l?.purpose ?? null, queued: q >= 0 ? q + 1 : 0, canConfirm: !!lab?.canConfirm, flags }
+  return { lock, key, word, tone, mine, own, forced, holder: l?.holder ?? lab?.heldBy ?? null, since: l?.startedAt ?? null, purpose: l?.purpose ?? null, queued: q >= 0 ? q + 1 : 0, canConfirm: !!lab?.canConfirm, flags }
 }
 
 // ---------- toasts and layers ----------

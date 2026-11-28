@@ -146,7 +146,10 @@ export const api = {
   unlock: (board: string) => call('POST', 'api/unlock', { board }),
   steal: (board: string, reason: string) => call<LockResult>('POST', 'api/steal', { board, reason }),
   /** A person takes a board someone else holds, for one operation: boardd gives it back to nobody once that ends. */
-  forceTake: (board: string) => call<Lease>('POST', 'api/force-take', { board }),
+  /** Step in on a board for one operation beside whoever holds it: the lock stays theirs, and this ends with that one operation. */
+  takeOver: (board: string) => call<{ lease: Lease, token: string }>('POST', 'api/take-over', { board }),
+  /** The old name of `takeOver`, for pages loaded from a boardd that has not restarted since it was renamed. */
+  forceTake: (board: string) => call<{ lease: Lease, token: string }>('POST', 'api/take-over', { board }),
   reset: (board: string) => call('POST', 'api/reset', { board }),
   channels: (board: string) => call<BoardChannels>('GET', `api/relay?board=${encodeURIComponent(board)}`),
   setChannel: (board: string, channel: string, action: string, ms: number | null) => call<{ message: string }>('POST', 'api/relay', { board, channel, action, ms: ms ?? undefined }),
