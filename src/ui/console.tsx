@@ -19,6 +19,7 @@ import type { ConsoleStatus } from './console-session.ts'
 export type { ConsoleStatus } from './console-session.ts'
 export { consoleStatusText } from './console-session.ts'
 
+/** A console of one chip, kept per board while the page is open (see `open`). */
 interface Live {
   el: HTMLDivElement
   status: ConsoleStatus
@@ -143,8 +144,11 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
   // is put back where it should be whenever that answer cannot be trusted.
   let following = true
   /** Whether the viewport can say where in the buffer it is: a pinned scrollbar (a bar not yet measured, or a
-   *  console whose rows all fit) has no position to report, so it can be neither read nor believed. */
-  const usable = () => { const vp = el.querySelector('.xterm-viewport'); return !!vp && vp.scrollHeight > vp.clientHeight + 1 }
+   *  console whose rows all fit) has no position to report, so it can be neither read nor believed. The viewport
+   *  element is found once and asked through it: `querySelector` per write was a walk of the console's DOM on every
+   *  line the board printed. */
+  let viewport: HTMLElement | null = null
+  const usable = () => (viewport ??= el.querySelector('.xterm-viewport')) && viewport.scrollHeight > viewport.clientHeight + 1
   /** Put the view where it belongs after the box or the console's place on the page changed: a scroll area that
    *  cannot show the buffer's height is one xterm never measured on this page (a console put back after another
    *  board or the log tab), so it is measured again — one row down and back is the public way to do that, and it is
@@ -159,6 +163,7 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
       const rows = term.rows
       term.resize(term.cols, rows + 1)
       term.resize(term.cols, rows)
+      viewport = null
     }
     if (toBottom || following) term.scrollToBottom()
   }
@@ -191,13 +196,14 @@ function open(board: string, die: string | undefined, dark: boolean): Live {
     }
     place(following ? false : buffer.viewportY < buffer.baseY)
   }
-  // Output arrived. A following view stays on the newest line, which is where it already is; a person reading
-  // scrollback is told how much came below. Neither reads the page's layout: on a console writing every few
-  // milliseconds that measurement, forced after each write, is the page's busiest work.
+  // Output arrived. A following view goes to the newest line — a no-op when it is already there, xterm's scroll
+  // returning at once for no distance — and nothing here reads the page's layout: the viewport's measured height is
+  // asked for when the person scrolls (`look`), not on every write. Readers of the view are told on the next frame
+  // (`live.onView` is debounced by whoever draws), not before this batch of output is parsed.
   const arrival = () => {
     if (following) term.scrollToBottom()
     live.onView.forEach(fn => fn())
-    place(following ? false : true)
+    if (!following) place(true)
   }
   term.onScroll(look)
   term.onWriteParsed(arrival)

@@ -118,13 +118,31 @@ export class BootMarksAddon implements ITerminalAddon {
    * them: then the scan starts at the top of the screen, the first row an application may have rewritten.
    */
   private next: IMarker | null = null
+  /**
+   * Whether the last write gave the scan anything to read: it does not when the rows it would read are all behind the
+   * marker, which is what a write that only redrew what was already there leaves. Kept as the marker's own place, not
+   * the buffer's row numbers, because the scrollback dropping its oldest moves those without anything being new.
+   */
+  private at: IMarker | null = null
+  /** Whether the last write was answered by a scan that read everything there was: the next may be skipped if it adds nothing. */
+  private settled = false
   private readonly found: LiveBootLine[] = []
   private readonly listeners = new Set<() => void>()
   private readonly disposables: IDisposable[] = []
 
   activate(term: Terminal): void {
     this.term = term
-    this.disposables.push(term.onWriteParsed(() => this.scan()))
+    this.disposables.push(term.onWriteParsed(() => {
+      // A write that only redrew what was already on the screen leaves the cursor where the last scan stopped: the rows
+      // behind it are not read again. Asked only when the last scan itself left something readable, so a write after a
+      // write that added nothing is not skipped by mistake.
+      const buffer = term.buffer.active
+      const at = this.at
+      if (this.settled && buffer.type === 'normal' && at && !at.isDisposed && at.line >= 0 && buffer.baseY + buffer.cursorY <= at.line) return
+      this.settled = false
+      this.scan()
+      this.settled = true
+    }))
   }
 
   dispose(): void {
@@ -132,6 +150,8 @@ export class BootMarksAddon implements ITerminalAddon {
     for (const found of this.found.splice(0)) found.marker.dispose()
     this.next?.dispose()
     this.next = null
+    this.at?.dispose()
+    this.at = null
     this.term = null
   }
 
@@ -166,6 +186,8 @@ export class BootMarksAddon implements ITerminalAddon {
     for (const found of this.found.splice(0)) found.marker.dispose()
     this.next?.dispose()
     this.next = null
+    this.at?.dispose()
+    this.at = null
   }
 
   private tell() { for (const fn of this.listeners) fn() }
@@ -217,6 +239,9 @@ export class BootMarksAddon implements ITerminalAddon {
     // Where the next scan goes on: the row under the cursor, which moves with the lines the scrollback drops.
     this.next?.dispose()
     this.next = term.registerMarker(0) ?? null
+    // Where a write that adds nothing will still leave the cursor: on this row, whose place the marker keeps.
+    this.at?.dispose()
+    this.at = term.registerMarker(0) ?? null
     if (changed) this.tell()
   }
 
