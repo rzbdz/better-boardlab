@@ -147,10 +147,14 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestIni
   ])
   // What a package would write: streamed like the backend fetching it, then its plan.
   if (path === '/api/flash/plan' && method === 'POST') {
-    const plan = { package: 'new.zip', partial: true, notes: [], media: [{ id: 'disk', label: 'disk · 8 MiB', size: 8 << 20, partitions: [
-      { name: 'boot', offset: 0, size: 2 << 20, image: 'boot.img', payload: 1 << 20, selectable: true },
-      { name: 'rootfs', offset: 2 << 20, size: null, image: 'rootfs.img', payload: 3 << 20, selectable: true },
-    ] }] }
+    // Two layouts, one per medium: the plan offers them by name, as a package carrying a NOR flash's and a disk's
+    // tables does, and choosing one writes that medium alone.
+    const plan = { package: 'new.zip', partial: true, notes: [],
+      presets: [{ id: 'nor', label: 'NOR 启动', about: '只刷 NOR 上那套', layout: 'nor', partitions: ['boot'] }],
+      media: [{ id: 'disk', label: 'disk · 8 MiB', size: 8 << 20, partitions: [
+        { name: 'boot', offset: 0, size: 2 << 20, image: 'boot.img', payload: 1 << 20, selectable: true },
+        { name: 'rootfs', offset: 2 << 20, size: null, image: 'rootfs.img', payload: 3 << 20, selectable: true },
+      ] }] }
     const text = `event: out\ndata: ${JSON.stringify({ text: 'fetching new.zip 100%' })}\n\nevent: exit\ndata: ${JSON.stringify({ ok: true, plan })}\n\n`
     return new Response(text, { headers: { 'content-type': 'text/event-stream' } })
   }

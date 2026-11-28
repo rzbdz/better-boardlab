@@ -358,24 +358,31 @@ describe('Modern frontend', () => {
     expect(calls.find(c => c.path.startsWith('api/markets/shelf/list?path=soc-a'))!.path).toMatch(/soc=k1.*board=boardctrl-k1-deb1/)
     // An image its backend does not take cannot be picked.
     expect((await button(/^disk\.iso/, dialog())).disabled).toBe(true)
+    const plansOf = () => calls.filter(c => c.path === 'api/flash/plan' && c.body?.image?.path === 'soc-a/new.zip')
+    const reads = plansOf().length
     fireEvent.click(await button(/^new\.zip/, dialog()))
-    // Picking a package reads its plan at once: its map is there without asking for it.
+    // Picking a package plans it at once, with the tool typed on this board before (the link test): its map is there
+    // without asking for it.
+    await waitFor(() => expect(plansOf().length).toBe(reads + 1), wait)
     await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
-    // The tool typed last time on this board (the link test) is remembered and goes with the plan too.
-    // The plan of this package, read as it was picked (other tests' plans came before it).
-    expect(calls.filter(c => c.path === 'api/flash/plan').at(-1)?.body).toEqual({ board: 'boardctrl-k1-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b' })
     // A look at another tab and back to the same image is not another package: its plan is kept, not asked for again.
-    const plans = () => calls.filter(c => c.path === 'api/flash/plan').length
+    const plans = () => plansOf().length
     const once = plans()
     fireEvent.click(await tab(/^链接/, dialog()))
     fireEvent.click(await tab(/^镜像市场/, dialog()))
     await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
     expect(plans()).toBe(once)
-    fireEvent.click(await button('指定分区', dialog()))
-    expect((await button('开始刷机', dialog())).disabled).toBe(true)
-    fireEvent.click(await button('rootfs', dialog()))
+    // A tool typed for this board goes with the plan: the package is planned again with it.
+    const toolInput = screen.getByPlaceholderText('留空由后端按刷机包选') as HTMLInputElement
+    fireEvent.change(toolInput, { target: { value: 'tool-b' } })
+    await waitFor(() => expect(plansOf().at(-1)!.body).toEqual({ board: 'boardctrl-k1-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b' }), wait)
+    await waitFor(() => expect(dialog().querySelectorAll('.fl-map').length).toBe(1), wait)
+    // The plan's preset is offered by name: choosing it writes that medium and its partitions, not one by one.
+    await waitFor(() => expect(dialog().querySelector('[data-choices]')?.textContent).toContain('NOR 启动'), wait)
+    const choices = dialog().querySelector('[data-choices]') as HTMLElement
+    fireEvent.click(await button(/^NOR\s*启动$/, choices))
     fireEvent.click(await button('开始刷机', dialog()))
-    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'boardctrl-k1-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b', partitions: ['rootfs'], reset: true }), wait)
+    await waitFor(() => expect(calls.filter(c => c.path === 'api/flash/package').at(-1)?.body).toEqual({ board: 'boardctrl-k1-deb1', image: { market: 'shelf', path: 'soc-a/new.zip' }, flasher: 'tool-b', partitions: ['boot'], layout: 'nor', reset: true }), wait)
     go('#/')
   })
 
@@ -532,16 +539,18 @@ describe('Modern frontend', () => {
   })
 
   it('keeps the board shortcuts out of the open switcher', async () => {
-    // boardctrl-k1-deb1 is yours, so R resets it; a letter typed in the open list does not.
+    // boardctrl-k1-deb1 is yours, so R resets it; a letter typed in the open list does not. The suite's tests share one
+    // page, so what earlier ones asked stays in the log: this one counts its own.
     go('#/board/boardctrl-k1-deb1')
     await waitFor(() => expect(document.querySelector('.detail .bname')?.textContent).toBe('BOARDCTRL-K1-DEB1'), wait)
+    const before = calls.length
     fireEvent.click(document.querySelector('.bswitch [role=button]')!)
     const list = () => document.querySelector('.bswitch [role=listbox]') as HTMLElement | null
     await waitFor(() => expect(list()).toBeTruthy(), wait)
     fireEvent.keyDown(list()!, { key: 'r' })
     fireEvent.keyDown(list()!, { key: 'd' })
     await new Promise(r => setTimeout(r, 50))
-    expect(calls.some(c => c.path === 'api/reset' || c.path === 'api/fastboot')).toBe(false)
+    expect(calls.slice(before).some(c => c.path === 'api/reset' || c.path === 'api/fastboot')).toBe(false)
     fireEvent.keyDown(list()!, { key: 'Escape' })
     await waitFor(() => expect(list()).toBeNull(), wait)
     go('#/')

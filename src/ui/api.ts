@@ -158,8 +158,8 @@ export const api = {
   bootSdk: (board: string, sdk: string, method: 'load' | 'download', brk?: string) => call<{ output: string }>('POST', 'api/boot/sdk', { board, sdk, method, ...(brk ? { brk } : {}) }),
   /** Where an SDK's recipe can stop early (empty when it has none). */
   bootBreaks: (board: string, sdk: string) => call<{ load: string[], download: string[] }>('GET', `api/boot/breaks?board=${encodeURIComponent(board)}&sdk=${encodeURIComponent(sdk)}`),
-  /** Flash a package: a `url` the board's backend downloads itself, a file sent to boardd (its `sha256`, see upload.ts), or an image of a market by its place there; only the chosen partitions when some are given, and a reset after when asked. */
-  flashPackage: (board: string, input: { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], reset?: boolean }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
+  /** Flash a package: a `url` the board's backend downloads itself, a file sent to boardd (its `sha256`, see upload.ts), or an image of a market by its place there; only the chosen partitions and/or the chosen layout (a preset's medium) when given, and a reset after when asked. */
+  flashPackage: (board: string, input: { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string, partitions?: string[], layout?: string, reset?: boolean }) => call<{ output: string }>('POST', 'api/flash/package', { board, ...input }),
   /** What a package would write, medium by medium, without touching the board: the backend's progress (fetching the package) goes to `line`. */
   flashPlan: async (board: string, input: { url?: string, sha256?: string, image?: { market: string, path: string }, flasher?: string }, line: (text: string) => void, signal?: AbortSignal): Promise<FlashPlan> => {
     const done = await stream('api/flash/plan', { board, ...input }, { line }, signal) as unknown as { plan?: FlashPlan }

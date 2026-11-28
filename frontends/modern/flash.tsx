@@ -191,19 +191,26 @@ export function FlashDialog({ board, close, onPackage, onSdk, initial }: { board
   // Closing the dialog stops a file still being sent, and a plan still being read on the board host.
   useEffect(() => () => { sendStop.current?.abort(); planStop.current?.abort() }, [])
   // The package the plan shown belongs to, and the partitions chosen from it.
+  // `preset`: the plan's named selection (its medium) chosen instead of partitions one by one; `null` is the package
+  // whole, and a set of names is a choice of partitions.
+  const [preset, setPreset] = useState<string | null>(null)
   const plannedKey = useRef('')
-  const pkgKey = pkg?.image ? `image:${pkg.image.market}\0${pkg.image.path}` : pkg?.sha256 ? `file:${pkg.sha256}` : ''
+  const tool = flasher.trim()
+  // What the plan shown is of: the package, and the tool it would be written with (another tool writes other media). A
+  // link is not read until asked for, so it keys nothing.
+  const planOf = pkg?.image ? `image:${pkg.image.market}\0${pkg.image.path}` : pkg?.sha256 ? `file:${pkg.sha256}` : ''
+  const pkgKey = planOf ? `${planOf}\0${tool}` : ''
   // A package changes: forget its plan and the partitions chosen from it, and read the new one at once, so what it
   // would write (its partitions, its map) is there before anything is chosen.
   useEffect(() => {
-    // No package (another tab, a link still being typed): what was read stays, and comes back with its package.
+    // No package to plan (another tab, a link still being typed): what was read stays, and comes back with its package.
     if (!pkgKey) return
     // The same package again, with its plan read already: nothing to ask the board host for a second time.
     if (pkgKey === plannedKey.current && plan) return
     planStop.current?.abort(); planStop.current = null; plannedKey.current = pkgKey
-    setPlan(null); setPlanError(null); setPlanLine(null); setWhole(true); setChosen(new Set())
+    setPlan(null); setPlanError(null); setPlanLine(null); setWhole(true); setChosen(new Set()); setPreset(null)
     // A picked package is read at once; a link is read when asked (the host downloads it, and a link being typed is
-    // not one yet).
+    // not one yet). The tool goes with the read: typing it re-plans the package, not only the next one.
     if (board.lab?.canPlan) void readPlan()
   }, [pkgKey])
 
@@ -219,13 +226,19 @@ export function FlashDialog({ board, close, onPackage, onSdk, initial }: { board
   }
   const selectable = plan ? plan.media.flatMap(medium => medium.partitions.filter(part => part.selectable && part.image).map(part => part.name)) : []
   const partial = !!plan?.partial && selectable.length > 0
-  const ready = source === 'sdk' ? !!sdk : !!pkg && (whole || chosen.size > 0)
+  // The presets a plan names: a package whose layouts are for different media (a NOR flash and a disk) is chosen by
+  // which one the board boots from, not by reading two layouts' worth of names.
+  const presets = plan?.presets ?? []
+  const which = presets.find(item => item.id === preset) ?? null
+  const ready = source === 'sdk' ? !!sdk : !!pkg && (whole || !!which || chosen.size > 0)
   const start = () => {
     if (source === 'sdk') { close(); return onSdk(sdk) }
     if (!pkg) return
     saveFlash(board.name, { source: source === 'file' ? 'market' : source, market, path: image ?? undefined, url: link || undefined, flasher: flasher.trim() || undefined })
     close()
-    onPackage({ ...pkg, flasher: flasher.trim() || undefined, ...(!whole && chosen.size ? { partitions: [...chosen] } : {}), ...(reset ? { reset: true } : {}) })
+    onPackage({ ...pkg, flasher: flasher.trim() || undefined,
+      ...(which ? { partitions: which.partitions, layout: which.layout } : !whole && chosen.size ? { partitions: [...chosen] } : {}),
+      ...(reset ? { reset: true } : {}) })
   }
   const usable = (markets ?? []).filter(item => !item.error)
   const tabs: Array<[Source, string, string]> = [
@@ -277,20 +290,28 @@ export function FlashDialog({ board, close, onPackage, onSdk, initial }: { board
 
       {source !== 'sdk' && <>
         <label className='field'>刷机工具（可选）<input className='input' value={flasher} onChange={e => setFlasher(e.target.value)} placeholder='留空由后端按刷机包选' /></label>
-        {pkg && board.lab?.canPlan && <div className='fl-plan'>
+        {pkg && board.lab?.canPlan && <div className='fl-plan' data-plan>
           {!plan && !planLine && !planError && <button type='button' className='pill sm' onClick={() => void readPlan()}><Icon name='eye' />看看会写什么</button>}
           {planLine && <div className='sub small'><span className='spin' /> {planLine}</div>}
           {plan && <div className='sub small fl-plan-head'>这个包会写这些分区（按介质画出来{partial ? '；选「指定分区」后点分区名只刷它那一片' : ''}）</div>}
           {planError && <div className='mv-note warn'>看不了这个包会写什么：{planError}<button type='button' className='pill sm' style={{ marginLeft: 8 }} onClick={() => void readPlan()}>再试</button></div>}
           {plan && <>
-            <PlanMap plan={plan} chosen={whole ? null : chosen} />
+            <PlanMap plan={plan} chosen={whole ? null : which ? new Set(which.partitions) : chosen} />
             {plan.notes.map(note => <div key={note} className='mv-note'>{note}</div>)}
-            {partial && <div className='field'>写哪些
-              <div className='chips'>
-                <button type='button' className={`chip${whole ? ' on' : ''}`} onClick={() => setWhole(true)}>整包</button>
-                <button type='button' className={`chip${!whole ? ' on' : ''}`} onClick={() => setWhole(false)}>指定分区</button>
+            {(presets.length > 0 || partial) && <div className='field'>写哪些
+              <div className='chips' data-choices>
+                <button type='button' className={`chip${whole ? ' on' : ''}`} onClick={() => { setWhole(true); setPreset(null); setChosen(new Set()) }}>整包</button>
+                {presets.map(item => (
+                  <button type='button' key={item.id} className={`chip${preset === item.id ? ' on' : ''}`} aria-pressed={preset === item.id}
+                    title={item.about ?? undefined}
+                    onClick={() => { setWhole(false); setPreset(item.id); setChosen(new Set()) }}>{item.label}</button>
+                ))}
+                {partial && presets.length === 0 && <button type='button' className={`chip${!whole ? ' on' : ''}`} onClick={() => setWhole(false)}>指定分区</button>}
               </div>
-              {!whole && <div className='chips'>{selectable.map(name => (
+              {which && <span className='sub small'>{which.about ?? `写 ${which.layout} 上的 ${which.partitions.length} 个分区`}</span>}
+              {/* The partitions one by one, as well as a preset: a package that names presets still lets a person
+                  choose single partitions, and a preset is only the starting point of that choice. */}
+              {!whole && (!which || preset === null) && <div className='chips'>{selectable.map(name => (
                 <button type='button' key={name} className={`chip${chosen.has(name) ? ' on' : ''}`} aria-pressed={chosen.has(name)}
                   onClick={() => setChosen(now => { const next = new Set(now); if (next.has(name)) next.delete(name); else next.add(name); return next })}>{name}</button>
               ))}</div>}
